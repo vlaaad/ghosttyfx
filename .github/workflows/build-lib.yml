@@ -1,0 +1,124 @@
+name: Build libghostty-vt
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: ghostty-org/ghostty
+          path: ghostty
+
+      - name: Install Zig
+        run: |
+          curl -L https://ziglang.org/download/0.14.0/zig-linux-x86_64-0.14.0.tar.xz | tar xJ
+          echo "${{ github.workspace }}/zig-linux-x86_64-0.14.0" >> $GITHUB_PATH
+
+      - name: Build
+        run: |
+          cd ghostty
+          zig build dist -Demit-lib-vt=true
+
+      - name: Package
+        run: |
+          mkdir -p lib/linux-x64
+          tar -xzf ghostty/zig-out/dist/*.tar.gz -C lib/linux-x64 --strip-components=1
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: libghostty-vt-linux-x64
+          path: lib/linux-x64/
+          retention-days: 1
+
+  build-macos-arm64:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: ghostty-org/ghostty
+          path: ghostty
+
+      - name: Install Zig
+        run: |
+          curl -L https://ziglang.org/download/0.14.0/zig-macos-aarch64-0.14.0.tar.xz | tar xJ
+          echo "${{ github.workspace }}/zig-macos-aarch64-0.14.0" >> $GITHUB_PATH
+
+      - name: Build
+        run: |
+          cd ghostty
+          zig build dist -Demit-lib-vt=true
+
+      - name: Package
+        run: |
+          mkdir -p lib/macos-arm64
+          tar -xzf ghostty/zig-out/dist/*.tar.gz -C lib/macos-arm64 --strip-components=1
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: libghostty-vt-macos-arm64
+          path: lib/macos-arm64/
+          retention-days: 1
+
+  build-macos-x64:
+    runs-on: macos-13
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: ghostty-org/ghostty
+          path: ghostty
+
+      - name: Install Zig
+        run: |
+          curl -L https://ziglang.org/download/0.14.0/zig-macos-x86_64-0.14.0.tar.xz | tar xJ
+          echo "${{ github.workspace }}/zig-macos-x86_64-0.14.0" >> $GITHUB_PATH
+
+      - name: Build
+        run: |
+          cd ghostty
+          zig build dist -Demit-lib-vt=true
+
+      - name: Package
+        run: |
+          mkdir -p lib/macos-x64
+          tar -xzf ghostty/zig-out/dist/*.tar.gz -C lib/macos-x64 --strip-components=1
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: libghostty-vt-macos-x64
+          path: lib/macos-x64/
+          retention-days: 1
+
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: ghostty-org/ghostty
+          path: ghostty
+
+      - name: Install Zig
+        run: |
+          curl -L https://ziglang.org/download/0.14.0/zig-windows-x86_64-0.14.0.zip -o zig.zip
+          Expand-Archive -Path zig.zip -DestinationPath ${{ github.workspace }}
+          echo "${{ github.workspace }}\zig-windows-x86_64-0.14.0" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Build
+        shell: bash
+        run: |
+          cd ghostty
+          zig build dist -Demit-lib-vt=true
+
+      - name: Package
+        shell: bash
+        run: |
+          mkdir -p lib/windows-x64
+          tar -xzf ghostty/zig-out/dist/*.tar.gz -C lib/windows-x64 --strip-components=1
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: libghostty-vt-windows-x64
+          path: lib/windows-x64/
+          retention-days: 1
