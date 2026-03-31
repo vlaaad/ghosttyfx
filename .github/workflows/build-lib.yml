@@ -111,15 +111,12 @@ jobs:
           repository: ghostty-org/ghostty
           path: ghostty
 
-      - name: Install Zig
-        run: |
-          curl -L https://ziglang.org/download/0.15.2/zig-x86_64-windows-0.15.2.zip -o zig.zip
-          Expand-Archive -Path zig.zip -DestinationPath ${{ github.workspace }}
+      - name: Setup Zig
+        uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29
 
       - name: Build
         shell: bash
         run: |
-          export PATH="${{ github.workspace }}/zig-x86_64-windows-0.15.2:$PATH"
           cd ghostty
           zig build -Dapp-runtime=none -Demit-lib-vt=true
 

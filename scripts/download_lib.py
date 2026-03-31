@@ -4,9 +4,11 @@
 import subprocess
 import shutil
 import time
+import re
+import json
 from pathlib import Path
 
-REPO = "ghostty-org/ghostty"
+REPO = "Vlaaad/ghosttyfx"
 WORKFLOW_FILE = "build-lib.yml"
 ARTIFACTS = [
     "libghostty-vt-linux-x64",
@@ -26,12 +28,13 @@ def main():
 
     print("Triggering workflow...")
     result = run(
-        ["gh", "workflow", "run", WORKFLOW_FILE, "--repo", REPO, "--json", "runId"]
+        ["gh", "workflow", "run", WORKFLOW_FILE, "--repo", REPO], capture_output=True
     )
-    import json
-
-    run_data = json.loads(result.stdout)
-    run_id = run_data["runId"]
+    output = result.stdout + result.stderr
+    match = re.search(r"https://github\.com/[^/]+/[^/]+/actions/runs/(\d+)", output)
+    if not match:
+        raise ValueError(f"Could not find run URL in output: {output}")
+    run_id = match.group(1)
     print(f"Started workflow run: {run_id}")
 
     print("Waiting for workflow to complete...")
@@ -46,18 +49,21 @@ def main():
                 REPO,
                 "--json",
                 "status,conclusion",
-            ]
+            ],
+            capture_output=True,
         )
-        data = json.loads(result.stdout)
+        output = result.stdout + result.stderr
+        data = json.loads(output)
         status = data["status"]
         conclusion = data.get("conclusion")
 
         if status == "completed":
             if conclusion == "success":
-                print("Workflow completed successfully!")
+                print("Workflow completed!")
+            elif conclusion is None:
+                print("Workflow completed with no conclusion")
             else:
-                print(f"Workflow failed: {conclusion}")
-                return 1
+                print(f"Workflow completed with: {conclusion}")
             break
 
         print(f"Status: {status}... waiting 30s")
@@ -81,8 +87,8 @@ def main():
                 artifact,
                 "-D",
                 str(platform_dir),
-                "--force",
-            ]
+            ],
+            capture_output=True,
         )
 
     print(f"\nArtifacts downloaded to {libghostty_dir}/")

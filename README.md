@@ -2,6 +2,21 @@
 
 JavaFX/cljfx terminal emulator using libghostty with JExtract bindings.
 
+## CI Build
+
+Builds libghostty-vt for Linux, macOS (arm64/x64), and Windows via GitHub Actions.
+
+### Windows Build Issue
+
+Zig bug #25805 causes builds to fail on Windows when cwd and cache paths are on different drives.
+The bug exists in Zig 0.12.x - 0.15.x and some 0.16.0-dev builds. It is fixed in Zig 0.16.0.
+
+Ghostty's CI works because they use `namespace-profile-ghostty-windows` runners where the working
+directory and temp path are on the same drive by default. Our `windows-latest` runners have them
+on different drives (D: for temp, C: for workspace), triggering the bug.
+
+Workaround: Set `ZIG_CACHE_DIR` to a path on the same drive as the runner's working directory.
+
 ## Setup
 
 1. Install Java 25+ with jextract
