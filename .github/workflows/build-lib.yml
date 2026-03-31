@@ -14,8 +14,8 @@ jobs:
 
       - name: Install Zig
         run: |
-          curl -L https://ziglang.org/download/0.15.2/zig-linux-x86_64-0.15.2.tar.xz | tar xJ
-          echo "${{ github.workspace }}/zig-linux-x86_64-0.15.2" >> $GITHUB_PATH
+          curl -L https://ziglang.org/download/0.15.2/zig-x86_64-linux-0.15.2.tar.xz | tar xJ
+          echo "${{ github.workspace }}/zig-x86_64-linux-0.15.2" >> $GITHUB_PATH
 
       - name: Build
         run: |
@@ -43,8 +43,8 @@ jobs:
 
       - name: Install Zig
         run: |
-          curl -L https://ziglang.org/download/0.15.2/zig-macos-aarch64-0.15.2.tar.xz | tar xJ
-          echo "${{ github.workspace }}/zig-macos-aarch64-0.15.2" >> $GITHUB_PATH
+          curl -L https://ziglang.org/download/0.15.2/zig-aarch64-macos-0.15.2.tar.xz | tar xJ
+          echo "${{ github.workspace }}/zig-aarch64-macos-0.15.2" >> $GITHUB_PATH
 
       - name: Build
         run: |
@@ -72,8 +72,8 @@ jobs:
 
       - name: Install Zig
         run: |
-          curl -L https://ziglang.org/download/0.15.2/zig-macos-x86_64-0.15.2.tar.xz | tar xJ
-          echo "${{ github.workspace }}/zig-macos-x86_64-0.15.2" >> $GITHUB_PATH
+          curl -L https://ziglang.org/download/0.15.2/zig-x86_64-macos-0.15.2.tar.xz | tar xJ
+          echo "${{ github.workspace }}/zig-x86_64-macos-0.15.2" >> $GITHUB_PATH
 
       - name: Build
         run: |
@@ -101,13 +101,13 @@ jobs:
 
       - name: Install Zig
         run: |
-          curl -L https://ziglang.org/download/0.15.2/zig-windows-x86_64-0.15.2.zip -o zig.zip
+          curl -L https://ziglang.org/download/0.15.2/zig-x86_64-windows-0.15.2.zip -o zig.zip
           Expand-Archive -Path zig.zip -DestinationPath ${{ github.workspace }}
 
       - name: Build
         shell: bash
         run: |
-          export PATH="${{ github.workspace }}/zig-windows-x86_64-0.15.2:$PATH"
+          export PATH="${{ github.workspace }}/zig-x86_64-windows-0.15.2:$PATH"
           cd ghostty
           zig build dist -Demit-lib-vt=true
 
