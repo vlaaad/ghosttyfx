@@ -20,17 +20,21 @@ jobs:
       - name: Build
         run: |
           cd ghostty
-          zig build dist -Demit-lib-vt=true
+          zig build -Dapp-runtime=none -Demit-lib-vt=true
 
       - name: Package
         run: |
+          cd ghostty/zig-out
           mkdir -p lib/linux-x64
-          tar -xzf ghostty/zig-out/dist/*.tar.gz -C lib/linux-x64 --strip-components=1
+          cp lib/libghostty-vt.so* lib/linux-x64/ 2>/dev/null || true
+          cp lib/libghostty-vt.a lib/linux-x64/ 2>/dev/null || true
+          cp -r include lib/linux-x64/
+          cp lib/pkgconfig/*.pc lib/linux-x64/ 2>/dev/null || true
 
       - uses: actions/upload-artifact@v4
         with:
           name: libghostty-vt-linux-x64
-          path: lib/linux-x64/
+          path: ghostty/zig-out/lib/linux-x64/
           retention-days: 1
 
   build-macos-arm64:
@@ -49,17 +53,21 @@ jobs:
       - name: Build
         run: |
           cd ghostty
-          zig build dist -Demit-lib-vt=true
+          zig build -Dapp-runtime=none -Demit-lib-vt=true
 
       - name: Package
         run: |
+          cd ghostty/zig-out
           mkdir -p lib/macos-arm64
-          tar -xzf ghostty/zig-out/dist/*.tar.gz -C lib/macos-arm64 --strip-components=1
+          cp lib/libghostty-vt*.dylib lib/macos-arm64/ 2>/dev/null || true
+          cp lib/libghostty-vt*.a lib/macos-arm64/ 2>/dev/null || true
+          cp -r include lib/macos-arm64/
+          cp lib/pkgconfig/*.pc lib/macos-arm64/ 2>/dev/null || true
 
       - uses: actions/upload-artifact@v4
         with:
           name: libghostty-vt-macos-arm64
-          path: lib/macos-arm64/
+          path: ghostty/zig-out/lib/macos-arm64/
           retention-days: 1
 
   build-macos-x64:
@@ -78,17 +86,21 @@ jobs:
       - name: Build
         run: |
           cd ghostty
-          zig build dist -Demit-lib-vt=true
+          zig build -Dapp-runtime=none -Demit-lib-vt=true
 
       - name: Package
         run: |
+          cd ghostty/zig-out
           mkdir -p lib/macos-x64
-          tar -xzf ghostty/zig-out/dist/*.tar.gz -C lib/macos-x64 --strip-components=1
+          cp lib/libghostty-vt*.dylib lib/macos-x64/ 2>/dev/null || true
+          cp lib/libghostty-vt*.a lib/macos-x64/ 2>/dev/null || true
+          cp -r include lib/macos-x64/
+          cp lib/pkgconfig/*.pc lib/macos-x64/ 2>/dev/null || true
 
       - uses: actions/upload-artifact@v4
         with:
           name: libghostty-vt-macos-x64
-          path: lib/macos-x64/
+          path: ghostty/zig-out/lib/macos-x64/
           retention-days: 1
 
   build-windows:
@@ -109,16 +121,20 @@ jobs:
         run: |
           export PATH="${{ github.workspace }}/zig-x86_64-windows-0.15.2:$PATH"
           cd ghostty
-          zig build dist -Demit-lib-vt=true
+          zig build -Dapp-runtime=none -Demit-lib-vt=true
 
       - name: Package
         shell: bash
         run: |
+          cd ghostty/zig-out
           mkdir -p lib/windows-x64
-          tar -xzf ghostty/zig-out/dist/*.tar.gz -C lib/windows-x64 --strip-components=1
+          cp lib/*.dll lib/windows-x64/ 2>/dev/null || true
+          cp lib/*.lib lib/windows-x64/ 2>/dev/null || true
+          cp -r include lib/windows-x64/
+          cp lib/pkgconfig/*.pc lib/windows-x64/ 2>/dev/null || true
 
       - uses: actions/upload-artifact@v4
         with:
           name: libghostty-vt-windows-x64
-          path: lib/windows-x64/
+          path: ghostty/zig-out/lib/windows-x64/
           retention-days: 1
