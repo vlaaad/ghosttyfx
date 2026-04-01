@@ -1,4 +1,5 @@
 /.cpcache
 /.clj-kondo
 /.lsp
+/dist
 __pycache__

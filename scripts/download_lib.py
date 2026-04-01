@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
 """Download libghostty-vt artifacts from GitHub Actions workflow."""
 
-import subprocess
-import shutil
-import time
-import re
 import json
+import re
+import subprocess
+import time
 from pathlib import Path
 
-REPO = "Vlaaad/ghosttyfx"
+REPO = "vlaaad/ghosttyfx"
 WORKFLOW_FILE = "build-lib.yml"
 ARTIFACTS = [
     "libghostty-vt-linux-x64",
@@ -22,9 +21,26 @@ def run(cmd: list[str], **kwargs) -> subprocess.CompletedProcess:
     return subprocess.run(cmd, check=True, text=True, **kwargs)
 
 
+def workflow_status(run_id: str) -> dict:
+    result = run(
+        [
+            "gh",
+            "run",
+            "view",
+            str(run_id),
+            "--repo",
+            REPO,
+            "--json",
+            "status,conclusion,jobs,url",
+        ],
+        capture_output=True,
+    )
+    return json.loads(result.stdout)
+
+
 def main():
-    libghostty_dir = Path(__file__).parent.parent / "libghostty"
-    libghostty_dir.mkdir(exist_ok=True)
+    dist_dir = Path(__file__).parent.parent / "dist"
+    dist_dir.mkdir(exist_ok=True)
 
     print("Triggering workflow...")
     result = run(
@@ -37,43 +53,40 @@ def main():
     run_id = match.group(1)
     print(f"Started workflow run: {run_id}")
 
-    print("Waiting for workflow to complete...")
+    print("Waiting for workflow to complete or the first job failure...")
     while True:
-        result = run(
-            [
-                "gh",
-                "run",
-                "view",
-                str(run_id),
-                "--repo",
-                REPO,
-                "--json",
-                "status,conclusion",
-            ],
-            capture_output=True,
-        )
-        output = result.stdout + result.stderr
-        data = json.loads(output)
+        data = workflow_status(run_id)
         status = data["status"]
         conclusion = data.get("conclusion")
+        jobs = data.get("jobs", [])
+
+        failed_jobs = [
+            job["name"]
+            for job in jobs
+            if job.get("conclusion") in {"failure", "cancelled", "timed_out", "startup_failure"}
+        ]
+
+        if failed_jobs:
+            print(f"Workflow failed early: {', '.join(failed_jobs)}")
+            print(f"Run URL: {data['url']}")
+            return 1
 
         if status == "completed":
-            if conclusion == "success":
-                print("Workflow completed!")
-            elif conclusion is None:
-                print("Workflow completed with no conclusion")
-            else:
+            if conclusion != "success":
                 print(f"Workflow completed with: {conclusion}")
+                print(f"Run URL: {data['url']}")
+                return 1
+            print("Workflow completed successfully!")
             break
 
-        print(f"Status: {status}... waiting 30s")
-        time.sleep(30)
+        print(f"Status: {status}... waiting 1s")
+        time.sleep(1)
 
     print("Downloading artifacts...")
     for artifact in ARTIFACTS:
         platform = artifact.replace("libghostty-vt-", "")
-        platform_dir = libghostty_dir / platform
-        print(f"  Downloading {artifact} -> {platform}/")
+        platform_dir = dist_dir / platform
+        print(f"  Downloading {artifact} -> dist/{platform}/")
 
         run(
             [
@@ -91,8 +104,8 @@ def main():
             capture_output=True,
         )
 
-    print(f"\nArtifacts downloaded to {libghostty_dir}/")
-    for d in sorted(libghostty_dir.iterdir()):
+    print(f"\nArtifacts downloaded to {dist_dir}/")
+    for d in sorted(dist_dir.iterdir()):
         if d.is_dir():
             files = list(d.rglob("*"))
             print(f"  {d.name}: {len(files)} files")

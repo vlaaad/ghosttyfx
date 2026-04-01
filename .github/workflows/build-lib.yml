@@ -26,7 +26,8 @@ jobs:
         run: |
           cd ghostty/zig-out
           mkdir -p lib/linux-x64
-          cp lib/libghostty-vt.so* lib/linux-x64/ 2>/dev/null || true
+          test -f lib/libghostty-vt.so.0.1.0
+          cp lib/libghostty-vt.so.0.1.0 lib/linux-x64/
           cp lib/libghostty-vt.a lib/linux-x64/ 2>/dev/null || true
           cp -r include lib/linux-x64/
           cp lib/pkgconfig/*.pc lib/linux-x64/ 2>/dev/null || true
@@ -59,7 +60,8 @@ jobs:
         run: |
           cd ghostty/zig-out
           mkdir -p lib/macos-arm64
-          cp lib/libghostty-vt*.dylib lib/macos-arm64/ 2>/dev/null || true
+          test -f lib/libghostty-vt.0.1.0.dylib
+          cp lib/libghostty-vt.0.1.0.dylib lib/macos-arm64/
           cp lib/libghostty-vt*.a lib/macos-arm64/ 2>/dev/null || true
           cp -r include lib/macos-arm64/
           cp lib/pkgconfig/*.pc lib/macos-arm64/ 2>/dev/null || true
@@ -92,7 +94,8 @@ jobs:
         run: |
           cd ghostty/zig-out
           mkdir -p lib/macos-x64
-          cp lib/libghostty-vt*.dylib lib/macos-x64/ 2>/dev/null || true
+          test -f lib/libghostty-vt.0.1.0.dylib
+          cp lib/libghostty-vt.0.1.0.dylib lib/macos-x64/
           cp lib/libghostty-vt*.a lib/macos-x64/ 2>/dev/null || true
           cp -r include lib/macos-x64/
           cp lib/pkgconfig/*.pc lib/macos-x64/ 2>/dev/null || true
@@ -136,8 +139,11 @@ jobs:
         shell: pwsh
         run: |
           Set-Location ghostty/zig-out
+          if (-not (Test-Path bin/ghostty-vt.dll)) {
+            throw "Expected Windows shared library at ghostty/zig-out/bin/ghostty-vt.dll"
+          }
           New-Item -ItemType Directory -Force -Path lib/windows-x64 | Out-Null
-          Copy-Item lib/*.dll lib/windows-x64 -ErrorAction SilentlyContinue
+          Copy-Item bin/ghostty-vt.dll lib/windows-x64
           Copy-Item lib/*.lib lib/windows-x64 -ErrorAction SilentlyContinue
           Copy-Item include lib/windows-x64 -Recurse -Force
           Copy-Item lib/pkgconfig/*.pc lib/windows-x64 -ErrorAction SilentlyContinue
