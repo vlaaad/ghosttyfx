@@ -83,8 +83,8 @@ def main():
             print("Workflow completed successfully!")
             break
 
-        print(f"Status: {status}... waiting 5s")
-        time.sleep(5)
+        print(f"Status: {status}... waiting 1s")
+        time.sleep(1)
 
     if include_dir.exists():
         shutil.rmtree(include_dir)
