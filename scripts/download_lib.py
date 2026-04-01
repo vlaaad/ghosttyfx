@@ -3,6 +3,7 @@
 
 import json
 import re
+import shutil
 import subprocess
 import time
 from pathlib import Path
@@ -15,6 +16,7 @@ ARTIFACTS = [
     "libghostty-vt-macos-x64",
     "libghostty-vt-windows-x64",
 ]
+HEADERS_ARTIFACT = "libghostty-vt-headers"
 
 
 def run(cmd: list[str], **kwargs) -> subprocess.CompletedProcess:
@@ -41,6 +43,8 @@ def workflow_status(run_id: str) -> dict:
 def main():
     dist_dir = Path(__file__).parent.parent / "dist"
     dist_dir.mkdir(exist_ok=True)
+    include_dir = dist_dir / "include"
+    lib_dir = dist_dir / "lib"
 
     print("Triggering workflow...")
     result = run(
@@ -79,14 +83,36 @@ def main():
             print("Workflow completed successfully!")
             break
 
-        print(f"Status: {status}... waiting 1s")
-        time.sleep(1)
+        print(f"Status: {status}... waiting 5s")
+        time.sleep(5)
+
+    if include_dir.exists():
+        shutil.rmtree(include_dir)
+    if lib_dir.exists():
+        shutil.rmtree(lib_dir)
+    include_dir.mkdir(parents=True)
+    lib_dir.mkdir(parents=True)
 
     print("Downloading artifacts...")
+    print("  Downloading headers -> dist/include/")
+    run(
+        [
+            "gh",
+            "run",
+            "download",
+            str(run_id),
+            "--repo",
+            REPO,
+            "-n",
+            HEADERS_ARTIFACT,
+            "-D",
+            str(include_dir),
+        ],
+        capture_output=True,
+    )
+
     for artifact in ARTIFACTS:
-        platform = artifact.replace("libghostty-vt-", "")
-        platform_dir = dist_dir / platform
-        print(f"  Downloading {artifact} -> dist/{platform}/")
+        print(f"  Downloading {artifact} -> dist/lib/")
 
         run(
             [
@@ -99,18 +125,16 @@ def main():
                 "-n",
                 artifact,
                 "-D",
-                str(platform_dir),
+                str(lib_dir),
             ],
             capture_output=True,
         )
 
     print(f"\nArtifacts downloaded to {dist_dir}/")
-    for d in sorted(dist_dir.iterdir()):
-        if d.is_dir():
-            files = list(d.rglob("*"))
-            print(f"  {d.name}: {len(files)} files")
-            for f in sorted(d.iterdir())[:5]:
-                print(f"    - {f.name}")
+    print(f"  include: {sum(1 for p in include_dir.rglob('*') if p.is_file())} files")
+    for f in sorted(lib_dir.iterdir()):
+        if f.is_file():
+            print(f"  lib: {f.name}")
 
     return 0
 

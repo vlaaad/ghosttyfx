@@ -25,17 +25,21 @@ jobs:
       - name: Package
         run: |
           cd ghostty/zig-out
-          mkdir -p lib/linux-x64
+          mkdir -p artifact/linux-x64 artifact/include
           test -f lib/libghostty-vt.so.0.1.0
-          cp lib/libghostty-vt.so.0.1.0 lib/linux-x64/
-          cp lib/libghostty-vt.a lib/linux-x64/ 2>/dev/null || true
-          cp -r include lib/linux-x64/
-          cp lib/pkgconfig/*.pc lib/linux-x64/ 2>/dev/null || true
+          cp lib/libghostty-vt.so.0.1.0 artifact/linux-x64/libghostty-vt-linux-x64.so
+          cp -r include/. artifact/include/
 
       - uses: actions/upload-artifact@v4
         with:
           name: libghostty-vt-linux-x64
-          path: ghostty/zig-out/lib/linux-x64/
+          path: ghostty/zig-out/artifact/linux-x64/
+          retention-days: 1
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: libghostty-vt-headers
+          path: ghostty/zig-out/artifact/include/
           retention-days: 1
 
   build-macos-arm64:
@@ -59,17 +63,14 @@ jobs:
       - name: Package
         run: |
           cd ghostty/zig-out
-          mkdir -p lib/macos-arm64
+          mkdir -p artifact/macos-arm64
           test -f lib/libghostty-vt.0.1.0.dylib
-          cp lib/libghostty-vt.0.1.0.dylib lib/macos-arm64/
-          cp lib/libghostty-vt*.a lib/macos-arm64/ 2>/dev/null || true
-          cp -r include lib/macos-arm64/
-          cp lib/pkgconfig/*.pc lib/macos-arm64/ 2>/dev/null || true
+          cp lib/libghostty-vt.0.1.0.dylib artifact/macos-arm64/libghostty-vt-macos-arm64.dylib
 
       - uses: actions/upload-artifact@v4
         with:
           name: libghostty-vt-macos-arm64
-          path: ghostty/zig-out/lib/macos-arm64/
+          path: ghostty/zig-out/artifact/macos-arm64/
           retention-days: 1
 
   build-macos-x64:
@@ -93,17 +94,14 @@ jobs:
       - name: Package
         run: |
           cd ghostty/zig-out
-          mkdir -p lib/macos-x64
+          mkdir -p artifact/macos-x64
           test -f lib/libghostty-vt.0.1.0.dylib
-          cp lib/libghostty-vt.0.1.0.dylib lib/macos-x64/
-          cp lib/libghostty-vt*.a lib/macos-x64/ 2>/dev/null || true
-          cp -r include lib/macos-x64/
-          cp lib/pkgconfig/*.pc lib/macos-x64/ 2>/dev/null || true
+          cp lib/libghostty-vt.0.1.0.dylib artifact/macos-x64/libghostty-vt-macos-x64.dylib
 
       - uses: actions/upload-artifact@v4
         with:
           name: libghostty-vt-macos-x64
-          path: ghostty/zig-out/lib/macos-x64/
+          path: ghostty/zig-out/artifact/macos-x64/
           retention-days: 1
 
   build-windows:
@@ -142,14 +140,11 @@ jobs:
           if (-not (Test-Path bin/ghostty-vt.dll)) {
             throw "Expected Windows shared library at ghostty/zig-out/bin/ghostty-vt.dll"
           }
-          New-Item -ItemType Directory -Force -Path lib/windows-x64 | Out-Null
-          Copy-Item bin/ghostty-vt.dll lib/windows-x64
-          Copy-Item lib/*.lib lib/windows-x64 -ErrorAction SilentlyContinue
-          Copy-Item include lib/windows-x64 -Recurse -Force
-          Copy-Item lib/pkgconfig/*.pc lib/windows-x64 -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force -Path artifact/windows-x64 | Out-Null
+          Copy-Item bin/ghostty-vt.dll artifact/windows-x64/libghostty-vt-windows-x64.dll
 
       - uses: actions/upload-artifact@v4
         with:
           name: libghostty-vt-windows-x64
-          path: ghostty/zig-out/lib/windows-x64/
+          path: ghostty/zig-out/artifact/windows-x64/
           retention-days: 1
