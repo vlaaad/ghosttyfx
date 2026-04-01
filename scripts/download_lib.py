@@ -42,7 +42,6 @@ def workflow_status(run_id: str) -> dict:
 
 def main():
     dist_dir = Path(__file__).parent.parent / "dist"
-    dist_dir.mkdir(exist_ok=True)
     include_dir = dist_dir / "include"
     lib_dir = dist_dir / "lib"
 
@@ -83,9 +82,12 @@ def main():
             print("Workflow completed successfully!")
             break
 
-        print(f"Status: {status}... waiting 1s")
-        time.sleep(1)
+        print(f"Status: {status}... waiting 5s")
+        time.sleep(5)
 
+    if dist_dir.exists():
+        shutil.rmtree(dist_dir)
+    dist_dir.mkdir(parents=True)
     if include_dir.exists():
         shutil.rmtree(include_dir)
     if lib_dir.exists():
