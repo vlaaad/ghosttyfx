@@ -105,6 +105,11 @@ jobs:
 
   build-windows:
     runs-on: windows-latest
+    env:
+      ZIG_LOCAL_CACHE_DIR: ${{ github.workspace }}\.zig-local-cache
+      ZIG_GLOBAL_CACHE_DIR: ${{ github.workspace }}\.zig-global-cache
+      TEMP: ${{ github.workspace }}\.tmp
+      TMP: ${{ github.workspace }}\.tmp
     steps:
       - uses: actions/checkout@v4
         with:
@@ -114,21 +119,28 @@ jobs:
       - name: Setup Zig
         uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29
 
+      - name: Prepare cache directories
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path $env:ZIG_LOCAL_CACHE_DIR | Out-Null
+          New-Item -ItemType Directory -Force -Path $env:ZIG_GLOBAL_CACHE_DIR | Out-Null
+          New-Item -ItemType Directory -Force -Path $env:TEMP | Out-Null
+
       - name: Build
-        shell: bash
+        shell: pwsh
         run: |
           cd ghostty
           zig build -Dapp-runtime=none -Demit-lib-vt=true
 
       - name: Package
-        shell: bash
+        shell: pwsh
         run: |
-          cd ghostty/zig-out
-          mkdir -p lib/windows-x64
-          cp lib/*.dll lib/windows-x64/ 2>/dev/null || true
-          cp lib/*.lib lib/windows-x64/ 2>/dev/null || true
-          cp -r include lib/windows-x64/
-          cp lib/pkgconfig/*.pc lib/windows-x64/ 2>/dev/null || true
+          Set-Location ghostty/zig-out
+          New-Item -ItemType Directory -Force -Path lib/windows-x64 | Out-Null
+          Copy-Item lib/*.dll lib/windows-x64 -ErrorAction SilentlyContinue
+          Copy-Item lib/*.lib lib/windows-x64 -ErrorAction SilentlyContinue
+          Copy-Item include lib/windows-x64 -Recurse -Force
+          Copy-Item lib/pkgconfig/*.pc lib/windows-x64 -ErrorAction SilentlyContinue
 
       - uses: actions/upload-artifact@v4
         with:
