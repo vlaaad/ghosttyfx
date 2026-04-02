@@ -107,7 +107,7 @@ jobs:
           compression-level: 0
 
   build-macos-x64:
-    runs-on: macos-14
+    runs-on: macos-15-intel
     steps:
       - uses: actions/checkout@v5
         with:
