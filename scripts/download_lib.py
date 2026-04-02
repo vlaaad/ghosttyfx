@@ -16,13 +16,6 @@ ARTIFACTS = [
     "libghostty-vt-macos-x64",
     "libghostty-vt-windows-x64",
 ]
-JEXTRACT_ARTIFACTS = [
-    "jextract-bindings-linux-x64",
-    "jextract-bindings-macos-arm64",
-    "jextract-bindings-macos-x64",
-    "jextract-bindings-windows-x64",
-]
-HEADERS_ARTIFACT = "libghostty-vt-headers"
 
 
 def run(cmd: list[str], **kwargs) -> subprocess.CompletedProcess:
@@ -86,9 +79,7 @@ def main():
     ensure_synced_with_main(repo_dir)
 
     dist_dir = repo_dir / "dist"
-    include_dir = dist_dir / "include"
-    lib_dir = dist_dir / "lib"
-    bindings_dir = dist_dir / "bindings"
+    platforms_dir = dist_dir / "platforms"
 
     print("Triggering workflow...")
     result = run(
@@ -133,56 +124,14 @@ def main():
     if dist_dir.exists():
         shutil.rmtree(dist_dir)
     dist_dir.mkdir(parents=True)
-    if include_dir.exists():
-        shutil.rmtree(include_dir)
-    if lib_dir.exists():
-        shutil.rmtree(lib_dir)
-    if bindings_dir.exists():
-        shutil.rmtree(bindings_dir)
-    include_dir.mkdir(parents=True)
-    lib_dir.mkdir(parents=True)
-    bindings_dir.mkdir(parents=True)
+    if platforms_dir.exists():
+        shutil.rmtree(platforms_dir)
+    platforms_dir.mkdir(parents=True)
 
     print("Downloading artifacts...")
-    print("  Downloading headers -> dist/include/")
-    run(
-        [
-            "gh",
-            "run",
-            "download",
-            str(run_id),
-            "--repo",
-            REPO,
-            "-n",
-            HEADERS_ARTIFACT,
-            "-D",
-            str(include_dir),
-        ],
-        capture_output=True,
-    )
-
     for artifact in ARTIFACTS:
-        print(f"  Downloading {artifact} -> dist/lib/")
-
-        run(
-            [
-                "gh",
-                "run",
-                "download",
-                str(run_id),
-                "--repo",
-                REPO,
-                "-n",
-                artifact,
-                "-D",
-                str(lib_dir),
-            ],
-            capture_output=True,
-        )
-
-    for artifact in JEXTRACT_ARTIFACTS:
-        print(f"  Downloading {artifact} -> dist/bindings/{artifact}/")
-        target_dir = bindings_dir / artifact
+        target_dir = platforms_dir / artifact
+        print(f"  Downloading {artifact} -> dist/platforms/{artifact}/")
         target_dir.mkdir(parents=True, exist_ok=True)
         run(
             [
@@ -201,13 +150,9 @@ def main():
         )
 
     print(f"\nArtifacts downloaded to {dist_dir}/")
-    print(f"  include: {sum(1 for p in include_dir.rglob('*') if p.is_file())} files")
-    for f in sorted(lib_dir.iterdir()):
-        if f.is_file():
-            print(f"  lib: {f.name}")
-    for d in sorted(bindings_dir.iterdir()):
+    for d in sorted(platforms_dir.iterdir()):
         if d.is_dir():
-            print(f"  bindings: {d.name} ({sum(1 for p in d.rglob('*') if p.is_file())} files)")
+            print(f"  platform: {d.name} ({sum(1 for p in d.rglob('*') if p.is_file())} files)")
 
     return 0
 
