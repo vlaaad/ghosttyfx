@@ -168,8 +168,12 @@ jobs:
           repository: ghostty-org/ghostty
           path: ghostty
 
-      - name: Setup Zig
-        uses: mlugg/setup-zig@v2.2.1
+      - name: Install Zig
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri "https://ziglang.org/download/0.15.2/zig-x86_64-windows-0.15.2.zip" -OutFile zig.zip
+          Expand-Archive -Path zig.zip -DestinationPath .
+          Add-Content -Path $env:GITHUB_PATH -Value "${{ github.workspace }}\zig-x86_64-windows-0.15.2"
 
       - name: Install jextract
         shell: pwsh
