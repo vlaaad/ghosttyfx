@@ -5,6 +5,8 @@ JavaFX/cljfx terminal emulator using libghostty with JExtract bindings.
 ## CI Build
 
 Builds libghostty-vt for Linux, macOS (arm64/x64), and Windows via GitHub Actions.
+Each CI job also runs `jextract` against the generated headers and uploads the generated
+Java sources as a separate artifact so bindings can be diffed across platforms locally.
 
 ### Windows Build Issue
 
@@ -27,6 +29,14 @@ Workaround: Set `ZIG_CACHE_DIR` to a path on the same drive as the runner's work
 6. Create Java wrapper layer
 7. Build JavaFX terminal component
 8. Create cljfx handler
+
+## Artifact Download
+
+Run `python scripts/download_lib.py` to trigger the workflow and download:
+
+- native libraries into `dist/lib/`
+- exported headers into `dist/include/`
+- per-platform `jextract` outputs into `dist/bindings/`
 
 ## Resources
 

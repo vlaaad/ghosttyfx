@@ -3,6 +3,10 @@ name: Build libghostty-vt
 on:
   workflow_dispatch:
 
+env:
+  JEXTRACT_VERSION: 25-jextract+2-4
+  JEXTRACT_DIRNAME: jextract-25
+
 jobs:
   build-linux:
     runs-on: ubuntu-latest
@@ -17,18 +21,35 @@ jobs:
           curl -L https://ziglang.org/download/0.15.2/zig-x86_64-linux-0.15.2.tar.xz | tar xJ
           echo "${{ github.workspace }}/zig-x86_64-linux-0.15.2" >> $GITHUB_PATH
 
+      - name: Install jextract
+        run: |
+          curl -L -o jextract.tar.gz "https://download.java.net/java/early_access/jextract/25/2/openjdk-${{ env.JEXTRACT_VERSION }}_linux-x64_bin.tar.gz"
+          tar -xzf jextract.tar.gz
+          echo "${{ github.workspace }}/${{ env.JEXTRACT_DIRNAME }}/bin" >> $GITHUB_PATH
+
       - name: Build
         run: |
           cd ghostty
           zig build -Dapp-runtime=none -Demit-lib-vt=true
 
+      - name: Generate jextract bindings
+        run: |
+          mkdir -p ghostty/zig-out/artifact/jextract-linux-x64/src
+          jextract \
+            -I ghostty/zig-out/include \
+            -t org.ghostty.vt.bindings \
+            --header-class-name ghostty_vt_h \
+            --output ghostty/zig-out/artifact/jextract-linux-x64/src \
+            ghostty/zig-out/include/ghostty/vt.h
+
       - name: Package
         run: |
           cd ghostty/zig-out
-          mkdir -p artifact/linux-x64 artifact/include
+          mkdir -p artifact/linux-x64 artifact/include artifact/jextract-linux-x64
           test -f lib/libghostty-vt.so.0.1.0
           cp lib/libghostty-vt.so.0.1.0 artifact/linux-x64/libghostty-vt-linux-x64.so
           cp -r include/. artifact/include/
+          printf "jextract %s\n" "$(jextract --version | head -n 1)" > artifact/jextract-linux-x64/metadata.txt
 
       - uses: actions/upload-artifact@v4
         with:
@@ -40,6 +61,12 @@ jobs:
         with:
           name: libghostty-vt-headers
           path: ghostty/zig-out/artifact/include/
+          retention-days: 1
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: jextract-bindings-linux-x64
+          path: ghostty/zig-out/artifact/jextract-linux-x64/
           retention-days: 1
 
   build-macos-arm64:
@@ -55,22 +82,45 @@ jobs:
           curl -L https://ziglang.org/download/0.15.2/zig-aarch64-macos-0.15.2.tar.xz | tar xJ
           echo "${{ github.workspace }}/zig-aarch64-macos-0.15.2" >> $GITHUB_PATH
 
+      - name: Install jextract
+        run: |
+          curl -L -o jextract.tar.gz "https://download.java.net/java/early_access/jextract/25/2/openjdk-${{ env.JEXTRACT_VERSION }}_macos-aarch64_bin.tar.gz"
+          tar -xzf jextract.tar.gz
+          echo "${{ github.workspace }}/${{ env.JEXTRACT_DIRNAME }}/bin" >> $GITHUB_PATH
+
       - name: Build
         run: |
           cd ghostty
           zig build -Dapp-runtime=none -Demit-lib-vt=true
 
+      - name: Generate jextract bindings
+        run: |
+          mkdir -p ghostty/zig-out/artifact/jextract-macos-arm64/src
+          jextract \
+            -I ghostty/zig-out/include \
+            -t org.ghostty.vt.bindings \
+            --header-class-name ghostty_vt_h \
+            --output ghostty/zig-out/artifact/jextract-macos-arm64/src \
+            ghostty/zig-out/include/ghostty/vt.h
+
       - name: Package
         run: |
           cd ghostty/zig-out
-          mkdir -p artifact/macos-arm64
+          mkdir -p artifact/macos-arm64 artifact/jextract-macos-arm64
           test -f lib/libghostty-vt.0.1.0.dylib
           cp lib/libghostty-vt.0.1.0.dylib artifact/macos-arm64/libghostty-vt-macos-arm64.dylib
+          printf "jextract %s\n" "$(jextract --version | head -n 1)" > artifact/jextract-macos-arm64/metadata.txt
 
       - uses: actions/upload-artifact@v4
         with:
           name: libghostty-vt-macos-arm64
           path: ghostty/zig-out/artifact/macos-arm64/
+          retention-days: 1
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: jextract-bindings-macos-arm64
+          path: ghostty/zig-out/artifact/jextract-macos-arm64/
           retention-days: 1
 
   build-macos-x64:
@@ -86,22 +136,45 @@ jobs:
           curl -L https://ziglang.org/download/0.15.2/zig-x86_64-macos-0.15.2.tar.xz | tar xJ
           echo "${{ github.workspace }}/zig-x86_64-macos-0.15.2" >> $GITHUB_PATH
 
+      - name: Install jextract
+        run: |
+          curl -L -o jextract.tar.gz "https://download.java.net/java/early_access/jextract/25/2/openjdk-${{ env.JEXTRACT_VERSION }}_macos-x64_bin.tar.gz"
+          tar -xzf jextract.tar.gz
+          echo "${{ github.workspace }}/${{ env.JEXTRACT_DIRNAME }}/bin" >> $GITHUB_PATH
+
       - name: Build
         run: |
           cd ghostty
           zig build -Dapp-runtime=none -Demit-lib-vt=true
 
+      - name: Generate jextract bindings
+        run: |
+          mkdir -p ghostty/zig-out/artifact/jextract-macos-x64/src
+          jextract \
+            -I ghostty/zig-out/include \
+            -t org.ghostty.vt.bindings \
+            --header-class-name ghostty_vt_h \
+            --output ghostty/zig-out/artifact/jextract-macos-x64/src \
+            ghostty/zig-out/include/ghostty/vt.h
+
       - name: Package
         run: |
           cd ghostty/zig-out
-          mkdir -p artifact/macos-x64
+          mkdir -p artifact/macos-x64 artifact/jextract-macos-x64
           test -f lib/libghostty-vt.0.1.0.dylib
           cp lib/libghostty-vt.0.1.0.dylib artifact/macos-x64/libghostty-vt-macos-x64.dylib
+          printf "jextract %s\n" "$(jextract --version | head -n 1)" > artifact/jextract-macos-x64/metadata.txt
 
       - uses: actions/upload-artifact@v4
         with:
           name: libghostty-vt-macos-x64
           path: ghostty/zig-out/artifact/macos-x64/
+          retention-days: 1
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: jextract-bindings-macos-x64
+          path: ghostty/zig-out/artifact/jextract-macos-x64/
           retention-days: 1
 
   build-windows:
@@ -120,6 +193,13 @@ jobs:
       - name: Setup Zig
         uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29
 
+      - name: Install jextract
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri "https://download.java.net/java/early_access/jextract/25/2/openjdk-${{ env.JEXTRACT_VERSION }}_windows-x64_bin.tar.gz" -OutFile jextract.tar.gz
+          tar -xzf jextract.tar.gz
+          Add-Content -Path $env:GITHUB_PATH -Value "${{ github.workspace }}\${{ env.JEXTRACT_DIRNAME }}\bin"
+
       - name: Prepare cache directories
         shell: pwsh
         run: |
@@ -133,6 +213,17 @@ jobs:
           cd ghostty
           zig build -Dapp-runtime=none -Demit-lib-vt=true
 
+      - name: Generate jextract bindings
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path ghostty/zig-out/artifact/jextract-windows-x64/src | Out-Null
+          jextract `
+            -I ghostty/zig-out/include `
+            -t org.ghostty.vt.bindings `
+            --header-class-name ghostty_vt_h `
+            --output ghostty/zig-out/artifact/jextract-windows-x64/src `
+            ghostty/zig-out/include/ghostty/vt.h
+
       - name: Package
         shell: pwsh
         run: |
@@ -141,10 +232,18 @@ jobs:
             throw "Expected Windows shared library at ghostty/zig-out/bin/ghostty-vt.dll"
           }
           New-Item -ItemType Directory -Force -Path artifact/windows-x64 | Out-Null
+          New-Item -ItemType Directory -Force -Path artifact/jextract-windows-x64 | Out-Null
           Copy-Item bin/ghostty-vt.dll artifact/windows-x64/libghostty-vt-windows-x64.dll
+          "jextract $(jextract --version | Select-Object -First 1)" | Set-Content artifact/jextract-windows-x64/metadata.txt
 
       - uses: actions/upload-artifact@v4
         with:
           name: libghostty-vt-windows-x64
           path: ghostty/zig-out/artifact/windows-x64/
+          retention-days: 1
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: jextract-bindings-windows-x64
+          path: ghostty/zig-out/artifact/jextract-windows-x64/
           retention-days: 1
