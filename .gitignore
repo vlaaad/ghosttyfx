@@ -4,3 +4,8 @@
 /dist
 /ghostty-reference
 __pycache__
+/ghostty-core/target
+/ghostty-linux-x86_64/target
+/ghostty-macos-aarch64/target
+/ghostty-macos-x86_64/target
+/ghostty-windows-x86_64/target
