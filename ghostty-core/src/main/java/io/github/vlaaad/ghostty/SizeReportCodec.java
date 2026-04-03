@@ -1,8 +1,6 @@
 package io.github.vlaaad.ghostty;
 
-/**
- * Size report codec interface.
- */
+/// Standalone encoder for terminal size-report replies.
 public interface SizeReportCodec {
     byte[] encode(SizeReportRequest request, SizeReport size);
 }

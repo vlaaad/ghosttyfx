@@ -1,8 +1,6 @@
 package io.github.vlaaad.ghostty;
 
-/**
- * Key codec interface for encoding key events.
- */
+/// Standalone encoder for translating host key events into terminal byte sequences.
 public interface KeyCodec {
     byte[] encode(KeyEvent event);
 }

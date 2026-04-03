@@ -1,8 +1,6 @@
 package io.github.vlaaad.ghostty;
 
-/**
- * Physical key codes (complete list).
- */
+/// Physical key codes (complete list).
 public enum Key {
     UNIDENTIFIED,
     

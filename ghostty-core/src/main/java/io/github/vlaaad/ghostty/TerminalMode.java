@@ -1,11 +1,16 @@
 package io.github.vlaaad.ghostty;
 
-/**
- * Terminal modes (DEC private modes).
- * Note: These correspond to packed 16-bit values from ghostty_mode_new().
- * Bit 15: 1 = ANSI mode, 0 = DEC private mode.
- * Bits 0-14: mode value.
- */
+/// Terminal mode identifiers understood by libghostty.
+///
+/// The native library defines these as packed 16-bit values produced by
+/// {@code ghostty_mode_new(value, ansiFlag)}. Java bindings do not receive those C preprocessor
+/// macros directly, so the enum keeps the canonical components and exposes {@link #packedValue()} to
+/// recreate the native representation:
+///
+/// <ul>
+///   <li>bits {@code 0-14}: mode number</li>
+///   <li>bit {@code 15}: {@code 1} for ANSI mode, {@code 0} for DEC private mode</li>
+/// </ul>
 public enum TerminalMode {
     // ANSI Modes (bit 15 = 1)
     KAM(2, true),                        // Keyboard action mode
@@ -59,7 +64,7 @@ public enum TerminalMode {
         this.isAnsi = isAnsi;
     }
     
-    /** Get the packed 16-bit value for native calls */
+    /// Returns the packed value expected by native mode APIs.
     public short packedValue() {
         return (short)((value & 0x7FFF) | (isAnsi ? 0x8000 : 0));
     }

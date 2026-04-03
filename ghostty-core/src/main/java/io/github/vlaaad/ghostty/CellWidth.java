@@ -1,8 +1,6 @@
 package io.github.vlaaad.ghostty;
 
-/**
- * Cell width property.
- */
+/// Cell width property.
 public enum CellWidth {
     NARROW,         // Not a wide character, cell width 1
     WIDE,           // Wide character, cell width 2

@@ -1,22 +1,18 @@
 package io.github.vlaaad.ghostty;
 
-/**
- * Device attributes record.
- * This is a simplified placeholder - full implementation would include all device attributes.
- * 
- * @param primary primary device attributes
- * @param secondary secondary device attributes
- * @param tertiary tertiary device attributes
- */
+/// Device attributes record.
+/// This is a simplified placeholder - full implementation would include all device attributes.
+///
+/// @param primary primary device attributes
+/// @param secondary secondary device attributes
+/// @param tertiary tertiary device attributes
 public record DeviceAttributes(
     DeviceAttributesPrimary primary,
     DeviceAttributesSecondary secondary,
     DeviceAttributesTertiary tertiary
 ) {}
 
-/**
- * Primary device attributes.
- */
+/// Primary device attributes.
 record DeviceAttributesPrimary(
     String version,
     int pngLevel,
@@ -57,9 +53,7 @@ record DeviceAttributesPrimary(
     boolean defaultFontSelection
 ) {}
 
-/**
- * Secondary device attributes.
- */
+/// Secondary device attributes.
 record DeviceAttributesSecondary(
     boolean utf8,
     boolean sixelGraphics,
@@ -71,9 +65,7 @@ record DeviceAttributesSecondary(
     boolean proportionalSpacing
 ) {}
 
-/**
- * Tertiary device attributes.
- */
+/// Tertiary device attributes.
 record DeviceAttributesTertiary(
     boolean transparency,
     boolean italics,

@@ -1,8 +1,6 @@
 package io.github.vlaaad.ghostty;
 
-/**
- * Mouse button identity.
- */
+/// Mouse button identity.
 public enum MouseButton {
     UNKNOWN,    // Unknown button
     LEFT,       // Left button

@@ -1,10 +1,8 @@
 package io.github.vlaaad.ghostty;
 
-/**
- * Type schema record.
- * 
- * @param json JSON schema string
- */
+/// JSON schema describing the public Ghostty type surface.
+///
+/// @param json schema document encoded as JSON text
 public record TypeSchema(
     String json
 ) {}

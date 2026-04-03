@@ -2,12 +2,21 @@ package io.github.vlaaad.ghostty;
 
 import java.util.Optional;
 
-/**
- * Terminal session interface.
- * Provides methods for interacting with a terminal session.
- */
+/// Thread-safe terminal session.
+///
+/// All public methods may be called from any thread. Implementations serialize interaction with
+/// mutable native terminal state on an internal actor thread and return only immutable Java values.
+/// Reads such as {@link #snapshot()}, {@link #cell(Point)}, {@link #row(long, RowCoordinateSpace)},
+/// and {@link #screen(ScreenKind)} never expose live native references.
+///
+/// Notification callbacks delivered through {@link TerminalEvents} must not run on the internal
+/// actor thread. They may safely call back into this session. In contrast, {@link TerminalQueries}
+/// run synchronously while the terminal is waiting for an immediate answer, so those implementations
+/// should avoid blocking and must not re-enter the session.
 public interface TerminalSession extends AutoCloseable {
     TerminalConfig config();
+
+    /// Returns a detached immutable view of the current terminal state.
     TerminalSnapshot snapshot();
 
     void resize(TerminalSize size);

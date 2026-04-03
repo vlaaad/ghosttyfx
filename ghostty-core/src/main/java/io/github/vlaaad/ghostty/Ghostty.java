@@ -1,24 +1,30 @@
 package io.github.vlaaad.ghostty;
 
-/**
- * Main entry point for Ghostty terminal emulator.
- * This class provides factory methods for creating terminal sessions and codecs.
- */
+/// Public bootstrap entry point for the Ghostty core API.
+///
+/// This facade is responsible for locating the platform-specific native adapter internally.
+/// Callers interact only with Java records, enums, and interfaces exposed from the core module;
+/// native handles, memory segments, and generated binding types stay hidden behind this class.
+///
+/// The API surface is intentionally split into two families:
+/// terminal sessions, which own mutable terminal state, and standalone codecs, which encode host
+/// input/output sequences without depending on any UI toolkit.
 public final class Ghostty {
     
     private Ghostty() {
         // Private constructor to prevent instantiation
     }
     
-    /**
-     * Creates a new terminal session.
-     * 
-     * @param config terminal configuration
-     * @param ptyWriter PTY writer for terminal output
-     * @param queries terminal queries handler
-     * @param events terminal events listener
-     * @return new terminal session
-     */
+    /// Creates a new terminal session.
+    ///
+    /// The returned session is thread-safe. Implementations confine mutable native state to an
+    /// internal single-threaded actor and publish only detached immutable snapshots to callers.
+    ///
+    /// @param config terminal configuration
+    /// @param ptyWriter PTY writer for terminal output
+    /// @param queries synchronous query handler invoked when the terminal needs an immediate host reply
+    /// @param events asynchronous notification listener for terminal-originated events
+    /// @return new terminal session
     public static TerminalSession open(
         TerminalConfig config,
         PtyWriter ptyWriter,
@@ -29,67 +35,53 @@ public final class Ghostty {
         throw new UnsupportedOperationException("Not yet implemented");
     }
     
-    /**
-     * Creates a key codec for encoding key events.
-     * 
-     * @param config key codec configuration
-     * @return key codec instance
-     */
+    /// Creates a standalone key codec for translating host key events into VT sequences.
+    ///
+    /// @param config key codec configuration
+    /// @return key codec instance
     public static KeyCodec keyCodec(KeyCodecConfig config) {
         throw new UnsupportedOperationException("Not yet implemented");
     }
     
-    /**
-     * Creates a mouse codec for encoding mouse events.
-     * 
-     * @param config mouse codec configuration
-     * @return mouse codec instance
-     */
+    /// Creates a standalone mouse codec for translating host mouse events into VT sequences.
+    ///
+    /// @param config mouse codec configuration
+    /// @return mouse codec instance
     public static MouseCodec mouseCodec(MouseCodecConfig config) {
         throw new UnsupportedOperationException("Not yet implemented");
     }
     
-    /**
-     * Creates a paste codec.
-     * 
-     * @return paste codec instance
-     */
+    /// Creates a standalone paste codec.
+    ///
+    /// @return paste codec instance
     public static PasteCodec pasteCodec() {
         throw new UnsupportedOperationException("Not yet implemented");
     }
     
-    /**
-     * Creates a focus codec.
-     * 
-     * @return focus codec instance
-     */
+    /// Creates a standalone focus codec.
+    ///
+    /// @return focus codec instance
     public static FocusCodec focusCodec() {
         throw new UnsupportedOperationException("Not yet implemented");
     }
     
-    /**
-     * Creates a size report codec.
-     * 
-     * @return size report codec instance
-     */
+    /// Creates a standalone size-report codec.
+    ///
+    /// @return size report codec instance
     public static SizeReportCodec sizeReportCodec() {
         throw new UnsupportedOperationException("Not yet implemented");
     }
     
-    /**
-     * Gets build information.
-     * 
-     * @return build information
-     */
+    /// Gets build information.
+    ///
+    /// @return build information
     public static BuildInfo buildInfo() {
         throw new UnsupportedOperationException("Not yet implemented");
     }
     
-    /**
-     * Gets type schema.
-     * 
-     * @return type schema
-     */
+    /// Gets type schema.
+    ///
+    /// @return type schema
     public static TypeSchema typeSchema() {
         throw new UnsupportedOperationException("Not yet implemented");
     }

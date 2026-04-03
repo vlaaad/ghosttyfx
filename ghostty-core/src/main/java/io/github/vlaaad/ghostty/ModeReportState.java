@@ -1,9 +1,6 @@
 package io.github.vlaaad.ghostty;
 
-/**
- * Mode report states (from native bindings).
- * These are used for DECRPM (DEC Private Mode Report) responses.
- */
+/// Reported state of a terminal mode in a DECRPM response.
 public enum ModeReportState {
     NOT_RECOGNIZED,    // Mode is not recognized
     SET,               // Mode is set (enabled)

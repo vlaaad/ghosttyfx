@@ -1,8 +1,6 @@
 package io.github.vlaaad.ghostty;
 
-/**
- * Color scheme enum.
- */
+/// Color scheme enum.
 public enum ColorScheme {
     DARK,
     LIGHT

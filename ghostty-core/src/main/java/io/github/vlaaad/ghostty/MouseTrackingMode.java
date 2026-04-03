@@ -1,8 +1,6 @@
 package io.github.vlaaad.ghostty;
 
-/**
- * Mouse tracking modes.
- */
+/// Mouse tracking modes.
 public enum MouseTrackingMode {
     NONE,       // Mouse reporting disabled
     X10,        // X10 mouse mode

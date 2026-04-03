@@ -1,8 +1,6 @@
 package io.github.vlaaad.ghostty;
 
-/**
- * Paste codec interface.
- */
+/// Standalone encoder for paste payloads and bracketed-paste framing.
 public interface PasteCodec {
     boolean isSafe(byte[] data);
     byte[] encode(byte[] data, boolean bracketed);
