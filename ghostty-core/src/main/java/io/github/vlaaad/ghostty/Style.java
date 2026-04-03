@@ -1,6 +1,6 @@
 package io.github.vlaaad.ghostty;
 
-/// Immutable snapshot of cell style.
+/// Immutable cell style.
 ///
 /// @param foreground foreground color
 /// @param background background color
@@ -12,7 +12,7 @@ package io.github.vlaaad.ghostty;
 /// @param inverse whether text is inverse
 /// @param invisible whether text is invisible
 /// @param strikethrough whether text has strikethrough
-public record StyleSnapshot(
+public record Style(
     ColorValue foreground,
     ColorValue background,
     boolean bold,

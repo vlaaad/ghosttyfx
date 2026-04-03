@@ -1,14 +1,14 @@
 package io.github.vlaaad.ghostty;
 
-/// Immutable snapshot of cursor state.
+/// Immutable cursor state.
 ///
 /// @param position cursor position
 /// @param visible whether cursor is visible
 /// @param pendingWrap whether cursor has pending wrap
 /// @param style cursor style
-public record CursorSnapshot(
+public record Cursor(
     Point position,
     boolean visible,
     boolean pendingWrap,
-    StyleSnapshot style
+    Style style
 ) {}

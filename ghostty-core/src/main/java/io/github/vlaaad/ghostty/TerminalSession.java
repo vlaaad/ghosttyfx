@@ -17,7 +17,7 @@ public interface TerminalSession extends AutoCloseable {
     TerminalConfig config();
 
     /// Returns a detached immutable view of the current terminal state.
-    TerminalSnapshot snapshot();
+    Terminal snapshot();
 
     void resize(TerminalSize size);
     void write(byte[] vt);
@@ -40,9 +40,9 @@ public interface TerminalSession extends AutoCloseable {
     void scrollBy(long delta);
     void scrollViewport(TerminalScrollViewport behavior);
 
-    Optional<CellSnapshot> cell(Point point);
-    Optional<RowSnapshot> row(long rowIndex, RowCoordinateSpace space);
-    ScreenSnapshot screen(ScreenKind screen);
+    Optional<Cell> cell(Point point);
+    Optional<Row> row(long rowIndex, RowCoordinateSpace space);
+    Screen screen(ScreenKind screen);
     Optional<DeviceAttributes> deviceAttributes();
 
     @Override

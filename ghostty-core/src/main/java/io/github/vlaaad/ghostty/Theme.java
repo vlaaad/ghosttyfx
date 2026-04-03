@@ -1,6 +1,6 @@
 package io.github.vlaaad.ghostty;
 
-/// Immutable snapshot of terminal theme.
+/// Immutable terminal theme.
 ///
 /// @param foreground foreground color
 /// @param background background color
@@ -10,7 +10,7 @@ package io.github.vlaaad.ghostty;
 /// @param defaultBackground default background color
 /// @param defaultCursor default cursor color
 /// @param defaultPalette default color palette
-public record ThemeSnapshot(
+public record Theme(
     ColorValue foreground,
     ColorValue background,
     ColorValue cursor,

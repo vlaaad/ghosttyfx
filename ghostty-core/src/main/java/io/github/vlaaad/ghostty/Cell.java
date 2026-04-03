@@ -1,6 +1,6 @@
 package io.github.vlaaad.ghostty;
 
-/// Immutable snapshot of a terminal cell.
+/// Immutable terminal cell.
 ///
 /// @param column column position
 /// @param text text content
@@ -11,13 +11,13 @@ package io.github.vlaaad.ghostty;
 /// @param hyperlink hyperlink if present
 /// @param semantic semantic content type
 /// @param protectedCell whether cell is protected
-public record CellSnapshot(
+public record Cell(
     int column,
     String text,
     int codePoint,
     CellContentTag contentTag,
     CellWidth width,
-    StyleSnapshot style,
+    Style style,
     Hyperlink hyperlink,
     CellSemantic semantic,
     boolean protectedCell

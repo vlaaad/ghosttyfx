@@ -1,12 +1,12 @@
 package io.github.vlaaad.ghostty;
 
-/// Detached immutable snapshot of terminal state.
+/// Detached immutable terminal state.
 ///
 /// Instances of this record are safe to retain and share across threads. They are copies of the
 /// terminal state at one point in time, not live views backed by native memory.
 ///
 /// @param size terminal size
-/// @param cursor cursor snapshot
+/// @param cursor cursor state
 /// @param activeScreen active screen kind
 /// @param cursorVisible whether cursor is visible
 /// @param cursorPendingWrap whether cursor has pending wrap
@@ -17,12 +17,12 @@ package io.github.vlaaad.ghostty;
 /// @param workingDirectory current working directory
 /// @param totalRows total number of rows across visible and scrollback history
 /// @param scrollbackRows number of rows currently retained in scrollback history
-/// @param theme theme snapshot
-/// @param primary primary screen snapshot
-/// @param alternate alternate screen snapshot
-public record TerminalSnapshot(
+/// @param theme terminal theme
+/// @param primary primary screen
+/// @param alternate alternate screen
+public record Terminal(
     TerminalSize size,
-    CursorSnapshot cursor,
+    Cursor cursor,
     ScreenKind activeScreen,
     boolean cursorVisible,
     boolean cursorPendingWrap,
@@ -33,7 +33,7 @@ public record TerminalSnapshot(
     String workingDirectory,
     long totalRows,
     long scrollbackRows,
-    ThemeSnapshot theme,
-    ScreenSnapshot primary,
-    ScreenSnapshot alternate
+    Theme theme,
+    Screen primary,
+    Screen alternate
 ) {}
