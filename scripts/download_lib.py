@@ -11,10 +11,10 @@ from pathlib import Path
 REPO = "vlaaad/ghosttyfx"
 WORKFLOW_FILE = "build-lib.yml"
 ARTIFACTS = [
-    "libghostty-vt-linux-x64",
-    "libghostty-vt-macos-arm64",
-    "libghostty-vt-macos-x64",
-    "libghostty-vt-windows-x64",
+    "libghostty-vt-linux-x86_64",
+    "libghostty-vt-macos-aarch64",
+    "libghostty-vt-macos-x86_64",
+    "libghostty-vt-windows-x86_64",
 ]
 
 

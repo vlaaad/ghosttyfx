@@ -50,7 +50,7 @@ The plan is:
 - keep the JavaFX/cljfx code talking only to the common handwritten API, not to generated classes directly
 
 
-Then, we will use **Maven** for Java libs.
+Then, we will use **Maven** for Java libs with runtime-scoped platform dependencies.
 
 ## Resources
 

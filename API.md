@@ -40,10 +40,10 @@ io.github.vlaaad.ghostty
 Suggested modules:
 
 - `ghostty-vt-core`
-- `ghostty-vt-linux-x64`
-- `ghostty-vt-macos-x64`
-- `ghostty-vt-macos-arm64`
-- `ghostty-vt-windows-x64`
+- `ghostty-vt-linux-x86_64`
+- `ghostty-vt-macos-x86_64`
+- `ghostty-vt-macos-aarch64`
+- `ghostty-vt-windows-x86_64`
 
 `ghostty-vt-core` contains only handwritten interfaces, records, enums, and shared wrapper logic contracts.
 Platform modules are discovered internally by the facade and are not part of the public bootstrap API.
