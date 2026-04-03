@@ -37,7 +37,7 @@ jobs:
           mkdir -p ghostty/zig-out/artifact/linux-x64/src
           jextract \
             -I ghostty/zig-out/include \
-            -t org.ghostty.vt.bindings \
+            -t io.github.vlaaad.ghostty.native \
             --header-class-name ghostty_vt_h \
             --output ghostty/zig-out/artifact/linux-x64/src \
             ghostty/zig-out/include/ghostty/vt.h
@@ -86,7 +86,7 @@ jobs:
           mkdir -p ghostty/zig-out/artifact/macos-arm64/src
           jextract \
             -I ghostty/zig-out/include \
-            -t org.ghostty.vt.bindings \
+            -t io.github.vlaaad.ghostty.native \
             --header-class-name ghostty_vt_h \
             --output ghostty/zig-out/artifact/macos-arm64/src \
             ghostty/zig-out/include/ghostty/vt.h
@@ -135,7 +135,7 @@ jobs:
           mkdir -p ghostty/zig-out/artifact/macos-x64/src
           jextract \
             -I ghostty/zig-out/include \
-            -t org.ghostty.vt.bindings \
+            -t io.github.vlaaad.ghostty.native \
             --header-class-name ghostty_vt_h \
             --output ghostty/zig-out/artifact/macos-x64/src \
             ghostty/zig-out/include/ghostty/vt.h
@@ -201,7 +201,7 @@ jobs:
           New-Item -ItemType Directory -Force -Path ghostty/zig-out/artifact/windows-x64/src | Out-Null
           jextract `
             -I ghostty/zig-out/include `
-            -t org.ghostty.vt.bindings `
+            -t io.github.vlaaad.ghostty.native `
             --header-class-name ghostty_vt_h `
             --output ghostty/zig-out/artifact/windows-x64/src `
             ghostty/zig-out/include/ghostty/vt.h

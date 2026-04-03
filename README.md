@@ -49,6 +49,9 @@ The plan is:
 - implement the common API in each platform module using that platform's generated `jextract` bindings
 - keep the JavaFX/cljfx code talking only to the common handwritten API, not to generated classes directly
 
+
+Then, we will use **Maven** for Java libs.
+
 ## Resources
 
 - [libghostty docs](https://libghostty.tip.ghostty.org/index.html)
