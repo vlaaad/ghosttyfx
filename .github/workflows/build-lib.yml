@@ -1,6 +1,8 @@
 name: Build libghostty-vt
 
 on:
+  push:
+  pull_request:
   workflow_dispatch:
 
 env:
@@ -12,9 +14,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+
+      - uses: actions/checkout@v5
         with:
           repository: ghostty-org/ghostty
           path: ghostty
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "25"
+          cache: maven
 
       - name: Install Zig
         run: |
@@ -44,16 +54,21 @@ jobs:
 
       - name: Package
         run: |
-          cd ghostty/zig-out
-          mkdir -p artifact/linux-x86_64/lib
-          test -f lib/libghostty-vt.so.0.1.0
-          cp lib/libghostty-vt.so.0.1.0 artifact/linux-x86_64/lib/libghostty-vt-linux-x86_64.so
-          printf "jextract %s\n" "$(jextract --version | head -n 1)" > artifact/linux-x86_64/metadata.txt
+          rm -rf dist/platforms/libghostty-vt-linux-x86_64
+          mkdir -p dist/platforms/libghostty-vt-linux-x86_64/lib
+          cp -R ghostty/zig-out/artifact/linux-x86_64/src dist/platforms/libghostty-vt-linux-x86_64/src
+          test -f ghostty/zig-out/lib/libghostty-vt.so.0.1.0
+          cp ghostty/zig-out/lib/libghostty-vt.so.0.1.0 dist/platforms/libghostty-vt-linux-x86_64/lib/libghostty-vt-linux-x86_64.so
+          printf "jextract %s\n" "$(jextract --version | head -n 1)" > dist/platforms/libghostty-vt-linux-x86_64/metadata.txt
+
+      - name: Test Java package
+        run: mvn -B -pl ghostty-core,ghostty-linux-x86_64 -am test
 
       - uses: actions/upload-artifact@v6
+        if: github.event_name == 'workflow_dispatch'
         with:
           name: libghostty-vt-linux-x86_64
-          path: ghostty/zig-out/artifact/linux-x86_64/
+          path: dist/platforms/libghostty-vt-linux-x86_64/
           retention-days: 1
           compression-level: 0
 
@@ -61,9 +76,17 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v5
+
+      - uses: actions/checkout@v5
         with:
           repository: ghostty-org/ghostty
           path: ghostty
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "25"
+          cache: maven
 
       - name: Install Zig
         run: |
@@ -93,16 +116,21 @@ jobs:
 
       - name: Package
         run: |
-          cd ghostty/zig-out
-          mkdir -p artifact/macos-aarch64/lib
-          test -f lib/libghostty-vt.0.1.0.dylib
-          cp lib/libghostty-vt.0.1.0.dylib artifact/macos-aarch64/lib/libghostty-vt-macos-aarch64.dylib
-          printf "jextract %s\n" "$(jextract --version | head -n 1)" > artifact/macos-aarch64/metadata.txt
+          rm -rf dist/platforms/libghostty-vt-macos-aarch64
+          mkdir -p dist/platforms/libghostty-vt-macos-aarch64/lib
+          cp -R ghostty/zig-out/artifact/macos-aarch64/src dist/platforms/libghostty-vt-macos-aarch64/src
+          test -f ghostty/zig-out/lib/libghostty-vt.0.1.0.dylib
+          cp ghostty/zig-out/lib/libghostty-vt.0.1.0.dylib dist/platforms/libghostty-vt-macos-aarch64/lib/libghostty-vt-macos-aarch64.dylib
+          printf "jextract %s\n" "$(jextract --version | head -n 1)" > dist/platforms/libghostty-vt-macos-aarch64/metadata.txt
+
+      - name: Test Java package
+        run: mvn -B -pl ghostty-core,ghostty-macos-aarch64 -am test
 
       - uses: actions/upload-artifact@v6
+        if: github.event_name == 'workflow_dispatch'
         with:
           name: libghostty-vt-macos-aarch64
-          path: ghostty/zig-out/artifact/macos-aarch64/
+          path: dist/platforms/libghostty-vt-macos-aarch64/
           retention-days: 1
           compression-level: 0
 
@@ -110,9 +138,17 @@ jobs:
     runs-on: macos-15-intel
     steps:
       - uses: actions/checkout@v5
+
+      - uses: actions/checkout@v5
         with:
           repository: ghostty-org/ghostty
           path: ghostty
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "25"
+          cache: maven
 
       - name: Install Zig
         run: |
@@ -142,16 +178,21 @@ jobs:
 
       - name: Package
         run: |
-          cd ghostty/zig-out
-          mkdir -p artifact/macos-x86_64/lib
-          test -f lib/libghostty-vt.0.1.0.dylib
-          cp lib/libghostty-vt.0.1.0.dylib artifact/macos-x86_64/lib/libghostty-vt-macos-x86_64.dylib
-          printf "jextract %s\n" "$(jextract --version | head -n 1)" > artifact/macos-x86_64/metadata.txt
+          rm -rf dist/platforms/libghostty-vt-macos-x86_64
+          mkdir -p dist/platforms/libghostty-vt-macos-x86_64/lib
+          cp -R ghostty/zig-out/artifact/macos-x86_64/src dist/platforms/libghostty-vt-macos-x86_64/src
+          test -f ghostty/zig-out/lib/libghostty-vt.0.1.0.dylib
+          cp ghostty/zig-out/lib/libghostty-vt.0.1.0.dylib dist/platforms/libghostty-vt-macos-x86_64/lib/libghostty-vt-macos-x86_64.dylib
+          printf "jextract %s\n" "$(jextract --version | head -n 1)" > dist/platforms/libghostty-vt-macos-x86_64/metadata.txt
+
+      - name: Test Java package
+        run: mvn -B -pl ghostty-core,ghostty-macos-x86_64 -am test
 
       - uses: actions/upload-artifact@v6
+        if: github.event_name == 'workflow_dispatch'
         with:
           name: libghostty-vt-macos-x86_64
-          path: ghostty/zig-out/artifact/macos-x86_64/
+          path: dist/platforms/libghostty-vt-macos-x86_64/
           retention-days: 1
           compression-level: 0
 
@@ -164,9 +205,17 @@ jobs:
       TMP: ${{ github.workspace }}\.tmp
     steps:
       - uses: actions/checkout@v5
+
+      - uses: actions/checkout@v5
         with:
           repository: ghostty-org/ghostty
           path: ghostty
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "25"
+          cache: maven
 
       - name: Install Zig
         shell: pwsh
@@ -209,17 +258,23 @@ jobs:
       - name: Package
         shell: pwsh
         run: |
-          Set-Location ghostty/zig-out
-          if (-not (Test-Path bin/ghostty-vt.dll)) {
+          if (-not (Test-Path ghostty/zig-out/bin/ghostty-vt.dll)) {
             throw "Expected Windows shared library at ghostty/zig-out/bin/ghostty-vt.dll"
           }
-          New-Item -ItemType Directory -Force -Path artifact/windows-x86_64/lib | Out-Null
-          Copy-Item bin/ghostty-vt.dll artifact/windows-x86_64/lib/libghostty-vt-windows-x86_64.dll
-          "jextract $(jextract --version | Select-Object -First 1)" | Set-Content artifact/windows-x86_64/metadata.txt
+          Remove-Item -Recurse -Force dist/platforms/libghostty-vt-windows-x86_64 -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force -Path dist/platforms/libghostty-vt-windows-x86_64/lib | Out-Null
+          Copy-Item -Recurse ghostty/zig-out/artifact/windows-x86_64/src dist/platforms/libghostty-vt-windows-x86_64/src
+          Copy-Item ghostty/zig-out/bin/ghostty-vt.dll dist/platforms/libghostty-vt-windows-x86_64/lib/libghostty-vt-windows-x86_64.dll
+          "jextract $(jextract --version | Select-Object -First 1)" | Set-Content dist/platforms/libghostty-vt-windows-x86_64/metadata.txt
+
+      - name: Test Java package
+        shell: pwsh
+        run: mvn -B -pl ghostty-core,ghostty-windows-x86_64 -am test
 
       - uses: actions/upload-artifact@v6
+        if: github.event_name == 'workflow_dispatch'
         with:
           name: libghostty-vt-windows-x86_64
-          path: ghostty/zig-out/artifact/windows-x86_64/
+          path: dist/platforms/libghostty-vt-windows-x86_64/
           retention-days: 1
           compression-level: 0
