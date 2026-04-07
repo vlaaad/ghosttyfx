@@ -1,5 +1,7 @@
 package io.github.vlaaad.ghostty;
 
+import io.github.vlaaad.ghostty.impl.Providers;
+
 /// Public bootstrap entry point for the Ghostty core API.
 ///
 /// This facade is responsible for locating the platform-specific native adapter internally.
@@ -76,13 +78,13 @@ public final class Ghostty {
     ///
     /// @return build information
     public static BuildInfo buildInfo() {
-        throw new UnsupportedOperationException("Not yet implemented");
+        return Providers.provider().buildInfo();
     }
     
     /// Gets type schema.
     ///
     /// @return type schema
     public static TypeSchema typeSchema() {
-        throw new UnsupportedOperationException("Not yet implemented");
+        return Providers.provider().typeSchema();
     }
 }

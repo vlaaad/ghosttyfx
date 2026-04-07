@@ -1,24 +1,22 @@
 package io.github.vlaaad.ghostty;
 
+import java.util.Set;
+
 /// Build information record.
 ///
 /// @param version version string
 /// @param major major version number
 /// @param minor minor version number
 /// @param patch patch version number
-/// @param build build number
+/// @param build build metadata string
 /// @param optimize optimization level
-/// @param simd SIMD support flag
-/// @param kittyGraphics Kitty graphics support flag
-/// @param tmuxControlMode TMUX control mode support flag
+/// @param features enabled build features
 public record BuildInfo(
     String version,
-    int major,
-    int minor,
-    int patch,
-    int build,
-    String optimize,
-    boolean simd,
-    boolean kittyGraphics,
-    boolean tmuxControlMode
+    long major,
+    long minor,
+    long patch,
+    String build,
+    BuildOptimize optimize,
+    Set<BuildFeature> features
 ) {}
