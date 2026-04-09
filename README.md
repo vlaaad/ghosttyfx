@@ -52,6 +52,10 @@ The plan is:
 
 Then, we will use **Maven** for Java libs with runtime-scoped platform dependencies.
 
+## Running Tests
+
+Use `mvn clean test` when validating local changes.
+
 ## Resources
 
 - [libghostty docs](https://libghostty.tip.ghostty.org/index.html)

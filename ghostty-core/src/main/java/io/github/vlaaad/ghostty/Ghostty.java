@@ -33,8 +33,7 @@ public final class Ghostty {
         TerminalQueries queries,
         TerminalEvents events
     ) {
-        // Platform-specific implementation will be loaded here
-        throw new UnsupportedOperationException("Not yet implemented");
+        return Providers.provider().open(config, ptyWriter, queries, events);
     }
     
     /// Creates a standalone key codec for translating host key events into VT sequences.
@@ -42,7 +41,7 @@ public final class Ghostty {
     /// @param config key codec configuration
     /// @return key codec instance
     public static KeyCodec keyCodec(KeyCodecConfig config) {
-        throw new UnsupportedOperationException("Not yet implemented");
+        return Providers.provider().keyCodec(config);
     }
     
     /// Creates a standalone mouse codec for translating host mouse events into VT sequences.
@@ -50,28 +49,28 @@ public final class Ghostty {
     /// @param config mouse codec configuration
     /// @return mouse codec instance
     public static MouseCodec mouseCodec(MouseCodecConfig config) {
-        throw new UnsupportedOperationException("Not yet implemented");
+        return Providers.provider().mouseCodec(config);
     }
     
     /// Creates a standalone paste codec.
     ///
     /// @return paste codec instance
     public static PasteCodec pasteCodec() {
-        throw new UnsupportedOperationException("Not yet implemented");
+        return Providers.provider().pasteCodec();
     }
     
     /// Creates a standalone focus codec.
     ///
     /// @return focus codec instance
     public static FocusCodec focusCodec() {
-        throw new UnsupportedOperationException("Not yet implemented");
+        return Providers.provider().focusCodec();
     }
     
     /// Creates a standalone size-report codec.
     ///
     /// @return size report codec instance
     public static SizeReportCodec sizeReportCodec() {
-        throw new UnsupportedOperationException("Not yet implemented");
+        return Providers.provider().sizeReportCodec();
     }
     
     /// Gets build information.

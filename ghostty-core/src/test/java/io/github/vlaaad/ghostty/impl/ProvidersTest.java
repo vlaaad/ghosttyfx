@@ -3,6 +3,19 @@ package io.github.vlaaad.ghostty.impl;
 import io.github.vlaaad.ghostty.BuildInfo;
 import io.github.vlaaad.ghostty.BuildFeature;
 import io.github.vlaaad.ghostty.BuildOptimize;
+import io.github.vlaaad.ghostty.FocusCodec;
+import io.github.vlaaad.ghostty.Ghostty;
+import io.github.vlaaad.ghostty.KeyCodec;
+import io.github.vlaaad.ghostty.KeyCodecConfig;
+import io.github.vlaaad.ghostty.MouseCodec;
+import io.github.vlaaad.ghostty.MouseCodecConfig;
+import io.github.vlaaad.ghostty.PasteCodec;
+import io.github.vlaaad.ghostty.PtyWriter;
+import io.github.vlaaad.ghostty.SizeReportCodec;
+import io.github.vlaaad.ghostty.TerminalConfig;
+import io.github.vlaaad.ghostty.TerminalEvents;
+import io.github.vlaaad.ghostty.TerminalQueries;
+import io.github.vlaaad.ghostty.TerminalSession;
 import io.github.vlaaad.ghostty.TypeSchema;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
@@ -25,6 +38,26 @@ final class ProvidersTest {
             Provider provider = Providers.provider();
             assertEquals("windows-x86_64", provider.id());
             assertSame(provider, Providers.provider());
+        } finally {
+            restoreProperty("os.name", previousOsName);
+            restoreProperty("os.arch", previousOsArch);
+            Providers.resetForTests();
+        }
+    }
+
+    @Test
+    void ghosttyMetadataMethodsStillUseResolvedProvider() {
+        String previousOsName = System.getProperty("os.name");
+        String previousOsArch = System.getProperty("os.arch");
+        try {
+            Providers.resetForTests();
+            System.setProperty("os.name", "Windows 11");
+            System.setProperty("os.arch", "amd64");
+
+            Provider provider = Providers.provider();
+
+            assertEquals(provider.buildInfo(), Ghostty.buildInfo());
+            assertEquals(provider.typeSchema(), Ghostty.typeSchema());
         } finally {
             restoreProperty("os.name", previousOsName);
             restoreProperty("os.arch", previousOsArch);
@@ -67,6 +100,41 @@ final class ProvidersTest {
         @Override
         public String id() {
             return "windows-x86_64";
+        }
+
+        @Override
+        public TerminalSession open(
+            TerminalConfig config,
+            PtyWriter ptyWriter,
+            TerminalQueries queries,
+            TerminalEvents events
+        ) {
+            throw new UnsupportedOperationException("Not used in this test provider");
+        }
+
+        @Override
+        public KeyCodec keyCodec(KeyCodecConfig config) {
+            throw new UnsupportedOperationException("Not used in this test provider");
+        }
+
+        @Override
+        public MouseCodec mouseCodec(MouseCodecConfig config) {
+            throw new UnsupportedOperationException("Not used in this test provider");
+        }
+
+        @Override
+        public PasteCodec pasteCodec() {
+            throw new UnsupportedOperationException("Not used in this test provider");
+        }
+
+        @Override
+        public FocusCodec focusCodec() {
+            throw new UnsupportedOperationException("Not used in this test provider");
+        }
+
+        @Override
+        public SizeReportCodec sizeReportCodec() {
+            throw new UnsupportedOperationException("Not used in this test provider");
         }
 
         @Override

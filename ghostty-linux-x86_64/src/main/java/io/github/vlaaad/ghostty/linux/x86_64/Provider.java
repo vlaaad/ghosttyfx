@@ -3,6 +3,18 @@ package io.github.vlaaad.ghostty.linux.x86_64;
 import io.github.vlaaad.ghostty.BuildInfo;
 import io.github.vlaaad.ghostty.BuildFeature;
 import io.github.vlaaad.ghostty.BuildOptimize;
+import io.github.vlaaad.ghostty.FocusCodec;
+import io.github.vlaaad.ghostty.KeyCodec;
+import io.github.vlaaad.ghostty.KeyCodecConfig;
+import io.github.vlaaad.ghostty.MouseCodec;
+import io.github.vlaaad.ghostty.MouseCodecConfig;
+import io.github.vlaaad.ghostty.PasteCodec;
+import io.github.vlaaad.ghostty.PtyWriter;
+import io.github.vlaaad.ghostty.SizeReportCodec;
+import io.github.vlaaad.ghostty.TerminalConfig;
+import io.github.vlaaad.ghostty.TerminalEvents;
+import io.github.vlaaad.ghostty.TerminalQueries;
+import io.github.vlaaad.ghostty.TerminalSession;
 import io.github.vlaaad.ghostty.TypeSchema;
 import io.github.vlaaad.ghostty.impl.NativeLibraries;
 import io.github.vlaaad.ghostty.impl.NativeSupport;
@@ -20,6 +32,30 @@ public final class Provider implements io.github.vlaaad.ghostty.impl.Provider {
 
     public String id() {
         return ID;
+    }
+
+    public TerminalSession open(TerminalConfig config, PtyWriter ptyWriter, TerminalQueries queries, TerminalEvents events) {
+        throw new UnsupportedOperationException("Not yet implemented");
+    }
+
+    public KeyCodec keyCodec(KeyCodecConfig config) {
+        throw new UnsupportedOperationException("Not yet implemented");
+    }
+
+    public MouseCodec mouseCodec(MouseCodecConfig config) {
+        throw new UnsupportedOperationException("Not yet implemented");
+    }
+
+    public PasteCodec pasteCodec() {
+        throw new UnsupportedOperationException("Not yet implemented");
+    }
+
+    public FocusCodec focusCodec() {
+        throw new UnsupportedOperationException("Not yet implemented");
+    }
+
+    public SizeReportCodec sizeReportCodec() {
+        throw new UnsupportedOperationException("Not yet implemented");
     }
 
     public BuildInfo buildInfo() {
