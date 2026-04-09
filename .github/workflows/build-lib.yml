@@ -16,6 +16,15 @@ jobs:
           repository: ghostty-org/ghostty
           path: ghostty
 
+      - uses: actions/checkout@v5
+        with:
+          repository: google/highway
+          ref: 66486a10623fa0d72fe91260f96c892e41aceb06
+          path: ghostty/pkg/highway/vendor/highway
+
+      - name: Vendor highway dependency
+        run: cp scripts/ghostty-highway-build.zig.zon ghostty/pkg/highway/build.zig.zon
+
       - uses: actions/setup-java@v5
         with:
           distribution: temurin
@@ -60,6 +69,15 @@ jobs:
           repository: ghostty-org/ghostty
           path: ghostty
 
+      - uses: actions/checkout@v5
+        with:
+          repository: google/highway
+          ref: 66486a10623fa0d72fe91260f96c892e41aceb06
+          path: ghostty/pkg/highway/vendor/highway
+
+      - name: Vendor highway dependency
+        run: cp scripts/ghostty-highway-build.zig.zon ghostty/pkg/highway/build.zig.zon
+
       - uses: actions/setup-java@v5
         with:
           distribution: temurin
@@ -103,6 +121,15 @@ jobs:
         with:
           repository: ghostty-org/ghostty
           path: ghostty
+
+      - uses: actions/checkout@v5
+        with:
+          repository: google/highway
+          ref: 66486a10623fa0d72fe91260f96c892e41aceb06
+          path: ghostty/pkg/highway/vendor/highway
+
+      - name: Vendor highway dependency
+        run: cp scripts/ghostty-highway-build.zig.zon ghostty/pkg/highway/build.zig.zon
 
       - uses: actions/setup-java@v5
         with:
@@ -152,6 +179,16 @@ jobs:
         with:
           repository: ghostty-org/ghostty
           path: ghostty
+
+      - uses: actions/checkout@v5
+        with:
+          repository: google/highway
+          ref: 66486a10623fa0d72fe91260f96c892e41aceb06
+          path: ghostty/pkg/highway/vendor/highway
+
+      - name: Vendor highway dependency
+        shell: pwsh
+        run: Copy-Item scripts/ghostty-highway-build.zig.zon ghostty/pkg/highway/build.zig.zon
 
       - uses: actions/setup-java@v5
         with:
