@@ -1,12 +1,12 @@
 # GhosttyFX
 
-JavaFX/cljfx terminal emulator using libghostty with JExtract bindings.
+JavaFX/cljfx terminal emulator using libghostty with handwritten FFM bindings.
 
 ## CI Build
 
 Builds libghostty-vt for Linux, macOS (arm64/x64), and Windows via GitHub Actions.
-Each CI job also runs `jextract` against the generated headers and uploads a single per-platform
-artifact containing the native library, generated Java sources, and generation metadata.
+Each CI job uploads a per-platform artifact containing only the native library that the Java
+wrapper loads at runtime.
 
 ### Windows Build Issue
 
@@ -21,32 +21,31 @@ Workaround: Set `ZIG_CACHE_DIR` to a path on the same drive as the runner's work
 
 ## Setup
 
-1. Install Java 25+ with jextract
+1. Install Java 25+
 2. Install build tools: CMake, Zig
 3. Clone libghostty: `git clone https://github.com/ghostty-org/ghostty`
 4. Build libghostty-vt shared library
-5. Run jextract on headers
-6. Create Java wrapper layer
-7. Build JavaFX terminal component
-8. Create cljfx handler
+5. Create Java wrapper layer
+6. Build JavaFX terminal component
+7. Create cljfx handler
 
 ## Artifact Download
 
 Run `python scripts/download_lib.py` to trigger the workflow and download:
 
 - one downloaded artifact per platform into `dist/platforms/`
-- each platform artifact contains `lib/`, `src/`, and `metadata.txt`
+- each platform artifact contains `lib/`
 
 ## Binding Strategy
 
-We are not going to use one raw `jextract` output everywhere. The generated bindings differ across
-platforms, especially on Windows vs Unix-like targets.
+The binding layer is handwritten in `ghostty-core`, with the small subset of FFM calls and ABI
+layouts the wrapper actually uses today.
 
 The plan is:
 
 - keep a handwritten common Java API in a core module
-- generate and package platform-specific bindings/modules for Linux, macOS arm64, macOS x64, and Windows x64
-- implement the common API in each platform module using that platform's generated `jextract` bindings
+- keep the handwritten binding/runtime code in `ghostty-core`
+- package platform-specific native libraries/modules for Linux, macOS arm64, macOS x64, and Windows x64
 - keep the JavaFX/cljfx code talking only to the common handwritten API, not to generated classes directly
 
 
@@ -59,5 +58,4 @@ Use `mvn clean test` when validating local changes.
 ## Resources
 
 - [libghostty docs](https://libghostty.tip.ghostty.org/index.html)
-- [JExtract (JEP 469)](https://openjdk.org/jeps/469)
 - [Ghostling example](https://github.com/ghostty-org/ghostling)

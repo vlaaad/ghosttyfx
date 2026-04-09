@@ -11,7 +11,7 @@ Phase status legend: `🟢` completed, `🟡` in progress, `⚪` not started.
 - Make `Ghostty` delegate `open`, `keyCodec`, `mouseCodec`, `pasteCodec`, `focusCodec`, and `sizeReportCodec` through `Providers.provider()`.
 - Keep `ghostty-core` as the only public API surface; platform modules stay internal adapters plus native resources.
 
-## ⚪ Phase 2: Replace jextract with shared handwritten bindings
+## 🟢 Phase 2: Replace jextract with shared handwritten bindings
 - Remove the runtime dependency on generated jextract classes and bind directly to packaged native libraries with handwritten FFM code.
 - Add a shared internal binding layer for the small subset of `libghostty-vt` symbols the wrapper actually uses, expanding it only when higher phases need more surface.
 - Model per-platform ABI differences explicitly, especially `size_t`, `GhosttyString`, layout-sensitive structs/unions, and callback descriptors.

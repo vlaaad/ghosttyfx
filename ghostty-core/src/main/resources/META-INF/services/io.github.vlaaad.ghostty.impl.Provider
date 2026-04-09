@@ -1,0 +1,4 @@
+io.github.vlaaad.ghostty.impl.LinuxX8664Provider
+io.github.vlaaad.ghostty.impl.MacosAarch64Provider
+io.github.vlaaad.ghostty.impl.MacosX8664Provider
+io.github.vlaaad.ghostty.impl.WindowsX8664Provider

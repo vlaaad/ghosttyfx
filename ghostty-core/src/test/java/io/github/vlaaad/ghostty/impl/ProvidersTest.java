@@ -32,11 +32,11 @@ final class ProvidersTest {
         String previousOsArch = System.getProperty("os.arch");
         try {
             Providers.resetForTests();
-            System.setProperty("os.name", "Windows 11");
+            System.setProperty("os.name", "TestOS");
             System.setProperty("os.arch", "amd64");
 
             Provider provider = Providers.provider();
-            assertEquals("windows-x86_64", provider.id());
+            assertEquals("testos-x86_64", provider.id());
             assertSame(provider, Providers.provider());
         } finally {
             restoreProperty("os.name", previousOsName);
@@ -51,7 +51,7 @@ final class ProvidersTest {
         String previousOsArch = System.getProperty("os.arch");
         try {
             Providers.resetForTests();
-            System.setProperty("os.name", "Windows 11");
+            System.setProperty("os.name", "TestOS");
             System.setProperty("os.arch", "amd64");
 
             Provider provider = Providers.provider();
@@ -99,7 +99,7 @@ final class ProvidersTest {
     public static final class TestProvider implements Provider {
         @Override
         public String id() {
-            return "windows-x86_64";
+            return "testos-x86_64";
         }
 
         @Override

@@ -5,10 +5,6 @@ on:
   pull_request:
   workflow_dispatch:
 
-env:
-  JEXTRACT_VERSION: 25-jextract+2-4
-  JEXTRACT_DIRNAME: jextract-25
-
 jobs:
   build-linux:
     runs-on: ubuntu-latest
@@ -31,35 +27,17 @@ jobs:
           curl -L https://ziglang.org/download/0.15.2/zig-x86_64-linux-0.15.2.tar.xz | tar xJ
           echo "${{ github.workspace }}/zig-x86_64-linux-0.15.2" >> $GITHUB_PATH
 
-      - name: Install jextract
-        run: |
-          curl -L -o jextract.tar.gz "https://download.java.net/java/early_access/jextract/25/2/openjdk-${{ env.JEXTRACT_VERSION }}_linux-x64_bin.tar.gz"
-          tar -xzf jextract.tar.gz
-          echo "${{ github.workspace }}/${{ env.JEXTRACT_DIRNAME }}/bin" >> $GITHUB_PATH
-
       - name: Build
         run: |
           cd ghostty
           zig build -Dapp-runtime=none -Demit-lib-vt=true
 
-      - name: Generate jextract bindings
-        run: |
-          mkdir -p ghostty/zig-out/artifact/linux-x86_64/src
-          jextract \
-            -I ghostty/zig-out/include \
-            -t io.github.vlaaad.linux.x86_64 \
-            --header-class-name ghostty_vt_h \
-            --output ghostty/zig-out/artifact/linux-x86_64/src \
-            ghostty/zig-out/include/ghostty/vt.h
-
       - name: Package
         run: |
           rm -rf dist/platforms/libghostty-vt-linux-x86_64
           mkdir -p dist/platforms/libghostty-vt-linux-x86_64/lib
-          cp -R ghostty/zig-out/artifact/linux-x86_64/src dist/platforms/libghostty-vt-linux-x86_64/src
           test -f ghostty/zig-out/lib/libghostty-vt.so.0.1.0
           cp ghostty/zig-out/lib/libghostty-vt.so.0.1.0 dist/platforms/libghostty-vt-linux-x86_64/lib/libghostty-vt-linux-x86_64.so
-          printf "jextract %s\n" "$(jextract --version | head -n 1)" > dist/platforms/libghostty-vt-linux-x86_64/metadata.txt
 
       - name: Test Java package
         run: mvn -B -pl ghostty-core,ghostty-linux-x86_64 -am test
@@ -93,35 +71,17 @@ jobs:
           curl -L https://ziglang.org/download/0.15.2/zig-aarch64-macos-0.15.2.tar.xz | tar xJ
           echo "${{ github.workspace }}/zig-aarch64-macos-0.15.2" >> $GITHUB_PATH
 
-      - name: Install jextract
-        run: |
-          curl -L -o jextract.tar.gz "https://download.java.net/java/early_access/jextract/25/2/openjdk-${{ env.JEXTRACT_VERSION }}_macos-aarch64_bin.tar.gz"
-          tar -xzf jextract.tar.gz
-          echo "${{ github.workspace }}/${{ env.JEXTRACT_DIRNAME }}/bin" >> $GITHUB_PATH
-
       - name: Build
         run: |
           cd ghostty
           zig build -Dapp-runtime=none -Demit-lib-vt=true
 
-      - name: Generate jextract bindings
-        run: |
-          mkdir -p ghostty/zig-out/artifact/macos-aarch64/src
-          jextract \
-            -I ghostty/zig-out/include \
-            -t io.github.vlaaad.macos.aarch64 \
-            --header-class-name ghostty_vt_h \
-            --output ghostty/zig-out/artifact/macos-aarch64/src \
-            ghostty/zig-out/include/ghostty/vt.h
-
       - name: Package
         run: |
           rm -rf dist/platforms/libghostty-vt-macos-aarch64
           mkdir -p dist/platforms/libghostty-vt-macos-aarch64/lib
-          cp -R ghostty/zig-out/artifact/macos-aarch64/src dist/platforms/libghostty-vt-macos-aarch64/src
           test -f ghostty/zig-out/lib/libghostty-vt.0.1.0.dylib
           cp ghostty/zig-out/lib/libghostty-vt.0.1.0.dylib dist/platforms/libghostty-vt-macos-aarch64/lib/libghostty-vt-macos-aarch64.dylib
-          printf "jextract %s\n" "$(jextract --version | head -n 1)" > dist/platforms/libghostty-vt-macos-aarch64/metadata.txt
 
       - name: Test Java package
         run: mvn -B -pl ghostty-core,ghostty-macos-aarch64 -am test
@@ -155,35 +115,17 @@ jobs:
           curl -L https://ziglang.org/download/0.15.2/zig-x86_64-macos-0.15.2.tar.xz | tar xJ
           echo "${{ github.workspace }}/zig-x86_64-macos-0.15.2" >> $GITHUB_PATH
 
-      - name: Install jextract
-        run: |
-          curl -L -o jextract.tar.gz "https://download.java.net/java/early_access/jextract/25/2/openjdk-${{ env.JEXTRACT_VERSION }}_macos-x64_bin.tar.gz"
-          tar -xzf jextract.tar.gz
-          echo "${{ github.workspace }}/${{ env.JEXTRACT_DIRNAME }}/bin" >> $GITHUB_PATH
-
       - name: Build
         run: |
           cd ghostty
           zig build -Dapp-runtime=none -Demit-lib-vt=true
 
-      - name: Generate jextract bindings
-        run: |
-          mkdir -p ghostty/zig-out/artifact/macos-x86_64/src
-          jextract \
-            -I ghostty/zig-out/include \
-            -t io.github.vlaaad.macos.x86_64 \
-            --header-class-name ghostty_vt_h \
-            --output ghostty/zig-out/artifact/macos-x86_64/src \
-            ghostty/zig-out/include/ghostty/vt.h
-
       - name: Package
         run: |
           rm -rf dist/platforms/libghostty-vt-macos-x86_64
           mkdir -p dist/platforms/libghostty-vt-macos-x86_64/lib
-          cp -R ghostty/zig-out/artifact/macos-x86_64/src dist/platforms/libghostty-vt-macos-x86_64/src
           test -f ghostty/zig-out/lib/libghostty-vt.0.1.0.dylib
           cp ghostty/zig-out/lib/libghostty-vt.0.1.0.dylib dist/platforms/libghostty-vt-macos-x86_64/lib/libghostty-vt-macos-x86_64.dylib
-          printf "jextract %s\n" "$(jextract --version | head -n 1)" > dist/platforms/libghostty-vt-macos-x86_64/metadata.txt
 
       - name: Test Java package
         run: mvn -B -pl ghostty-core,ghostty-macos-x86_64 -am test
@@ -224,13 +166,6 @@ jobs:
           Expand-Archive -Path zig.zip -DestinationPath .
           Add-Content -Path $env:GITHUB_PATH -Value "${{ github.workspace }}\zig-x86_64-windows-0.15.2"
 
-      - name: Install jextract
-        shell: pwsh
-        run: |
-          Invoke-WebRequest -Uri "https://download.java.net/java/early_access/jextract/25/2/openjdk-${{ env.JEXTRACT_VERSION }}_windows-x64_bin.tar.gz" -OutFile jextract.tar.gz
-          tar -xzf jextract.tar.gz
-          Add-Content -Path $env:GITHUB_PATH -Value "${{ github.workspace }}\${{ env.JEXTRACT_DIRNAME }}\bin"
-
       - name: Prepare cache directories
         shell: pwsh
         run: |
@@ -244,17 +179,6 @@ jobs:
           cd ghostty
           zig build -Dapp-runtime=none -Demit-lib-vt=true
 
-      - name: Generate jextract bindings
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force -Path ghostty/zig-out/artifact/windows-x86_64/src | Out-Null
-          jextract `
-            -I ghostty/zig-out/include `
-            -t io.github.vlaaad.windows.x86_64 `
-            --header-class-name ghostty_vt_h `
-            --output ghostty/zig-out/artifact/windows-x86_64/src `
-            ghostty/zig-out/include/ghostty/vt.h
-
       - name: Package
         shell: pwsh
         run: |
@@ -263,9 +187,7 @@ jobs:
           }
           Remove-Item -Recurse -Force dist/platforms/libghostty-vt-windows-x86_64 -ErrorAction SilentlyContinue
           New-Item -ItemType Directory -Force -Path dist/platforms/libghostty-vt-windows-x86_64/lib | Out-Null
-          Copy-Item -Recurse ghostty/zig-out/artifact/windows-x86_64/src dist/platforms/libghostty-vt-windows-x86_64/src
           Copy-Item ghostty/zig-out/bin/ghostty-vt.dll dist/platforms/libghostty-vt-windows-x86_64/lib/libghostty-vt-windows-x86_64.dll
-          "jextract $(jextract --version | Select-Object -First 1)" | Set-Content dist/platforms/libghostty-vt-windows-x86_64/metadata.txt
 
       - name: Test Java package
         shell: pwsh
