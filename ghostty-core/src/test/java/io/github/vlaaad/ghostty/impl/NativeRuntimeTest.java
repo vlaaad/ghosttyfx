@@ -7,6 +7,7 @@ import io.github.vlaaad.ghostty.KeyCodec;
 import io.github.vlaaad.ghostty.KeyCodecConfig;
 import io.github.vlaaad.ghostty.KeyEvent;
 import io.github.vlaaad.ghostty.KeyModifiers;
+import io.github.vlaaad.ghostty.OptionAsAlt;
 import io.github.vlaaad.ghostty.TypeSchema;
 import java.util.Arrays;
 import java.util.ServiceLoader;
@@ -103,7 +104,15 @@ final class NativeRuntimeTest {
 
     @Test
     void encodesAltWithEscapePrefix() {
-        KeyCodec codec = provider.keyCodec(new KeyCodecConfig(false, false, false, true, false, null, null));
+        KeyCodec codec = provider.keyCodec(new KeyCodecConfig(
+            false,
+            false,
+            false,
+            true,
+            false,
+            null,
+            platform.id().startsWith("macos-") ? OptionAsAlt.TRUE : null
+        ));
 
         assertArrayEquals(
             new byte[] {0x1b, 'a'},
