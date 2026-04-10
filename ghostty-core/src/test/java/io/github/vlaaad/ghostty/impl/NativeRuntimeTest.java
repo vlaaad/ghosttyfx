@@ -1,6 +1,7 @@
 package io.github.vlaaad.ghostty.impl;
 
 import io.github.vlaaad.ghostty.BuildInfo;
+import io.github.vlaaad.ghostty.Ghostty;
 import io.github.vlaaad.ghostty.Key;
 import io.github.vlaaad.ghostty.KeyAction;
 import io.github.vlaaad.ghostty.KeyCodec;
@@ -9,10 +10,6 @@ import io.github.vlaaad.ghostty.KeyEvent;
 import io.github.vlaaad.ghostty.KeyModifiers;
 import io.github.vlaaad.ghostty.OptionAsAlt;
 import io.github.vlaaad.ghostty.TypeSchema;
-import java.util.Arrays;
-import java.util.ServiceLoader;
-import java.util.Set;
-import java.util.stream.Collectors;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
@@ -20,6 +17,8 @@ import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
@@ -27,42 +26,33 @@ final class NativeRuntimeTest {
     private static final KeyModifiers NO_MODS = new KeyModifiers(false, false, false, false, false, false, null, null, null, null);
     private static final KeyModifiers CTRL = new KeyModifiers(false, true, false, false, false, false, null, null, null, null);
     private static final KeyModifiers ALT = new KeyModifiers(false, false, true, false, false, false, null, null, null, null);
-    private static SupportedPlatform platform;
-    private static Provider provider;
+    private static NativeRuntime runtime;
 
     @BeforeAll
-    static void requiresSupportedPlatform() {
-        platform = SupportedPlatform.current();
-        assumeTrue(platform != null);
-        Providers.resetForTests();
-        provider = Providers.provider();
+    static void requiresSupportedRuntime() {
+        NativeRuntime.resetForTests();
+        assumeTrue(isCurrentPlatformSupported());
+        runtime = NativeRuntime.current();
     }
 
     @Test
-    void serviceLoaderExposesHandwrittenProviders() {
-        Set<String> ids = ServiceLoader.load(Provider.class).stream()
-            .map(ServiceLoader.Provider::get)
-            .map(Provider::id)
-            .collect(Collectors.toSet());
-
-        assertTrue(ids.containsAll(
-            Arrays.stream(SupportedPlatform.values()).map(SupportedPlatform::id).collect(Collectors.toSet())
-        ));
+    void resolvesCurrentRuntimeOnce() {
+        assertSame(runtime, NativeRuntime.current());
     }
 
     @Test
     void currentPlatformNativeLibraryIsOnClasspath() {
         assertNotNull(
             NativeRuntimeTest.class.getClassLoader()
-                .getResource("native/" + platform.id() + "/" + platform.libraryFileName())
+                .getResource("native/" + runtime.id() + "/" + runtime.libraryFileName())
         );
     }
 
     @Test
     void exposesBuildInfo() {
-        BuildInfo buildInfo = provider.buildInfo();
+        BuildInfo buildInfo = runtime.buildInfo();
 
-        assertEquals(platform.id(), provider.id());
+        assertFalse(runtime.id().isBlank());
         assertFalse(buildInfo.version().isBlank());
         assertTrue(buildInfo.major() >= 0);
         assertTrue(buildInfo.minor() >= 0);
@@ -74,7 +64,7 @@ final class NativeRuntimeTest {
 
     @Test
     void exposesTypeSchema() {
-        TypeSchema schema = provider.typeSchema();
+        TypeSchema schema = runtime.typeSchema();
 
         assertFalse(schema.json().isBlank());
         assertTrue(schema.json().startsWith("{"));
@@ -82,8 +72,38 @@ final class NativeRuntimeTest {
     }
 
     @Test
+    void ghosttyMetadataMethodsStillUseCurrentRuntime() {
+        assertEquals(runtime.buildInfo(), Ghostty.buildInfo());
+        assertEquals(runtime.typeSchema(), Ghostty.typeSchema());
+    }
+
+    @Test
+    void failureIncludesRequestedPlatform() {
+        String previousOsName = System.getProperty("os.name");
+        String previousOsArch = System.getProperty("os.arch");
+        try {
+            NativeRuntime.resetForTests();
+            System.setProperty("os.name", "Plan 9");
+            System.setProperty("os.arch", "mips64");
+
+            UnsupportedOperationException exception = assertThrows(
+                UnsupportedOperationException.class,
+                NativeRuntime::current
+            );
+
+            assertTrue(exception.getMessage().contains("plan9-mips64"));
+            assertTrue(exception.getMessage().contains("windows-x86_64"));
+        } finally {
+            restoreProperty("os.name", previousOsName);
+            restoreProperty("os.arch", previousOsArch);
+            NativeRuntime.resetForTests();
+            runtime = NativeRuntime.current();
+        }
+    }
+
+    @Test
     void encodesCtrlC() {
-        KeyCodec codec = provider.keyCodec(new KeyCodecConfig(false, false, false, false, false, null, null));
+        KeyCodec codec = runtime.keyCodec(new KeyCodecConfig(false, false, false, false, false, null, null));
 
         assertArrayEquals(
             new byte[] {0x03},
@@ -95,8 +115,8 @@ final class NativeRuntimeTest {
     void encodesArrowUpInNormalAndApplicationModes() {
         KeyEvent event = new KeyEvent(KeyAction.PRESS, Key.ARROW_UP, NO_MODS, NO_MODS, false, null, 0);
 
-        KeyCodec normal = provider.keyCodec(new KeyCodecConfig(false, false, false, false, false, null, null));
-        KeyCodec application = provider.keyCodec(new KeyCodecConfig(true, false, false, false, false, null, null));
+        KeyCodec normal = runtime.keyCodec(new KeyCodecConfig(false, false, false, false, false, null, null));
+        KeyCodec application = runtime.keyCodec(new KeyCodecConfig(true, false, false, false, false, null, null));
 
         assertArrayEquals(new byte[] {0x1b, '[', 'A'}, normal.encode(event));
         assertArrayEquals(new byte[] {0x1b, 'O', 'A'}, application.encode(event));
@@ -104,14 +124,14 @@ final class NativeRuntimeTest {
 
     @Test
     void encodesAltWithEscapePrefix() {
-        KeyCodec codec = provider.keyCodec(new KeyCodecConfig(
+        KeyCodec codec = runtime.keyCodec(new KeyCodecConfig(
             false,
             false,
             false,
             true,
             false,
             null,
-            platform.id().startsWith("macos-") ? OptionAsAlt.TRUE : null
+            runtime.id().startsWith("macos-") ? OptionAsAlt.TRUE : null
         ));
 
         assertArrayEquals(
@@ -122,11 +142,29 @@ final class NativeRuntimeTest {
 
     @Test
     void modifierKeyPressProducesNoBytes() {
-        KeyCodec codec = provider.keyCodec(new KeyCodecConfig(false, false, false, false, false, null, null));
+        KeyCodec codec = runtime.keyCodec(new KeyCodecConfig(false, false, false, false, false, null, null));
 
         assertArrayEquals(
             new byte[0],
             codec.encode(new KeyEvent(KeyAction.PRESS, Key.SHIFT_LEFT, NO_MODS, NO_MODS, false, null, 0))
         );
+    }
+
+    private static boolean isCurrentPlatformSupported() {
+        String osName = System.getProperty("os.name", "").toLowerCase();
+        String osArch = System.getProperty("os.arch", "").toLowerCase();
+        return (
+            (osName.contains("linux") && (osArch.equals("amd64") || osArch.equals("x86_64")))
+                || ((osName.contains("mac") || osName.contains("darwin")) && (osArch.equals("amd64") || osArch.equals("x86_64") || osArch.equals("aarch64") || osArch.equals("arm64")))
+                || (osName.contains("win") && (osArch.equals("amd64") || osArch.equals("x86_64")))
+        );
+    }
+
+    private static void restoreProperty(String key, String value) {
+        if (value == null) {
+            System.clearProperty(key);
+            return;
+        }
+        System.setProperty(key, value);
     }
 }

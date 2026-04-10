@@ -9,8 +9,7 @@ import java.lang.foreign.MemorySegment;
 import java.lang.foreign.SymbolLookup;
 import java.lang.foreign.ValueLayout;
 import java.lang.invoke.MethodHandle;
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static java.lang.foreign.MemoryLayout.PathElement.groupElement;
 
@@ -61,10 +60,10 @@ final class GhosttyBindings {
     static final int GHOSTTY_KITTY_KEY_REPORT_ALL = 8;
     static final int GHOSTTY_KITTY_KEY_REPORT_ASSOCIATED = 16;
 
-    private static final Map<SupportedPlatform, GhosttyBindings> INSTANCES = new ConcurrentHashMap<>();
+    private static final AtomicReference<GhosttyBindings> INSTANCE = new AtomicReference<>();
     private static final AddressLayout C_POINTER = ValueLayout.ADDRESS;
 
-    private final SupportedPlatform platform;
+    private final NativeRuntime runtime;
     private final MemoryLayout ghosttyStringLayout;
     private final long ghosttyStringPtrOffset;
     private final long ghosttyStringLenOffset;
@@ -85,20 +84,20 @@ final class GhosttyBindings {
     private final MethodHandle ghosttyKeyEventSetUtf8;
     private final MethodHandle ghosttyKeyEventSetUnshiftedCodepoint;
 
-    private GhosttyBindings(SupportedPlatform platform) {
-        this.platform = platform;
+    private GhosttyBindings(NativeRuntime runtime) {
+        this.runtime = runtime;
 
         NativeLibraries.ensureLoaded(
-            platform.id(),
-            "native/" + platform.id() + "/" + platform.libraryFileName(),
-            platform.libraryFileName(),
+            runtime.id(),
+            "native/" + runtime.id() + "/" + runtime.libraryFileName(),
+            runtime.libraryFileName(),
             GhosttyBindings.class
         );
 
         SymbolLookup lookup = SymbolLookup.loaderLookup();
         ghosttyStringLayout = MemoryLayout.structLayout(
             C_POINTER.withName("ptr"),
-            platform.sizeTLayout().withName("len")
+            runtime.sizeTLayout().withName("len")
         );
         ghosttyStringPtrOffset = ghosttyStringLayout.byteOffset(groupElement("ptr"));
         ghosttyStringLenOffset = ghosttyStringLayout.byteOffset(groupElement("len"));
@@ -125,7 +124,7 @@ final class GhosttyBindings {
             C_POINTER,
             C_POINTER,
             C_POINTER,
-            platform.sizeTLayout(),
+            runtime.sizeTLayout(),
             C_POINTER
         ));
         ghosttyKeyEventNew = bind(lookup, "ghostty_key_event_new", FunctionDescriptor.of(
@@ -157,7 +156,7 @@ final class GhosttyBindings {
         ghosttyKeyEventSetUtf8 = bind(lookup, "ghostty_key_event_set_utf8", FunctionDescriptor.ofVoid(
             C_POINTER,
             C_POINTER,
-            platform.sizeTLayout()
+            runtime.sizeTLayout()
         ));
         ghosttyKeyEventSetUnshiftedCodepoint = bind(
             lookup,
@@ -166,12 +165,25 @@ final class GhosttyBindings {
         );
     }
 
-    static GhosttyBindings get(SupportedPlatform platform) {
-        return INSTANCES.computeIfAbsent(platform, GhosttyBindings::new);
+    static GhosttyBindings get(NativeRuntime runtime) {
+        GhosttyBindings bindings = INSTANCE.get();
+        if (bindings != null) {
+            return bindings;
+        }
+
+        GhosttyBindings created = new GhosttyBindings(runtime);
+        if (INSTANCE.compareAndSet(null, created)) {
+            return created;
+        }
+        return INSTANCE.get();
+    }
+
+    static void resetForTests() {
+        INSTANCE.set(null);
     }
 
     ValueLayout.OfLong sizeTLayout() {
-        return platform.sizeTLayout();
+        return runtime.sizeTLayout();
     }
 
     MemorySegment allocateGhosttyString(Arena arena) {
@@ -183,7 +195,7 @@ final class GhosttyBindings {
     }
 
     long ghosttyStringLen(MemorySegment struct) {
-        return struct.get(platform.sizeTLayout(), ghosttyStringLenOffset);
+        return struct.get(runtime.sizeTLayout(), ghosttyStringLenOffset);
     }
 
     MemorySegment ghosttyTypeJson() {

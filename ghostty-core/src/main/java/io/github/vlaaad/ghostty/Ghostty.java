@@ -1,6 +1,6 @@
 package io.github.vlaaad.ghostty;
 
-import io.github.vlaaad.ghostty.impl.Providers;
+import io.github.vlaaad.ghostty.impl.NativeRuntime;
 
 /// Public bootstrap entry point for the Ghostty core API.
 ///
@@ -33,7 +33,7 @@ public final class Ghostty {
         TerminalQueries queries,
         TerminalEvents events
     ) {
-        return Providers.provider().open(config, ptyWriter, queries, events);
+        return NativeRuntime.current().open(config, ptyWriter, queries, events);
     }
     
     /// Creates a standalone key codec for translating host key events into VT sequences.
@@ -41,7 +41,7 @@ public final class Ghostty {
     /// @param config key codec configuration
     /// @return key codec instance
     public static KeyCodec keyCodec(KeyCodecConfig config) {
-        return Providers.provider().keyCodec(config);
+        return NativeRuntime.current().keyCodec(config);
     }
     
     /// Creates a standalone mouse codec for translating host mouse events into VT sequences.
@@ -49,41 +49,41 @@ public final class Ghostty {
     /// @param config mouse codec configuration
     /// @return mouse codec instance
     public static MouseCodec mouseCodec(MouseCodecConfig config) {
-        return Providers.provider().mouseCodec(config);
+        return NativeRuntime.current().mouseCodec(config);
     }
     
     /// Creates a standalone paste codec.
     ///
     /// @return paste codec instance
     public static PasteCodec pasteCodec() {
-        return Providers.provider().pasteCodec();
+        return NativeRuntime.current().pasteCodec();
     }
     
     /// Creates a standalone focus codec.
     ///
     /// @return focus codec instance
     public static FocusCodec focusCodec() {
-        return Providers.provider().focusCodec();
+        return NativeRuntime.current().focusCodec();
     }
     
     /// Creates a standalone size-report codec.
     ///
     /// @return size report codec instance
     public static SizeReportCodec sizeReportCodec() {
-        return Providers.provider().sizeReportCodec();
+        return NativeRuntime.current().sizeReportCodec();
     }
     
     /// Gets build information.
     ///
     /// @return build information
     public static BuildInfo buildInfo() {
-        return Providers.provider().buildInfo();
+        return NativeRuntime.current().buildInfo();
     }
     
     /// Gets type schema.
     ///
     /// @return type schema
     public static TypeSchema typeSchema() {
-        return Providers.provider().typeSchema();
+        return NativeRuntime.current().typeSchema();
     }
 }

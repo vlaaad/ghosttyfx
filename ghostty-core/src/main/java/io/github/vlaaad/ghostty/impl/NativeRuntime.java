@@ -23,53 +23,64 @@ import java.lang.foreign.MemorySegment;
 import java.lang.foreign.ValueLayout;
 import java.nio.charset.StandardCharsets;
 import java.util.EnumSet;
+import java.util.List;
+import java.util.Locale;
 import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicReference;
 
-abstract class AbstractNativeProvider implements Provider {
-    private final SupportedPlatform platform;
+public final class NativeRuntime {
+    private static final AtomicReference<NativeRuntime> CURRENT = new AtomicReference<>();
+    private static final List<RuntimeDescriptor> SUPPORTED = List.of(
+        new RuntimeDescriptor("linux-x86_64", "so", ValueLayout.JAVA_LONG),
+        new RuntimeDescriptor("macos-x86_64", "dylib", ValueLayout.JAVA_LONG),
+        new RuntimeDescriptor("macos-aarch64", "dylib", ValueLayout.JAVA_LONG),
+        new RuntimeDescriptor("windows-x86_64", "dll", ValueLayout.JAVA_LONG)
+    );
 
-    AbstractNativeProvider(SupportedPlatform platform) {
-        this.platform = platform;
+    private final RuntimeDescriptor runtime;
+
+    private NativeRuntime(RuntimeDescriptor runtime) {
+        this.runtime = runtime;
     }
 
-    @Override
     public final String id() {
-        return platform.id();
+        return runtime.id();
     }
 
-    @Override
+    public final String libraryFileName() {
+        return runtime.libraryFileName();
+    }
+
+    public final ValueLayout.OfLong sizeTLayout() {
+        return runtime.sizeTLayout();
+    }
+
     public final KeyCodec keyCodec(KeyCodecConfig config) {
         Objects.requireNonNull(config, "config");
         return event -> encodeKey(config, event);
     }
 
-    @Override
     public final TerminalSession open(TerminalConfig config, PtyWriter ptyWriter, TerminalQueries queries, TerminalEvents events) {
         throw new UnsupportedOperationException("Not yet implemented");
     }
 
-    @Override
     public final MouseCodec mouseCodec(MouseCodecConfig config) {
         throw new UnsupportedOperationException("Not yet implemented");
     }
 
-    @Override
     public final PasteCodec pasteCodec() {
         throw new UnsupportedOperationException("Not yet implemented");
     }
 
-    @Override
     public final FocusCodec focusCodec() {
         throw new UnsupportedOperationException("Not yet implemented");
     }
 
-    @Override
     public final SizeReportCodec sizeReportCodec() {
         throw new UnsupportedOperationException("Not yet implemented");
     }
 
-    @Override
     public final BuildInfo buildInfo() {
         GhosttyBindings bindings = bindings();
 
@@ -160,7 +171,6 @@ abstract class AbstractNativeProvider implements Provider {
         }
     }
 
-    @Override
     public final TypeSchema typeSchema() {
         MemorySegment jsonPointer = bindings().ghosttyTypeJson();
         if (jsonPointer.address() == 0L) {
@@ -169,8 +179,26 @@ abstract class AbstractNativeProvider implements Provider {
         return new TypeSchema(jsonPointer.reinterpret(Long.MAX_VALUE).getString(0));
     }
 
+    public static NativeRuntime current() {
+        NativeRuntime runtime = CURRENT.get();
+        if (runtime != null) {
+            return runtime;
+        }
+
+        NativeRuntime resolved = resolveCurrent();
+        if (CURRENT.compareAndSet(null, resolved)) {
+            return resolved;
+        }
+        return CURRENT.get();
+    }
+
+    static void resetForTests() {
+        CURRENT.set(null);
+        GhosttyBindings.resetForTests();
+    }
+
     private GhosttyBindings bindings() {
-        return GhosttyBindings.get(platform);
+        return GhosttyBindings.get(this);
     }
 
     private byte[] encodeKey(KeyCodecConfig config, io.github.vlaaad.ghostty.KeyEvent event) {
@@ -408,6 +436,45 @@ abstract class AbstractNativeProvider implements Provider {
         throw new IllegalStateException("Unknown optimize mode " + optimize);
     }
 
+    private static NativeRuntime resolveCurrent() {
+        String id = normalizeId(
+            System.getProperty("os.name", ""),
+            System.getProperty("os.arch", "")
+        );
+        for (RuntimeDescriptor candidate : SUPPORTED) {
+            if (candidate.id().equals(id)) {
+                return new NativeRuntime(candidate);
+            }
+        }
+        throw new UnsupportedOperationException(
+            "Native runtime is not available for platform '" + id + "'. Supported platforms: " + supportedIds()
+        );
+    }
+
+    private static List<String> supportedIds() {
+        return SUPPORTED.stream().map(RuntimeDescriptor::id).toList();
+    }
+
+    private static String normalizeId(String osName, String osArch) {
+        String normalizedOs = osName.toLowerCase(Locale.ROOT);
+        String normalizedArch = osArch.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9_]+", "");
+        return (
+            (normalizedOs.contains("win")
+                ? "windows"
+                : normalizedOs.contains("mac") || normalizedOs.contains("darwin")
+                    ? "macos"
+                    : normalizedOs.contains("linux")
+                        ? "linux"
+                        : normalizedOs.replaceAll("[^a-z0-9]+", ""))
+                + "-"
+                + switch (normalizedArch) {
+                    case "x8664", "amd64", "x86_64" -> "x86_64";
+                    case "aarch64", "arm64" -> "aarch64";
+                    default -> normalizedArch;
+                }
+        );
+    }
+
     private record NativeKeyEncoder(GhosttyBindings bindings, MemorySegment handle) implements AutoCloseable {
         static NativeKeyEncoder create(GhosttyBindings bindings, Arena arena) {
             MemorySegment encoderOut = arena.allocate(ValueLayout.ADDRESS);
@@ -431,6 +498,12 @@ abstract class AbstractNativeProvider implements Provider {
         @Override
         public void close() {
             bindings.ghosttyKeyEventFree(handle);
+        }
+    }
+
+    private record RuntimeDescriptor(String id, String libraryExtension, ValueLayout.OfLong sizeTLayout) {
+        String libraryFileName() {
+            return "libghostty-vt-" + id + "." + libraryExtension;
         }
     }
 }
