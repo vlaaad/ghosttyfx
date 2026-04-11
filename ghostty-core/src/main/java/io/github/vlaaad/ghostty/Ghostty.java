@@ -33,7 +33,7 @@ public final class Ghostty {
         TerminalQueries queries,
         TerminalEvents events
     ) {
-        return NativeRuntime.current().open(config, ptyWriter, queries, events);
+        return NativeRuntime.instance().open(config, ptyWriter, queries, events);
     }
     
     /// Creates a standalone key codec for translating host key events into VT sequences.
@@ -41,7 +41,7 @@ public final class Ghostty {
     /// @param config key codec configuration
     /// @return key codec instance
     public static KeyCodec keyCodec(KeyCodecConfig config) {
-        return NativeRuntime.current().keyCodec(config);
+        return NativeRuntime.instance().keyCodec(config);
     }
     
     /// Creates a standalone mouse codec for translating host mouse events into VT sequences.
@@ -49,41 +49,41 @@ public final class Ghostty {
     /// @param config mouse codec configuration
     /// @return mouse codec instance
     public static MouseCodec mouseCodec(MouseCodecConfig config) {
-        return NativeRuntime.current().mouseCodec(config);
+        return NativeRuntime.instance().mouseCodec(config);
     }
     
     /// Creates a standalone paste codec.
     ///
     /// @return paste codec instance
     public static PasteCodec pasteCodec() {
-        return NativeRuntime.current().pasteCodec();
+        return NativeRuntime.instance().pasteCodec();
     }
     
     /// Creates a standalone focus codec.
     ///
     /// @return focus codec instance
     public static FocusCodec focusCodec() {
-        return NativeRuntime.current().focusCodec();
+        return NativeRuntime.instance().focusCodec();
     }
     
     /// Creates a standalone size-report codec.
     ///
     /// @return size report codec instance
     public static SizeReportCodec sizeReportCodec() {
-        return NativeRuntime.current().sizeReportCodec();
+        return NativeRuntime.instance().sizeReportCodec();
     }
     
     /// Gets build information.
     ///
     /// @return build information
     public static BuildInfo buildInfo() {
-        return NativeRuntime.current().buildInfo();
+        return NativeRuntime.instance().buildInfo();
     }
     
     /// Gets type schema.
     ///
     /// @return type schema
     public static TypeSchema typeSchema() {
-        return NativeRuntime.current().typeSchema();
+        return NativeRuntime.instance().typeSchema();
     }
 }

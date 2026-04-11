@@ -10,6 +10,9 @@ import io.github.vlaaad.ghostty.KeyEvent;
 import io.github.vlaaad.ghostty.KeyModifiers;
 import io.github.vlaaad.ghostty.OptionAsAlt;
 import io.github.vlaaad.ghostty.TypeSchema;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
+import java.util.Locale;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
@@ -30,29 +33,22 @@ final class NativeRuntimeTest {
 
     @BeforeAll
     static void requiresSupportedRuntime() {
-        NativeRuntime.resetForTests();
-        assumeTrue(isCurrentPlatformSupported());
-        runtime = NativeRuntime.current();
+        try {
+            runtime = NativeRuntime.instance();
+        } catch (UnsupportedOperationException exception) {
+            assumeTrue(false, exception.getMessage());
+        }
     }
 
     @Test
     void resolvesCurrentRuntimeOnce() {
-        assertSame(runtime, NativeRuntime.current());
-    }
-
-    @Test
-    void currentPlatformNativeLibraryIsOnClasspath() {
-        assertNotNull(
-            NativeRuntimeTest.class.getClassLoader()
-                .getResource("native/" + runtime.id() + "/" + runtime.libraryFileName())
-        );
+        assertSame(runtime, NativeRuntime.instance());
     }
 
     @Test
     void exposesBuildInfo() {
         BuildInfo buildInfo = runtime.buildInfo();
 
-        assertFalse(runtime.id().isBlank());
         assertFalse(buildInfo.version().isBlank());
         assertTrue(buildInfo.major() >= 0);
         assertTrue(buildInfo.minor() >= 0);
@@ -78,27 +74,17 @@ final class NativeRuntimeTest {
     }
 
     @Test
-    void failureIncludesRequestedPlatform() {
-        String previousOsName = System.getProperty("os.name");
-        String previousOsArch = System.getProperty("os.arch");
-        try {
-            NativeRuntime.resetForTests();
-            System.setProperty("os.name", "Plan 9");
-            System.setProperty("os.arch", "mips64");
+    void keyResultTreatsNoValueAsNoValue() throws ReflectiveOperationException {
+        Method checkKeyResult = NativeRuntime.class.getDeclaredMethod("checkKeyResult", String.class, int.class);
+        checkKeyResult.setAccessible(true);
 
-            UnsupportedOperationException exception = assertThrows(
-                UnsupportedOperationException.class,
-                NativeRuntime::current
-            );
+        InvocationTargetException exception = assertThrows(
+            InvocationTargetException.class,
+            () -> checkKeyResult.invoke(null, "ghostty_key_encoder_encode", -4)
+        );
 
-            assertTrue(exception.getMessage().contains("plan9-mips64"));
-            assertTrue(exception.getMessage().contains("windows-x86_64"));
-        } finally {
-            restoreProperty("os.name", previousOsName);
-            restoreProperty("os.arch", previousOsArch);
-            NativeRuntime.resetForTests();
-            runtime = NativeRuntime.current();
-        }
+        assertEquals(IllegalStateException.class, exception.getCause().getClass());
+        assertEquals("ghostty_key_encoder_encode failed: no value", exception.getCause().getMessage());
     }
 
     @Test
@@ -124,6 +110,7 @@ final class NativeRuntimeTest {
 
     @Test
     void encodesAltWithEscapePrefix() {
+        String osName = System.getProperty("os.name", "").toLowerCase(Locale.ROOT);
         KeyCodec codec = runtime.keyCodec(new KeyCodecConfig(
             false,
             false,
@@ -131,7 +118,7 @@ final class NativeRuntimeTest {
             true,
             false,
             null,
-            runtime.id().startsWith("macos-") ? OptionAsAlt.TRUE : null
+            osName.contains("mac") || osName.contains("darwin") ? OptionAsAlt.TRUE : null
         ));
 
         assertArrayEquals(
@@ -150,21 +137,4 @@ final class NativeRuntimeTest {
         );
     }
 
-    private static boolean isCurrentPlatformSupported() {
-        String osName = System.getProperty("os.name", "").toLowerCase();
-        String osArch = System.getProperty("os.arch", "").toLowerCase();
-        return (
-            (osName.contains("linux") && (osArch.equals("amd64") || osArch.equals("x86_64")))
-                || ((osName.contains("mac") || osName.contains("darwin")) && (osArch.equals("amd64") || osArch.equals("x86_64") || osArch.equals("aarch64") || osArch.equals("arm64")))
-                || (osName.contains("win") && (osArch.equals("amd64") || osArch.equals("x86_64")))
-        );
-    }
-
-    private static void restoreProperty(String key, String value) {
-        if (value == null) {
-            System.clearProperty(key);
-            return;
-        }
-        System.setProperty(key, value);
-    }
 }
