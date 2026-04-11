@@ -45,7 +45,7 @@ final class NativeMetadata {
     BuildInfo buildInfo() {
         try (var arena = Arena.ofConfined()) {
             var versionOut = NativeString.allocate(arena);
-            NativeRuntime.callStatus(
+            NativeRuntime.invokeStatus(
                 ghosttyBuildInfo,
                 "ghostty_build_info(version_string)",
                 GHOSTTY_BUILD_INFO_VERSION_STRING,
@@ -53,7 +53,7 @@ final class NativeMetadata {
             );
 
             var majorOut = arena.allocate(NativeRuntime.SIZE_T_LAYOUT);
-            NativeRuntime.callStatus(
+            NativeRuntime.invokeStatus(
                 ghosttyBuildInfo,
                 "ghostty_build_info(version_major)",
                 GHOSTTY_BUILD_INFO_VERSION_MAJOR,
@@ -61,7 +61,7 @@ final class NativeMetadata {
             );
 
             var minorOut = arena.allocate(NativeRuntime.SIZE_T_LAYOUT);
-            NativeRuntime.callStatus(
+            NativeRuntime.invokeStatus(
                 ghosttyBuildInfo,
                 "ghostty_build_info(version_minor)",
                 GHOSTTY_BUILD_INFO_VERSION_MINOR,
@@ -69,7 +69,7 @@ final class NativeMetadata {
             );
 
             var patchOut = arena.allocate(NativeRuntime.SIZE_T_LAYOUT);
-            NativeRuntime.callStatus(
+            NativeRuntime.invokeStatus(
                 ghosttyBuildInfo,
                 "ghostty_build_info(version_patch)",
                 GHOSTTY_BUILD_INFO_VERSION_PATCH,
@@ -77,7 +77,7 @@ final class NativeMetadata {
             );
 
             var buildOut = NativeString.allocate(arena);
-            NativeRuntime.callStatus(
+            NativeRuntime.invokeStatus(
                 ghosttyBuildInfo,
                 "ghostty_build_info(version_build)",
                 GHOSTTY_BUILD_INFO_VERSION_BUILD,
@@ -85,7 +85,7 @@ final class NativeMetadata {
             );
 
             var optimizeOut = arena.allocate(ValueLayout.JAVA_INT);
-            NativeRuntime.callStatus(
+            NativeRuntime.invokeStatus(
                 ghosttyBuildInfo,
                 "ghostty_build_info(optimize)",
                 GHOSTTY_BUILD_INFO_OPTIMIZE,
@@ -93,7 +93,7 @@ final class NativeMetadata {
             );
 
             var simdOut = arena.allocate(ValueLayout.JAVA_BOOLEAN);
-            NativeRuntime.callStatus(
+            NativeRuntime.invokeStatus(
                 ghosttyBuildInfo,
                 "ghostty_build_info(simd)",
                 GHOSTTY_BUILD_INFO_SIMD,
@@ -101,7 +101,7 @@ final class NativeMetadata {
             );
 
             var kittyGraphicsOut = arena.allocate(ValueLayout.JAVA_BOOLEAN);
-            NativeRuntime.callStatus(
+            NativeRuntime.invokeStatus(
                 ghosttyBuildInfo,
                 "ghostty_build_info(kitty_graphics)",
                 GHOSTTY_BUILD_INFO_KITTY_GRAPHICS,
@@ -109,7 +109,7 @@ final class NativeMetadata {
             );
 
             var tmuxControlModeOut = arena.allocate(ValueLayout.JAVA_BOOLEAN);
-            NativeRuntime.callStatus(
+            NativeRuntime.invokeStatus(
                 ghosttyBuildInfo,
                 "ghostty_build_info(tmux_control_mode)",
                 GHOSTTY_BUILD_INFO_TMUX_CONTROL_MODE,
@@ -147,7 +147,7 @@ final class NativeMetadata {
     }
 
     TypeSchema typeSchema() {
-        var jsonPointer = NativeRuntime.invokeAddress(ghosttyTypeJson, "ghostty_type_json");
+        MemorySegment jsonPointer = NativeRuntime.invoke(ghosttyTypeJson);
         if (jsonPointer.address() == 0L) {
             throw new IllegalStateException("ghostty_type_json() returned a null pointer");
         }

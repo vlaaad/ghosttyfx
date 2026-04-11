@@ -81,11 +81,22 @@ final class NativeRuntimeTest {
 
         var exception = assertThrows(
             ResultException.class,
-            () -> NativeRuntime.callStatus(handle, "ghostty_key_encoder_encode", 0, MemorySegment.NULL)
+            () -> NativeRuntime.invokeStatus(handle, "ghostty_key_encoder_encode", 0, MemorySegment.NULL)
         );
 
         assertEquals(-4, exception.result);
         assertEquals("ghostty_key_encoder_encode failed: no value", exception.getMessage());
+    }
+
+    @Test
+    void invokeRethrowsCheckedException() throws ReflectiveOperationException {
+        var handle = MethodHandles.lookup().findStatic(
+            NativeRuntimeTest.class,
+            "throwChecked",
+            MethodType.methodType(int.class)
+        );
+
+        assertThrows(CheckedFailure.class, () -> NativeRuntime.<Integer>invoke(handle));
     }
 
     @Test
@@ -140,5 +151,12 @@ final class NativeRuntimeTest {
 
     private static int returnNoValue(int ignored, MemorySegment out) {
         return -4;
+    }
+
+    private static int throwChecked() throws CheckedFailure {
+        throw new CheckedFailure();
+    }
+
+    private static final class CheckedFailure extends Exception {
     }
 }
