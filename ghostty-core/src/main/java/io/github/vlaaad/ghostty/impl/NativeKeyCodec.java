@@ -125,51 +125,25 @@ public final class NativeKeyCodec {
 
     public KeyCodec keyCodec(KeyCodecConfig config) {
         Objects.requireNonNull(config, "config");
-        return event -> {
-            Objects.requireNonNull(event, "event");
-
-            try (var arena = Arena.ofConfined()) {
-                try (var encoder = NativeKeyEncoder.create(this, arena);
-                     var keyEvent = NativeKeyEvent.create(this, arena)) {
-                    configureEncoder(arena, encoder.handle(), config);
-                    populateKeyEvent(arena, keyEvent.handle(), event);
-
-                    var outLen = arena.allocate(NativeRuntime.SIZE_T_LAYOUT);
-                    try {
-                        NativeRuntime.invokeStatus(
-                            ghosttyKeyEncoderEncode,
-                            "ghostty_key_encoder_encode",
-                            encoder.handle(),
-                            keyEvent.handle(),
-                            MemorySegment.NULL,
-                            0L,
-                            outLen
-                        );
-                    } catch (ResultException exception) {
-                        if (exception.result != NativeRuntime.GHOSTTY_OUT_OF_SPACE) {
-                            throw exception;
-                        }
-                    }
-
-                    var required = outLen.get(NativeRuntime.SIZE_T_LAYOUT, 0);
-                    if (required == 0) {
-                        return new byte[0];
-                    }
-
-                    var out = arena.allocate(required);
-                    NativeRuntime.invokeStatus(
-                        ghosttyKeyEncoderEncode,
-                        "ghostty_key_encoder_encode",
-                        encoder.handle(),
-                        keyEvent.handle(),
-                        out,
-                        required,
-                        outLen
-                    );
-                    return out.asSlice(0, outLen.get(NativeRuntime.SIZE_T_LAYOUT, 0)).toArray(ValueLayout.JAVA_BYTE);
-                }
+        try (var arena = Arena.ofConfined()) {
+            var encoderOut = arena.allocate(ValueLayout.ADDRESS);
+            NativeRuntime.invokeStatus(
+                ghosttyKeyEncoderNew,
+                "ghostty_key_encoder_new",
+                MemorySegment.NULL,
+                encoderOut
+            );
+            var handleAddress = encoderOut.get(ValueLayout.ADDRESS, 0).address();
+            try {
+                configureEncoder(arena, MemorySegment.ofAddress(handleAddress), config);
+                KeyCodec keyCodec = event -> encode(MemorySegment.ofAddress(handleAddress), event);
+                NativeRuntime.CLEANER.register(keyCodec, () -> freeEncoder(handleAddress));
+                return keyCodec;
+            } catch (RuntimeException exception) {
+                freeEncoder(handleAddress);
+                throw exception;
             }
-        };
+        }
     }
 
     private void configureEncoder(Arena arena, MemorySegment encoder, KeyCodecConfig config) {
@@ -231,22 +205,72 @@ public final class NativeKeyCodec {
         NativeRuntime.invoke(ghosttyKeyEncoderSetopt, encoder, option, segment);
     }
 
-    private void populateKeyEvent(Arena arena, MemorySegment keyEvent, KeyEvent event) {
-        NativeRuntime.invoke(ghosttyKeyEventSetAction, keyEvent, event.action().ordinal());
-        NativeRuntime.invoke(ghosttyKeyEventSetKey, keyEvent, event.key().ordinal());
-        NativeRuntime.invoke(ghosttyKeyEventSetMods, keyEvent, toGhosttyMods(event.modifiers()));
-        NativeRuntime.invoke(ghosttyKeyEventSetConsumedMods, keyEvent, toGhosttyMods(event.consumedModifiers()));
-        NativeRuntime.invoke(ghosttyKeyEventSetComposing, keyEvent, event.composing());
-        var utf8 = event.utf8();
-        if (utf8 == null || utf8.isEmpty()) {
-            NativeRuntime.invoke(ghosttyKeyEventSetUtf8, keyEvent, MemorySegment.NULL, 0L);
-        } else {
-            var bytes = utf8.getBytes(StandardCharsets.UTF_8);
-            var segment = arena.allocate(bytes.length);
-            segment.asByteBuffer().put(bytes);
-            NativeRuntime.invoke(ghosttyKeyEventSetUtf8, keyEvent, segment, (long) bytes.length);
+    private byte[] encode(MemorySegment encoder, KeyEvent event) {
+        Objects.requireNonNull(event, "event");
+        try (var arena = Arena.ofConfined();
+             var keyEvent = NativeKeyEvent.create(this, arena)) {
+            // Populate the transient native key event from the immutable Java record.
+            NativeRuntime.invoke(ghosttyKeyEventSetAction, keyEvent.handle(), event.action().ordinal());
+            NativeRuntime.invoke(ghosttyKeyEventSetKey, keyEvent.handle(), event.key().ordinal());
+            NativeRuntime.invoke(ghosttyKeyEventSetMods, keyEvent.handle(), toGhosttyMods(event.modifiers()));
+            NativeRuntime.invoke(
+                ghosttyKeyEventSetConsumedMods,
+                keyEvent.handle(),
+                toGhosttyMods(event.consumedModifiers())
+            );
+            NativeRuntime.invoke(ghosttyKeyEventSetComposing, keyEvent.handle(), event.composing());
+            var utf8 = event.utf8();
+            if (utf8 == null || utf8.isEmpty()) {
+                NativeRuntime.invoke(ghosttyKeyEventSetUtf8, keyEvent.handle(), MemorySegment.NULL, 0L);
+            } else {
+                var bytes = utf8.getBytes(StandardCharsets.UTF_8);
+                var segment = arena.allocate(bytes.length);
+                segment.asByteBuffer().put(bytes);
+                NativeRuntime.invoke(ghosttyKeyEventSetUtf8, keyEvent.handle(), segment, (long) bytes.length);
+            }
+            NativeRuntime.invoke(ghosttyKeyEventSetUnshiftedCodepoint, keyEvent.handle(), event.unshiftedCodePoint());
+
+            // Probe the required output size, then encode into an exact-sized buffer.
+            var outLen = arena.allocate(NativeRuntime.SIZE_T_LAYOUT);
+            try {
+                NativeRuntime.invokeStatus(
+                    ghosttyKeyEncoderEncode,
+                    "ghostty_key_encoder_encode",
+                    encoder,
+                    keyEvent.handle(),
+                    MemorySegment.NULL,
+                    0L,
+                    outLen
+                );
+            } catch (ResultException exception) {
+                if (exception.result != NativeRuntime.GHOSTTY_OUT_OF_SPACE) {
+                    throw exception;
+                }
+            }
+
+            var required = outLen.get(NativeRuntime.SIZE_T_LAYOUT, 0);
+            if (required == 0) {
+                return new byte[0];
+            }
+
+            var out = arena.allocate(required);
+            NativeRuntime.invokeStatus(
+                ghosttyKeyEncoderEncode,
+                "ghostty_key_encoder_encode",
+                encoder,
+                keyEvent.handle(),
+                out,
+                required,
+                outLen
+            );
+            return out.asSlice(0, outLen.get(NativeRuntime.SIZE_T_LAYOUT, 0)).toArray(ValueLayout.JAVA_BYTE);
         }
-        NativeRuntime.invoke(ghosttyKeyEventSetUnshiftedCodepoint, keyEvent, event.unshiftedCodePoint());
+    }
+
+    private void freeEncoder(long handleAddress) {
+        if (handleAddress != 0L) {
+            NativeRuntime.invoke(ghosttyKeyEncoderFree, MemorySegment.ofAddress(handleAddress));
+        }
     }
 
     private static short toGhosttyMods(KeyModifiers modifiers) {
@@ -310,19 +334,6 @@ public final class NativeKeyCodec {
             result |= GHOSTTY_KITTY_KEY_REPORT_ASSOCIATED;
         }
         return (byte) result;
-    }
-
-    private record NativeKeyEncoder(NativeKeyCodec codec, MemorySegment handle) implements AutoCloseable {
-        static NativeKeyEncoder create(NativeKeyCodec codec, Arena arena) {
-            var encoderOut = arena.allocate(ValueLayout.ADDRESS);
-            NativeRuntime.invokeStatus(codec.ghosttyKeyEncoderNew, "ghostty_key_encoder_new", MemorySegment.NULL, encoderOut);
-            return new NativeKeyEncoder(codec, encoderOut.get(ValueLayout.ADDRESS, 0));
-        }
-
-        @Override
-        public void close() {
-            NativeRuntime.invoke(codec.ghosttyKeyEncoderFree, handle);
-        }
     }
 
     private record NativeKeyEvent(NativeKeyCodec codec, MemorySegment handle) implements AutoCloseable {

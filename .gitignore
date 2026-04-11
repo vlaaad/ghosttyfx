@@ -9,3 +9,4 @@ __pycache__
 /ghostty-macos-aarch64/target
 /ghostty-macos-x86_64/target
 /ghostty-windows-x86_64/target
+hs_err_pid*.log

@@ -1,5 +1,7 @@
 package io.github.vlaaad.ghostty;
 
 /// Mouse codec configuration record.
-/// This is a simplified placeholder - full implementation would include all configuration options.
+///
+/// The native mouse encoder currently has no creation-time options;
+/// encoding behavior is controlled per call through {@link MouseEncodeContext}.
 public record MouseCodecConfig() {}

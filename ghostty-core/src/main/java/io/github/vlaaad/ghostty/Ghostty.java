@@ -50,8 +50,7 @@ public final class Ghostty {
     /// @param config mouse codec configuration
     /// @return mouse codec instance
     public static MouseCodec mouseCodec(MouseCodecConfig config) {
-        NativeRuntime.instance();
-        throw new UnsupportedOperationException("Not yet implemented");
+        return NativeRuntime.instance().nativeMouseCodec.mouseCodec(config);
     }
     
     /// Creates a standalone paste codec.

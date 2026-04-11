@@ -6,6 +6,7 @@ import java.lang.foreign.Linker;
 import java.lang.foreign.SymbolLookup;
 import java.lang.foreign.ValueLayout;
 import java.lang.invoke.MethodHandle;
+import java.lang.ref.Cleaner;
 import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
 import java.util.Locale;
@@ -18,9 +19,11 @@ public final class NativeRuntime {
     static final int GHOSTTY_NO_VALUE = -4;
 
     static final ValueLayout.OfLong SIZE_T_LAYOUT = ValueLayout.JAVA_LONG;
+    static final Cleaner CLEANER = Cleaner.create();
 
     public final NativeMetadata metadata;
     public final NativeKeyCodec nativeKeyCodec;
+    public final NativeMouseCodec nativeMouseCodec;
 
     private NativeRuntime() {
         var osName = System.getProperty("os.name", "");
@@ -76,6 +79,7 @@ public final class NativeRuntime {
         var lookup = SymbolLookup.loaderLookup();
         metadata = new NativeMetadata(lookup);
         nativeKeyCodec = new NativeKeyCodec(lookup);
+        nativeMouseCodec = new NativeMouseCodec(lookup);
     }
 
     public static NativeRuntime instance() {
