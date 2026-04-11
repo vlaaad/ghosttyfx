@@ -45,7 +45,7 @@ final class NativeRuntimeTest {
 
     @Test
     void exposesBuildInfo() {
-        var buildInfo = runtime.buildInfo();
+        var buildInfo = runtime.metadata.buildInfo();
 
         assertFalse(buildInfo.version().isBlank());
         assertTrue(buildInfo.major() >= 0);
@@ -58,7 +58,7 @@ final class NativeRuntimeTest {
 
     @Test
     void exposesTypeSchema() {
-        var schema = runtime.typeSchema();
+        var schema = runtime.metadata.typeSchema();
 
         assertFalse(schema.json().isBlank());
         assertTrue(schema.json().startsWith("{"));
@@ -67,8 +67,8 @@ final class NativeRuntimeTest {
 
     @Test
     void ghosttyMetadataMethodsStillUseCurrentRuntime() {
-        assertEquals(runtime.buildInfo(), Ghostty.buildInfo());
-        assertEquals(runtime.typeSchema(), Ghostty.typeSchema());
+        assertEquals(runtime.metadata.buildInfo(), Ghostty.buildInfo());
+        assertEquals(runtime.metadata.typeSchema(), Ghostty.typeSchema());
     }
 
     @Test
@@ -101,7 +101,7 @@ final class NativeRuntimeTest {
 
     @Test
     void encodesCtrlC() {
-        var codec = runtime.keyCodec(new KeyCodecConfig(false, false, false, false, false, null, null));
+        var codec = runtime.nativeKeyCodec.keyCodec(new KeyCodecConfig(false, false, false, false, false, null, null));
 
         assertArrayEquals(
             new byte[] {0x03},
@@ -113,8 +113,8 @@ final class NativeRuntimeTest {
     void encodesArrowUpInNormalAndApplicationModes() {
         var event = new KeyEvent(KeyAction.PRESS, Key.ARROW_UP, NO_MODS, NO_MODS, false, null, 0);
 
-        var normal = runtime.keyCodec(new KeyCodecConfig(false, false, false, false, false, null, null));
-        var application = runtime.keyCodec(new KeyCodecConfig(true, false, false, false, false, null, null));
+        var normal = runtime.nativeKeyCodec.keyCodec(new KeyCodecConfig(false, false, false, false, false, null, null));
+        var application = runtime.nativeKeyCodec.keyCodec(new KeyCodecConfig(true, false, false, false, false, null, null));
 
         assertArrayEquals(new byte[] {0x1b, '[', 'A'}, normal.encode(event));
         assertArrayEquals(new byte[] {0x1b, 'O', 'A'}, application.encode(event));
@@ -123,7 +123,7 @@ final class NativeRuntimeTest {
     @Test
     void encodesAltWithEscapePrefix() {
         var osName = System.getProperty("os.name", "").toLowerCase(Locale.ROOT);
-        var codec = runtime.keyCodec(new KeyCodecConfig(
+        var codec = runtime.nativeKeyCodec.keyCodec(new KeyCodecConfig(
             false,
             false,
             false,
@@ -141,7 +141,7 @@ final class NativeRuntimeTest {
 
     @Test
     void modifierKeyPressProducesNoBytes() {
-        var codec = runtime.keyCodec(new KeyCodecConfig(false, false, false, false, false, null, null));
+        var codec = runtime.nativeKeyCodec.keyCodec(new KeyCodecConfig(false, false, false, false, false, null, null));
 
         assertArrayEquals(
             new byte[0],

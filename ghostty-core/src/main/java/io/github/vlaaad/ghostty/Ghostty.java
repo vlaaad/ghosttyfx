@@ -33,7 +33,8 @@ public final class Ghostty {
         TerminalQueries queries,
         TerminalEvents events
     ) {
-        return NativeRuntime.instance().open(config, ptyWriter, queries, events);
+        NativeRuntime.instance();
+        throw new UnsupportedOperationException("Not yet implemented");
     }
     
     /// Creates a standalone key codec for translating host key events into VT sequences.
@@ -41,7 +42,7 @@ public final class Ghostty {
     /// @param config key codec configuration
     /// @return key codec instance
     public static KeyCodec keyCodec(KeyCodecConfig config) {
-        return NativeRuntime.instance().keyCodec(config);
+        return NativeRuntime.instance().nativeKeyCodec.keyCodec(config);
     }
     
     /// Creates a standalone mouse codec for translating host mouse events into VT sequences.
@@ -49,41 +50,45 @@ public final class Ghostty {
     /// @param config mouse codec configuration
     /// @return mouse codec instance
     public static MouseCodec mouseCodec(MouseCodecConfig config) {
-        return NativeRuntime.instance().mouseCodec(config);
+        NativeRuntime.instance();
+        throw new UnsupportedOperationException("Not yet implemented");
     }
     
     /// Creates a standalone paste codec.
     ///
     /// @return paste codec instance
     public static PasteCodec pasteCodec() {
-        return NativeRuntime.instance().pasteCodec();
+        NativeRuntime.instance();
+        throw new UnsupportedOperationException("Not yet implemented");
     }
     
     /// Creates a standalone focus codec.
     ///
     /// @return focus codec instance
     public static FocusCodec focusCodec() {
-        return NativeRuntime.instance().focusCodec();
+        NativeRuntime.instance();
+        throw new UnsupportedOperationException("Not yet implemented");
     }
     
     /// Creates a standalone size-report codec.
     ///
     /// @return size report codec instance
     public static SizeReportCodec sizeReportCodec() {
-        return NativeRuntime.instance().sizeReportCodec();
+        NativeRuntime.instance();
+        throw new UnsupportedOperationException("Not yet implemented");
     }
     
     /// Gets build information.
     ///
     /// @return build information
     public static BuildInfo buildInfo() {
-        return NativeRuntime.instance().buildInfo();
+        return NativeRuntime.instance().metadata.buildInfo();
     }
     
     /// Gets type schema.
     ///
     /// @return type schema
     public static TypeSchema typeSchema() {
-        return NativeRuntime.instance().typeSchema();
+        return NativeRuntime.instance().metadata.typeSchema();
     }
 }

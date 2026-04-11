@@ -13,7 +13,7 @@ import java.lang.invoke.MethodHandle;
 import java.util.EnumSet;
 import java.util.Set;
 
-final class NativeMetadata {
+public final class NativeMetadata {
     private static final int GHOSTTY_OPTIMIZE_DEBUG = 0;
     private static final int GHOSTTY_OPTIMIZE_RELEASE_SAFE = 1;
     private static final int GHOSTTY_OPTIMIZE_RELEASE_SMALL = 2;
@@ -32,8 +32,8 @@ final class NativeMetadata {
     private final MethodHandle ghosttyTypeJson;
     private final MethodHandle ghosttyBuildInfo;
 
-    NativeMetadata() {
-        var lookup = SymbolLookup.loaderLookup();
+    NativeMetadata(SymbolLookup lookup) {
+        java.util.Objects.requireNonNull(lookup, "lookup");
         ghosttyTypeJson = NativeRuntime.bind(lookup, "ghostty_type_json", FunctionDescriptor.of(ValueLayout.ADDRESS));
         ghosttyBuildInfo = NativeRuntime.bind(lookup, "ghostty_build_info", FunctionDescriptor.of(
             ValueLayout.JAVA_INT,
@@ -42,7 +42,7 @@ final class NativeMetadata {
         ));
     }
 
-    BuildInfo buildInfo() {
+    public BuildInfo buildInfo() {
         try (var arena = Arena.ofConfined()) {
             var versionOut = NativeString.allocate(arena);
             NativeRuntime.invokeStatus(
@@ -146,7 +146,7 @@ final class NativeMetadata {
         }
     }
 
-    TypeSchema typeSchema() {
+    public TypeSchema typeSchema() {
         MemorySegment jsonPointer = NativeRuntime.invoke(ghosttyTypeJson);
         if (jsonPointer.address() == 0L) {
             throw new IllegalStateException("ghostty_type_json() returned a null pointer");

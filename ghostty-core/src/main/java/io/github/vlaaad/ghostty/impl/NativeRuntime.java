@@ -1,85 +1,26 @@
 package io.github.vlaaad.ghostty.impl;
 
-import io.github.vlaaad.ghostty.BuildInfo;
-import io.github.vlaaad.ghostty.FocusCodec;
-import io.github.vlaaad.ghostty.KeyCodec;
-import io.github.vlaaad.ghostty.KeyCodecConfig;
-import io.github.vlaaad.ghostty.KeyModifiers;
-import io.github.vlaaad.ghostty.MouseCodec;
-import io.github.vlaaad.ghostty.MouseCodecConfig;
-import io.github.vlaaad.ghostty.ModifierSide;
-import io.github.vlaaad.ghostty.PasteCodec;
-import io.github.vlaaad.ghostty.PtyWriter;
-import io.github.vlaaad.ghostty.SizeReportCodec;
-import io.github.vlaaad.ghostty.TerminalConfig;
-import io.github.vlaaad.ghostty.TerminalEvents;
-import io.github.vlaaad.ghostty.TerminalQueries;
-import io.github.vlaaad.ghostty.TerminalSession;
-import io.github.vlaaad.ghostty.TypeSchema;
 import java.io.IOException;
-import java.lang.foreign.AddressLayout;
-import java.lang.foreign.Arena;
 import java.lang.foreign.FunctionDescriptor;
 import java.lang.foreign.Linker;
-import java.lang.foreign.MemorySegment;
 import java.lang.foreign.SymbolLookup;
 import java.lang.foreign.ValueLayout;
 import java.lang.invoke.MethodHandle;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
 import java.util.Locale;
-import java.util.Objects;
 
 public final class NativeRuntime {
-    private static final int GHOSTTY_SUCCESS = 0;
-    private static final int GHOSTTY_OUT_OF_MEMORY = -1;
-    private static final int GHOSTTY_INVALID_VALUE = -2;
-    private static final int GHOSTTY_OUT_OF_SPACE = -3;
-    private static final int GHOSTTY_NO_VALUE = -4;
+    static final int GHOSTTY_SUCCESS = 0;
+    static final int GHOSTTY_OUT_OF_MEMORY = -1;
+    static final int GHOSTTY_INVALID_VALUE = -2;
+    static final int GHOSTTY_OUT_OF_SPACE = -3;
+    static final int GHOSTTY_NO_VALUE = -4;
 
-    private static final int GHOSTTY_KEY_ENCODER_OPT_CURSOR_KEY_APPLICATION = 0;
-    private static final int GHOSTTY_KEY_ENCODER_OPT_KEYPAD_KEY_APPLICATION = 1;
-    private static final int GHOSTTY_KEY_ENCODER_OPT_IGNORE_KEYPAD_WITH_NUMLOCK = 2;
-    private static final int GHOSTTY_KEY_ENCODER_OPT_ALT_ESC_PREFIX = 3;
-    private static final int GHOSTTY_KEY_ENCODER_OPT_MODIFY_OTHER_KEYS_STATE_2 = 4;
-    private static final int GHOSTTY_KEY_ENCODER_OPT_KITTY_FLAGS = 5;
-    private static final int GHOSTTY_KEY_ENCODER_OPT_MACOS_OPTION_AS_ALT = 6;
-
-    private static final int GHOSTTY_MODS_SHIFT = 1;
-    private static final int GHOSTTY_MODS_CTRL = 2;
-    private static final int GHOSTTY_MODS_ALT = 4;
-    private static final int GHOSTTY_MODS_SUPER = 8;
-    private static final int GHOSTTY_MODS_CAPS_LOCK = 16;
-    private static final int GHOSTTY_MODS_NUM_LOCK = 32;
-    private static final int GHOSTTY_MODS_SHIFT_SIDE = 64;
-    private static final int GHOSTTY_MODS_CTRL_SIDE = 128;
-    private static final int GHOSTTY_MODS_ALT_SIDE = 256;
-    private static final int GHOSTTY_MODS_SUPER_SIDE = 512;
-
-    private static final int GHOSTTY_KITTY_KEY_DISAMBIGUATE = 1;
-    private static final int GHOSTTY_KITTY_KEY_REPORT_EVENTS = 2;
-    private static final int GHOSTTY_KITTY_KEY_REPORT_ALTERNATES = 4;
-    private static final int GHOSTTY_KITTY_KEY_REPORT_ALL = 8;
-    private static final int GHOSTTY_KITTY_KEY_REPORT_ASSOCIATED = 16;
-
-    private static final AddressLayout C_POINTER = ValueLayout.ADDRESS;
     static final ValueLayout.OfLong SIZE_T_LAYOUT = ValueLayout.JAVA_LONG;
 
-    private final NativeMetadata metadata;
-    private final MethodHandle ghosttyKeyEncoderNew;
-    private final MethodHandle ghosttyKeyEncoderFree;
-    private final MethodHandle ghosttyKeyEncoderSetopt;
-    private final MethodHandle ghosttyKeyEncoderEncode;
-    private final MethodHandle ghosttyKeyEventNew;
-    private final MethodHandle ghosttyKeyEventFree;
-    private final MethodHandle ghosttyKeyEventSetAction;
-    private final MethodHandle ghosttyKeyEventSetKey;
-    private final MethodHandle ghosttyKeyEventSetMods;
-    private final MethodHandle ghosttyKeyEventSetConsumedMods;
-    private final MethodHandle ghosttyKeyEventSetComposing;
-    private final MethodHandle ghosttyKeyEventSetUtf8;
-    private final MethodHandle ghosttyKeyEventSetUnshiftedCodepoint;
+    public final NativeMetadata metadata;
+    public final NativeKeyCodec nativeKeyCodec;
 
     private NativeRuntime() {
         var osName = System.getProperty("os.name", "");
@@ -132,303 +73,13 @@ public final class NativeRuntime {
             throw sneakyThrow(exception);
         }
 
-        metadata = new NativeMetadata();
-
         var lookup = SymbolLookup.loaderLookup();
-        ghosttyKeyEncoderNew = bind(lookup, "ghostty_key_encoder_new", FunctionDescriptor.of(
-            ValueLayout.JAVA_INT,
-            C_POINTER,
-            C_POINTER
-        ));
-        ghosttyKeyEncoderFree = bind(lookup, "ghostty_key_encoder_free", FunctionDescriptor.ofVoid(C_POINTER));
-        ghosttyKeyEncoderSetopt = bind(lookup, "ghostty_key_encoder_setopt", FunctionDescriptor.ofVoid(
-            C_POINTER,
-            ValueLayout.JAVA_INT,
-            C_POINTER
-        ));
-        ghosttyKeyEncoderEncode = bind(lookup, "ghostty_key_encoder_encode", FunctionDescriptor.of(
-            ValueLayout.JAVA_INT,
-            C_POINTER,
-            C_POINTER,
-            C_POINTER,
-            SIZE_T_LAYOUT,
-            C_POINTER
-        ));
-        ghosttyKeyEventNew = bind(lookup, "ghostty_key_event_new", FunctionDescriptor.of(
-            ValueLayout.JAVA_INT,
-            C_POINTER,
-            C_POINTER
-        ));
-        ghosttyKeyEventFree = bind(lookup, "ghostty_key_event_free", FunctionDescriptor.ofVoid(C_POINTER));
-        ghosttyKeyEventSetAction = bind(lookup, "ghostty_key_event_set_action", FunctionDescriptor.ofVoid(
-            C_POINTER,
-            ValueLayout.JAVA_INT
-        ));
-        ghosttyKeyEventSetKey = bind(lookup, "ghostty_key_event_set_key", FunctionDescriptor.ofVoid(
-            C_POINTER,
-            ValueLayout.JAVA_INT
-        ));
-        ghosttyKeyEventSetMods = bind(lookup, "ghostty_key_event_set_mods", FunctionDescriptor.ofVoid(
-            C_POINTER,
-            ValueLayout.JAVA_SHORT
-        ));
-        ghosttyKeyEventSetConsumedMods = bind(lookup, "ghostty_key_event_set_consumed_mods", FunctionDescriptor.ofVoid(
-            C_POINTER,
-            ValueLayout.JAVA_SHORT
-        ));
-        ghosttyKeyEventSetComposing = bind(lookup, "ghostty_key_event_set_composing", FunctionDescriptor.ofVoid(
-            C_POINTER,
-            ValueLayout.JAVA_BOOLEAN
-        ));
-        ghosttyKeyEventSetUtf8 = bind(lookup, "ghostty_key_event_set_utf8", FunctionDescriptor.ofVoid(
-            C_POINTER,
-            C_POINTER,
-            SIZE_T_LAYOUT
-        ));
-        ghosttyKeyEventSetUnshiftedCodepoint = bind(
-            lookup,
-            "ghostty_key_event_set_unshifted_codepoint",
-            FunctionDescriptor.ofVoid(C_POINTER, ValueLayout.JAVA_INT)
-        );
-    }
-
-    public final KeyCodec keyCodec(KeyCodecConfig config) {
-        Objects.requireNonNull(config, "config");
-        return event -> encodeKey(config, event);
-    }
-
-    public final TerminalSession open(TerminalConfig config, PtyWriter ptyWriter, TerminalQueries queries, TerminalEvents events) {
-        throw new UnsupportedOperationException("Not yet implemented");
-    }
-
-    public final MouseCodec mouseCodec(MouseCodecConfig config) {
-        throw new UnsupportedOperationException("Not yet implemented");
-    }
-
-    public final PasteCodec pasteCodec() {
-        throw new UnsupportedOperationException("Not yet implemented");
-    }
-
-    public final FocusCodec focusCodec() {
-        throw new UnsupportedOperationException("Not yet implemented");
-    }
-
-    public final SizeReportCodec sizeReportCodec() {
-        throw new UnsupportedOperationException("Not yet implemented");
-    }
-
-    public final BuildInfo buildInfo() {
-        return metadata.buildInfo();
-    }
-
-    public final TypeSchema typeSchema() {
-        return metadata.typeSchema();
+        metadata = new NativeMetadata(lookup);
+        nativeKeyCodec = new NativeKeyCodec(lookup);
     }
 
     public static NativeRuntime instance() {
         return Holder.INSTANCE;
-    }
-
-    private byte[] encodeKey(KeyCodecConfig config, io.github.vlaaad.ghostty.KeyEvent event) {
-        Objects.requireNonNull(event, "event");
-
-        try (var arena = Arena.ofConfined()) {
-            try (var encoder = NativeKeyEncoder.create(this, arena);
-                 var keyEvent = NativeKeyEvent.create(this, arena)) {
-                configureEncoder(arena, encoder.handle(), config);
-                populateKeyEvent(arena, keyEvent.handle(), event);
-
-                var outLen = arena.allocate(SIZE_T_LAYOUT);
-                try {
-                    invokeStatus(
-                        ghosttyKeyEncoderEncode,
-                        "ghostty_key_encoder_encode",
-                        encoder.handle(),
-                        keyEvent.handle(),
-                        MemorySegment.NULL,
-                        0L,
-                        outLen
-                    );
-                } catch (ResultException exception) {
-                    if (exception.result != GHOSTTY_OUT_OF_SPACE) {
-                        throw exception;
-                    }
-                }
-                var required = outLen.get(SIZE_T_LAYOUT, 0);
-                if (required == 0) {
-                    return new byte[0];
-                }
-
-                var out = arena.allocate(required);
-                invokeStatus(
-                    ghosttyKeyEncoderEncode,
-                    "ghostty_key_encoder_encode",
-                    encoder.handle(),
-                    keyEvent.handle(),
-                    out,
-                    required,
-                    outLen
-                );
-                return out.asSlice(0, outLen.get(SIZE_T_LAYOUT, 0)).toArray(ValueLayout.JAVA_BYTE);
-            }
-        }
-    }
-
-    private void configureEncoder(
-        Arena arena,
-        MemorySegment encoder,
-        KeyCodecConfig config
-    ) {
-        setKeyEncoderBooleanOption(
-            arena,
-            encoder,
-            GHOSTTY_KEY_ENCODER_OPT_CURSOR_KEY_APPLICATION,
-            config.cursorKeyApplication()
-        );
-        setKeyEncoderBooleanOption(
-            arena,
-            encoder,
-            GHOSTTY_KEY_ENCODER_OPT_KEYPAD_KEY_APPLICATION,
-            config.keypadKeyApplication()
-        );
-        setKeyEncoderBooleanOption(
-            arena,
-            encoder,
-            GHOSTTY_KEY_ENCODER_OPT_IGNORE_KEYPAD_WITH_NUMLOCK,
-            config.ignoreKeypadWithNumLock()
-        );
-        setKeyEncoderBooleanOption(
-            arena,
-            encoder,
-            GHOSTTY_KEY_ENCODER_OPT_ALT_ESC_PREFIX,
-            config.altEscPrefix()
-        );
-        setKeyEncoderBooleanOption(
-            arena,
-            encoder,
-            GHOSTTY_KEY_ENCODER_OPT_MODIFY_OTHER_KEYS_STATE_2,
-            config.modifyOtherKeysState2()
-        );
-
-        var kittyFlags = arena.allocate(ValueLayout.JAVA_BYTE);
-        kittyFlags.set(ValueLayout.JAVA_BYTE, 0, toKittyFlags(config.kittyFlags()));
-        invoke(
-            ghosttyKeyEncoderSetopt,
-            encoder,
-            GHOSTTY_KEY_ENCODER_OPT_KITTY_FLAGS,
-            kittyFlags
-        );
-
-        if (config.optionAsAlt() != null) {
-            var optionAsAlt = arena.allocate(ValueLayout.JAVA_INT);
-            optionAsAlt.set(ValueLayout.JAVA_INT, 0, config.optionAsAlt().ordinal());
-            invoke(
-                ghosttyKeyEncoderSetopt,
-                encoder,
-                GHOSTTY_KEY_ENCODER_OPT_MACOS_OPTION_AS_ALT,
-                optionAsAlt
-            );
-        }
-    }
-
-    private void setKeyEncoderBooleanOption(
-        Arena arena,
-        MemorySegment encoder,
-        int option,
-        boolean value
-    ) {
-        var segment = arena.allocate(ValueLayout.JAVA_BOOLEAN);
-        segment.set(ValueLayout.JAVA_BOOLEAN, 0, value);
-        invoke(ghosttyKeyEncoderSetopt, encoder, option, segment);
-    }
-
-    private void populateKeyEvent(
-        Arena arena,
-        MemorySegment keyEvent,
-        io.github.vlaaad.ghostty.KeyEvent event
-    ) {
-        invoke(ghosttyKeyEventSetAction, keyEvent, event.action().ordinal());
-        invoke(ghosttyKeyEventSetKey, keyEvent, event.key().ordinal());
-        invoke(ghosttyKeyEventSetMods, keyEvent, toGhosttyMods(event.modifiers()));
-        invoke(ghosttyKeyEventSetConsumedMods, keyEvent, toGhosttyMods(event.consumedModifiers()));
-        invoke(ghosttyKeyEventSetComposing, keyEvent, event.composing());
-        setUtf8(arena, keyEvent, event.utf8());
-        invoke(ghosttyKeyEventSetUnshiftedCodepoint, keyEvent, event.unshiftedCodePoint());
-    }
-
-    private void setUtf8(Arena arena, MemorySegment keyEvent, String utf8) {
-        if (utf8 == null || utf8.isEmpty()) {
-            invoke(ghosttyKeyEventSetUtf8, keyEvent, MemorySegment.NULL, 0L);
-            return;
-        }
-
-        var bytes = utf8.getBytes(StandardCharsets.UTF_8);
-        var segment = arena.allocate(bytes.length);
-        segment.asByteBuffer().put(bytes);
-        invoke(ghosttyKeyEventSetUtf8, keyEvent, segment, (long) bytes.length);
-    }
-
-    private static short toGhosttyMods(KeyModifiers modifiers) {
-        if (modifiers == null) {
-            return 0;
-        }
-
-        var mods = 0;
-        if (modifiers.shift()) {
-            mods |= GHOSTTY_MODS_SHIFT;
-            if (modifiers.shiftSide() == ModifierSide.RIGHT) {
-                mods |= GHOSTTY_MODS_SHIFT_SIDE;
-            }
-        }
-        if (modifiers.ctrl()) {
-            mods |= GHOSTTY_MODS_CTRL;
-            if (modifiers.ctrlSide() == ModifierSide.RIGHT) {
-                mods |= GHOSTTY_MODS_CTRL_SIDE;
-            }
-        }
-        if (modifiers.alt()) {
-            mods |= GHOSTTY_MODS_ALT;
-            if (modifiers.altSide() == ModifierSide.RIGHT) {
-                mods |= GHOSTTY_MODS_ALT_SIDE;
-            }
-        }
-        if (modifiers.superKey()) {
-            mods |= GHOSTTY_MODS_SUPER;
-            if (modifiers.superSide() == ModifierSide.RIGHT) {
-                mods |= GHOSTTY_MODS_SUPER_SIDE;
-            }
-        }
-        if (modifiers.capsLock()) {
-            mods |= GHOSTTY_MODS_CAPS_LOCK;
-        }
-        if (modifiers.numLock()) {
-            mods |= GHOSTTY_MODS_NUM_LOCK;
-        }
-        return (short) mods;
-    }
-
-    private static byte toKittyFlags(io.github.vlaaad.ghostty.KittyKeyboardFlags flags) {
-        if (flags == null) {
-            return 0;
-        }
-
-        var result = 0;
-        if (flags.disambiguate()) {
-            result |= GHOSTTY_KITTY_KEY_DISAMBIGUATE;
-        }
-        if (flags.reportEvents()) {
-            result |= GHOSTTY_KITTY_KEY_REPORT_EVENTS;
-        }
-        if (flags.reportAlternates()) {
-            result |= GHOSTTY_KITTY_KEY_REPORT_ALTERNATES;
-        }
-        if (flags.reportAll()) {
-            result |= GHOSTTY_KITTY_KEY_REPORT_ALL;
-        }
-        if (flags.reportAssociated()) {
-            result |= GHOSTTY_KITTY_KEY_REPORT_ASSOCIATED;
-        }
-        return (byte) result;
     }
 
     static MethodHandle bind(SymbolLookup lookup, String symbol, FunctionDescriptor descriptor) {
@@ -472,32 +123,6 @@ public final class NativeRuntime {
     @SuppressWarnings("unchecked")
     private static <X extends Throwable> RuntimeException sneakyThrow(Throwable exception) throws X {
         throw (X) exception;
-    }
-
-    private record NativeKeyEncoder(NativeRuntime runtime, MemorySegment handle) implements AutoCloseable {
-        static NativeKeyEncoder create(NativeRuntime runtime, Arena arena) {
-            var encoderOut = arena.allocate(ValueLayout.ADDRESS);
-            invokeStatus(runtime.ghosttyKeyEncoderNew, "ghostty_key_encoder_new", MemorySegment.NULL, encoderOut);
-            return new NativeKeyEncoder(runtime, encoderOut.get(ValueLayout.ADDRESS, 0));
-        }
-
-        @Override
-        public void close() {
-            invoke(runtime.ghosttyKeyEncoderFree, handle);
-        }
-    }
-
-    private record NativeKeyEvent(NativeRuntime runtime, MemorySegment handle) implements AutoCloseable {
-        static NativeKeyEvent create(NativeRuntime runtime, Arena arena) {
-            var eventOut = arena.allocate(ValueLayout.ADDRESS);
-            invokeStatus(runtime.ghosttyKeyEventNew, "ghostty_key_event_new", MemorySegment.NULL, eventOut);
-            return new NativeKeyEvent(runtime, eventOut.get(ValueLayout.ADDRESS, 0));
-        }
-
-        @Override
-        public void close() {
-            invoke(runtime.ghosttyKeyEventFree, handle);
-        }
     }
 
     private static final class Holder {
