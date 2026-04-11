@@ -1,8 +1,6 @@
 package io.github.vlaaad.ghostty.impl;
 
-import io.github.vlaaad.ghostty.BuildFeature;
 import io.github.vlaaad.ghostty.BuildInfo;
-import io.github.vlaaad.ghostty.BuildOptimize;
 import io.github.vlaaad.ghostty.FocusCodec;
 import io.github.vlaaad.ghostty.KeyCodec;
 import io.github.vlaaad.ghostty.KeyCodecConfig;
@@ -19,27 +17,20 @@ import io.github.vlaaad.ghostty.TerminalQueries;
 import io.github.vlaaad.ghostty.TerminalSession;
 import io.github.vlaaad.ghostty.TypeSchema;
 import java.io.IOException;
-import java.io.InputStream;
 import java.io.UncheckedIOException;
 import java.lang.foreign.AddressLayout;
 import java.lang.foreign.Arena;
 import java.lang.foreign.FunctionDescriptor;
 import java.lang.foreign.Linker;
-import java.lang.foreign.MemoryLayout;
 import java.lang.foreign.MemorySegment;
 import java.lang.foreign.SymbolLookup;
 import java.lang.foreign.ValueLayout;
 import java.lang.invoke.MethodHandle;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
-import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
-import java.util.EnumSet;
 import java.util.Locale;
 import java.util.Objects;
-import java.util.Set;
-
-import static java.lang.foreign.MemoryLayout.PathElement.groupElement;
 
 public final class NativeRuntime {
     private static final int GHOSTTY_SUCCESS = 0;
@@ -47,21 +38,6 @@ public final class NativeRuntime {
     private static final int GHOSTTY_INVALID_VALUE = -2;
     private static final int GHOSTTY_OUT_OF_SPACE = -3;
     private static final int GHOSTTY_NO_VALUE = -4;
-
-    private static final int GHOSTTY_OPTIMIZE_DEBUG = 0;
-    private static final int GHOSTTY_OPTIMIZE_RELEASE_SAFE = 1;
-    private static final int GHOSTTY_OPTIMIZE_RELEASE_SMALL = 2;
-    private static final int GHOSTTY_OPTIMIZE_RELEASE_FAST = 3;
-
-    private static final int GHOSTTY_BUILD_INFO_SIMD = 1;
-    private static final int GHOSTTY_BUILD_INFO_KITTY_GRAPHICS = 2;
-    private static final int GHOSTTY_BUILD_INFO_TMUX_CONTROL_MODE = 3;
-    private static final int GHOSTTY_BUILD_INFO_OPTIMIZE = 4;
-    private static final int GHOSTTY_BUILD_INFO_VERSION_STRING = 5;
-    private static final int GHOSTTY_BUILD_INFO_VERSION_MAJOR = 6;
-    private static final int GHOSTTY_BUILD_INFO_VERSION_MINOR = 7;
-    private static final int GHOSTTY_BUILD_INFO_VERSION_PATCH = 8;
-    private static final int GHOSTTY_BUILD_INFO_VERSION_BUILD = 9;
 
     private static final int GHOSTTY_KEY_ENCODER_OPT_CURSOR_KEY_APPLICATION = 0;
     private static final int GHOSTTY_KEY_ENCODER_OPT_KEYPAD_KEY_APPLICATION = 1;
@@ -89,14 +65,9 @@ public final class NativeRuntime {
     private static final int GHOSTTY_KITTY_KEY_REPORT_ASSOCIATED = 16;
 
     private static final AddressLayout C_POINTER = ValueLayout.ADDRESS;
-    private static final ValueLayout.OfLong SIZE_T_LAYOUT = ValueLayout.JAVA_LONG;
+    static final ValueLayout.OfLong SIZE_T_LAYOUT = ValueLayout.JAVA_LONG;
 
-    private final MemoryLayout ghosttyStringLayout;
-    private final long ghosttyStringPtrOffset;
-    private final long ghosttyStringLenOffset;
-
-    private final MethodHandle ghosttyTypeJson;
-    private final MethodHandle ghosttyBuildInfo;
+    private final NativeMetadata metadata;
     private final MethodHandle ghosttyKeyEncoderNew;
     private final MethodHandle ghosttyKeyEncoderFree;
     private final MethodHandle ghosttyKeyEncoderSetopt;
@@ -113,21 +84,9 @@ public final class NativeRuntime {
 
     private NativeRuntime() {
         loadCurrentLibrary();
+        metadata = new NativeMetadata();
 
-        SymbolLookup lookup = SymbolLookup.loaderLookup();
-        ghosttyStringLayout = MemoryLayout.structLayout(
-            C_POINTER.withName("ptr"),
-            SIZE_T_LAYOUT.withName("len")
-        );
-        ghosttyStringPtrOffset = ghosttyStringLayout.byteOffset(groupElement("ptr"));
-        ghosttyStringLenOffset = ghosttyStringLayout.byteOffset(groupElement("len"));
-
-        ghosttyTypeJson = bind(lookup, "ghostty_type_json", FunctionDescriptor.of(C_POINTER));
-        ghosttyBuildInfo = bind(lookup, "ghostty_build_info", FunctionDescriptor.of(
-            ValueLayout.JAVA_INT,
-            ValueLayout.JAVA_INT,
-            C_POINTER
-        ));
+        var lookup = SymbolLookup.loaderLookup();
         ghosttyKeyEncoderNew = bind(lookup, "ghostty_key_encoder_new", FunctionDescriptor.of(
             ValueLayout.JAVA_INT,
             C_POINTER,
@@ -211,97 +170,11 @@ public final class NativeRuntime {
     }
 
     public final BuildInfo buildInfo() {
-        try (Arena arena = Arena.ofConfined()) {
-            MemorySegment versionOut = allocateGhosttyString(arena);
-            checkBuildInfoResult(
-                GHOSTTY_BUILD_INFO_VERSION_STRING,
-                ghosttyBuildInfo(GHOSTTY_BUILD_INFO_VERSION_STRING, versionOut)
-            );
-
-            MemorySegment majorOut = arena.allocate(SIZE_T_LAYOUT);
-            checkBuildInfoResult(
-                GHOSTTY_BUILD_INFO_VERSION_MAJOR,
-                ghosttyBuildInfo(GHOSTTY_BUILD_INFO_VERSION_MAJOR, majorOut)
-            );
-
-            MemorySegment minorOut = arena.allocate(SIZE_T_LAYOUT);
-            checkBuildInfoResult(
-                GHOSTTY_BUILD_INFO_VERSION_MINOR,
-                ghosttyBuildInfo(GHOSTTY_BUILD_INFO_VERSION_MINOR, minorOut)
-            );
-
-            MemorySegment patchOut = arena.allocate(SIZE_T_LAYOUT);
-            checkBuildInfoResult(
-                GHOSTTY_BUILD_INFO_VERSION_PATCH,
-                ghosttyBuildInfo(GHOSTTY_BUILD_INFO_VERSION_PATCH, patchOut)
-            );
-
-            MemorySegment buildOut = allocateGhosttyString(arena);
-            checkBuildInfoResult(
-                GHOSTTY_BUILD_INFO_VERSION_BUILD,
-                ghosttyBuildInfo(GHOSTTY_BUILD_INFO_VERSION_BUILD, buildOut)
-            );
-
-            MemorySegment optimizeOut = arena.allocate(ValueLayout.JAVA_INT);
-            checkBuildInfoResult(
-                GHOSTTY_BUILD_INFO_OPTIMIZE,
-                ghosttyBuildInfo(GHOSTTY_BUILD_INFO_OPTIMIZE, optimizeOut)
-            );
-
-            MemorySegment simdOut = arena.allocate(ValueLayout.JAVA_BOOLEAN);
-            checkBuildInfoResult(
-                GHOSTTY_BUILD_INFO_SIMD,
-                ghosttyBuildInfo(GHOSTTY_BUILD_INFO_SIMD, simdOut)
-            );
-
-            MemorySegment kittyGraphicsOut = arena.allocate(ValueLayout.JAVA_BOOLEAN);
-            checkBuildInfoResult(
-                GHOSTTY_BUILD_INFO_KITTY_GRAPHICS,
-                ghosttyBuildInfo(GHOSTTY_BUILD_INFO_KITTY_GRAPHICS, kittyGraphicsOut)
-            );
-
-            MemorySegment tmuxControlModeOut = arena.allocate(ValueLayout.JAVA_BOOLEAN);
-            checkBuildInfoResult(
-                GHOSTTY_BUILD_INFO_TMUX_CONTROL_MODE,
-                ghosttyBuildInfo(GHOSTTY_BUILD_INFO_TMUX_CONTROL_MODE, tmuxControlModeOut)
-            );
-
-            EnumSet<BuildFeature> features = EnumSet.noneOf(BuildFeature.class);
-            if (simdOut.get(ValueLayout.JAVA_BOOLEAN, 0)) {
-                features.add(BuildFeature.SIMD);
-            }
-            if (kittyGraphicsOut.get(ValueLayout.JAVA_BOOLEAN, 0)) {
-                features.add(BuildFeature.KITTY_GRAPHICS);
-            }
-            if (tmuxControlModeOut.get(ValueLayout.JAVA_BOOLEAN, 0)) {
-                features.add(BuildFeature.TMUX_CONTROL_MODE);
-            }
-
-            int optimize = optimizeOut.get(ValueLayout.JAVA_INT, 0);
-            return new BuildInfo(
-                readUtf8String(ghosttyStringPtr(versionOut), ghosttyStringLen(versionOut)),
-                majorOut.get(SIZE_T_LAYOUT, 0),
-                minorOut.get(SIZE_T_LAYOUT, 0),
-                patchOut.get(SIZE_T_LAYOUT, 0),
-                readUtf8String(ghosttyStringPtr(buildOut), ghosttyStringLen(buildOut)),
-                switch (optimize) {
-                    case GHOSTTY_OPTIMIZE_DEBUG -> BuildOptimize.DEBUG;
-                    case GHOSTTY_OPTIMIZE_RELEASE_SAFE -> BuildOptimize.RELEASE_SAFE;
-                    case GHOSTTY_OPTIMIZE_RELEASE_SMALL -> BuildOptimize.RELEASE_SMALL;
-                    case GHOSTTY_OPTIMIZE_RELEASE_FAST -> BuildOptimize.RELEASE_FAST;
-                    default -> throw new IllegalStateException("Unknown optimize mode " + optimize);
-                },
-                Set.copyOf(features)
-            );
-        }
+        return metadata.buildInfo();
     }
 
     public final TypeSchema typeSchema() {
-        MemorySegment jsonPointer = ghosttyTypeJson();
-        if (jsonPointer.address() == 0L) {
-            throw new IllegalStateException("ghostty_type_json() returned a null pointer");
-        }
-        return new TypeSchema(jsonPointer.reinterpret(Long.MAX_VALUE).getString(0));
+        return metadata.typeSchema();
     }
 
     public static NativeRuntime instance() {
@@ -311,38 +184,38 @@ public final class NativeRuntime {
     private byte[] encodeKey(KeyCodecConfig config, io.github.vlaaad.ghostty.KeyEvent event) {
         Objects.requireNonNull(event, "event");
 
-        try (Arena arena = Arena.ofConfined()) {
-            try (NativeKeyEncoder encoder = NativeKeyEncoder.create(this, arena);
-                 NativeKeyEvent keyEvent = NativeKeyEvent.create(this, arena)) {
+        try (var arena = Arena.ofConfined()) {
+            try (var encoder = NativeKeyEncoder.create(this, arena);
+                 var keyEvent = NativeKeyEvent.create(this, arena)) {
                 configureEncoder(arena, encoder.handle(), config);
                 populateKeyEvent(arena, keyEvent.handle(), event);
 
-                MemorySegment outLen = arena.allocate(SIZE_T_LAYOUT);
-                int probe = ghosttyKeyEncoderEncode(
-                    encoder.handle(),
-                    keyEvent.handle(),
-                    MemorySegment.NULL,
-                    0,
-                    outLen
-                );
-                long required = outLen.get(SIZE_T_LAYOUT, 0);
-                if (probe != GHOSTTY_OUT_OF_SPACE) {
-                    checkKeyResult("ghostty_key_encoder_encode", probe);
+                var outLen = arena.allocate(SIZE_T_LAYOUT);
+                try {
+                    ghosttyKeyEncoderEncode(
+                        encoder.handle(),
+                        keyEvent.handle(),
+                        MemorySegment.NULL,
+                        0,
+                        outLen
+                    );
+                } catch (ResultException exception) {
+                    if (exception.result != GHOSTTY_OUT_OF_SPACE) {
+                        throw exception;
+                    }
                 }
+                var required = outLen.get(SIZE_T_LAYOUT, 0);
                 if (required == 0) {
                     return new byte[0];
                 }
 
-                MemorySegment out = arena.allocate(required);
-                checkKeyResult(
-                    "ghostty_key_encoder_encode",
-                    ghosttyKeyEncoderEncode(
-                        encoder.handle(),
-                        keyEvent.handle(),
-                        out,
-                        required,
-                        outLen
-                    )
+                var out = arena.allocate(required);
+                ghosttyKeyEncoderEncode(
+                    encoder.handle(),
+                    keyEvent.handle(),
+                    out,
+                    required,
+                    outLen
                 );
                 return out.asSlice(0, outLen.get(SIZE_T_LAYOUT, 0)).toArray(ValueLayout.JAVA_BYTE);
             }
@@ -385,7 +258,7 @@ public final class NativeRuntime {
             config.modifyOtherKeysState2()
         );
 
-        MemorySegment kittyFlags = arena.allocate(ValueLayout.JAVA_BYTE);
+        var kittyFlags = arena.allocate(ValueLayout.JAVA_BYTE);
         kittyFlags.set(ValueLayout.JAVA_BYTE, 0, toKittyFlags(config.kittyFlags()));
         ghosttyKeyEncoderSetopt(
             encoder,
@@ -394,7 +267,7 @@ public final class NativeRuntime {
         );
 
         if (config.optionAsAlt() != null) {
-            MemorySegment optionAsAlt = arena.allocate(ValueLayout.JAVA_INT);
+            var optionAsAlt = arena.allocate(ValueLayout.JAVA_INT);
             optionAsAlt.set(ValueLayout.JAVA_INT, 0, config.optionAsAlt().ordinal());
             ghosttyKeyEncoderSetopt(
                 encoder,
@@ -410,7 +283,7 @@ public final class NativeRuntime {
         int option,
         boolean value
     ) {
-        MemorySegment segment = arena.allocate(ValueLayout.JAVA_BOOLEAN);
+        var segment = arena.allocate(ValueLayout.JAVA_BOOLEAN);
         segment.set(ValueLayout.JAVA_BOOLEAN, 0, value);
         ghosttyKeyEncoderSetopt(encoder, option, segment);
     }
@@ -435,34 +308,14 @@ public final class NativeRuntime {
             return;
         }
 
-        byte[] bytes = utf8.getBytes(StandardCharsets.UTF_8);
-        MemorySegment segment = arena.allocate(bytes.length);
+        var bytes = utf8.getBytes(StandardCharsets.UTF_8);
+        var segment = arena.allocate(bytes.length);
         segment.asByteBuffer().put(bytes);
         ghosttyKeyEventSetUtf8(keyEvent, segment, bytes.length);
     }
 
-    private MemorySegment allocateGhosttyString(Arena arena) {
-        return arena.allocate(ghosttyStringLayout);
-    }
-
-    private MemorySegment ghosttyStringPtr(MemorySegment struct) {
-        return struct.get(C_POINTER, ghosttyStringPtrOffset);
-    }
-
-    private long ghosttyStringLen(MemorySegment struct) {
-        return struct.get(SIZE_T_LAYOUT, ghosttyStringLenOffset);
-    }
-
-    private MemorySegment ghosttyTypeJson() {
-        return invokeAddress(ghosttyTypeJson, "ghostty_type_json");
-    }
-
-    private int ghosttyBuildInfo(int data, MemorySegment out) {
-        return invokeInt(ghosttyBuildInfo, "ghostty_build_info", data, out);
-    }
-
-    private int ghosttyKeyEncoderNew(MemorySegment allocator, MemorySegment encoder) {
-        return invokeInt(ghosttyKeyEncoderNew, "ghostty_key_encoder_new", allocator, encoder);
+    private void ghosttyKeyEncoderNew(MemorySegment allocator, MemorySegment encoder) {
+        callStatus(ghosttyKeyEncoderNew, "ghostty_key_encoder_new", allocator, encoder);
     }
 
     private void ghosttyKeyEncoderFree(MemorySegment encoder) {
@@ -473,14 +326,14 @@ public final class NativeRuntime {
         invokeVoid(ghosttyKeyEncoderSetopt, "ghostty_key_encoder_setopt", encoder, option, value);
     }
 
-    private int ghosttyKeyEncoderEncode(
+    private void ghosttyKeyEncoderEncode(
         MemorySegment encoder,
         MemorySegment event,
         MemorySegment outBuf,
         long outBufSize,
         MemorySegment outLen
     ) {
-        return invokeInt(
+        callStatus(
             ghosttyKeyEncoderEncode,
             "ghostty_key_encoder_encode",
             encoder,
@@ -491,8 +344,8 @@ public final class NativeRuntime {
         );
     }
 
-    private int ghosttyKeyEventNew(MemorySegment allocator, MemorySegment event) {
-        return invokeInt(ghosttyKeyEventNew, "ghostty_key_event_new", allocator, event);
+    private void ghosttyKeyEventNew(MemorySegment allocator, MemorySegment event) {
+        callStatus(ghosttyKeyEventNew, "ghostty_key_event_new", allocator, event);
     }
 
     private void ghosttyKeyEventFree(MemorySegment event) {
@@ -537,7 +390,7 @@ public final class NativeRuntime {
             return 0;
         }
 
-        int mods = 0;
+        var mods = 0;
         if (modifiers.shift()) {
             mods |= GHOSTTY_MODS_SHIFT;
             if (modifiers.shiftSide() == ModifierSide.RIGHT) {
@@ -576,7 +429,7 @@ public final class NativeRuntime {
             return 0;
         }
 
-        int result = 0;
+        var result = 0;
         if (flags.disambiguate()) {
             result |= GHOSTTY_KITTY_KEY_DISAMBIGUATE;
         }
@@ -596,10 +449,10 @@ public final class NativeRuntime {
     }
 
     private static void loadCurrentLibrary() {
-        String osName = System.getProperty("os.name", "");
-        String archName = System.getProperty("os.arch", "");
+        var osName = System.getProperty("os.name", "");
+        var archName = System.getProperty("os.arch", "");
 
-        String os = osName.toLowerCase(Locale.ROOT);
+        var os = osName.toLowerCase(Locale.ROOT);
         String extension;
         if (os.contains("win")) {
             os = "windows";
@@ -616,18 +469,18 @@ public final class NativeRuntime {
             );
         }
 
-        String arch = archName.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9_]+", "");
+        var arch = archName.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9_]+", "");
         arch = switch (arch) {
             case "x8664", "amd64", "x86_64" -> "x86_64";
             case "aarch64", "arm64" -> "aarch64";
             default -> arch;
         };
 
-        String platform = os + "-" + arch;
-        String libraryFileName = "libghostty-vt-" + platform + extension;
-        String libraryResource = "native/" + platform + "/" + libraryFileName;
+        var platform = os + "-" + arch;
+        var libraryFileName = "libghostty-vt-" + platform + extension;
+        var libraryResource = "native/" + platform + "/" + libraryFileName;
 
-        try (InputStream input = NativeRuntime.class.getClassLoader().getResourceAsStream(libraryResource)) {
+        try (var input = NativeRuntime.class.getClassLoader().getResourceAsStream(libraryResource)) {
             if (input == null) {
                 throw new UnsupportedOperationException(
                     "Native runtime is not available for os '" + osName + "' and arch '" + archName
@@ -635,10 +488,10 @@ public final class NativeRuntime {
                 );
             }
 
-            Path directory = Files.createTempDirectory("ghosttyfx-" + platform + "-");
+            var directory = Files.createTempDirectory("ghosttyfx-" + platform + "-");
             directory.toFile().deleteOnExit();
 
-            Path extracted = directory.resolve(libraryFileName);
+            var extracted = directory.resolve(libraryFileName);
             Files.copy(input, extracted, StandardCopyOption.REPLACE_EXISTING);
             extracted.toFile().deleteOnExit();
             System.load(extracted.toAbsolutePath().toString());
@@ -650,61 +503,13 @@ public final class NativeRuntime {
         }
     }
 
-    private static void checkKeyResult(String functionName, int result) {
-        checkResult(
-            functionName,
-            result
-        );
-    }
-
-    private static void checkBuildInfoResult(int field, int result) {
-        checkResult(
-            "ghostty_build_info(" + field + ")",
-            result
-        );
-    }
-
-    private static void checkResult(
-        String functionName,
-        int result
-    ) {
-        if (result == GHOSTTY_SUCCESS) {
-            return;
-        }
-        if (result == GHOSTTY_OUT_OF_MEMORY) {
-            throw new IllegalStateException(functionName + " failed: out of memory");
-        }
-        if (result == GHOSTTY_INVALID_VALUE) {
-            throw new IllegalArgumentException(functionName + " failed: invalid value");
-        }
-        if (result == GHOSTTY_OUT_OF_SPACE) {
-            throw new IllegalStateException(functionName + " failed: out of space");
-        }
-        if (result == GHOSTTY_NO_VALUE) {
-            throw new IllegalStateException(functionName + " failed: no value");
-        }
-
-        throw new IllegalStateException(
-            functionName + " failed with unexpected result code " + result
-        );
-    }
-
-    private static String readUtf8String(MemorySegment pointer, long length) {
-        if (length == 0) {
-            return "";
-        }
-
-        byte[] bytes = pointer.reinterpret(length).toArray(ValueLayout.JAVA_BYTE);
-        return new String(bytes, StandardCharsets.UTF_8);
-    }
-
-    private static MethodHandle bind(SymbolLookup lookup, String symbol, FunctionDescriptor descriptor) {
-        MemorySegment address = lookup.find(symbol)
+    static MethodHandle bind(SymbolLookup lookup, String symbol, FunctionDescriptor descriptor) {
+        var address = lookup.find(symbol)
             .orElseThrow(() -> new IllegalStateException("Native symbol '" + symbol + "' is unavailable"));
         return Linker.nativeLinker().downcallHandle(address, descriptor);
     }
 
-    private static MemorySegment invokeAddress(MethodHandle handle, String symbol) {
+    static MemorySegment invokeAddress(MethodHandle handle, String symbol) {
         try {
             return (MemorySegment) handle.invokeExact();
         } catch (Error | RuntimeException exception) {
@@ -714,7 +519,11 @@ public final class NativeRuntime {
         }
     }
 
-    private static int invokeInt(MethodHandle handle, String symbol, int arg0, MemorySegment arg1) {
+    static void callStatus(MethodHandle handle, String errorMessage, int arg0, MemorySegment arg1) {
+        throwIfFailed(errorMessage, invokeExactInt(handle, errorMessage, arg0, arg1));
+    }
+
+    private static int invokeExactInt(MethodHandle handle, String symbol, int arg0, MemorySegment arg1) {
         try {
             return (int) handle.invokeExact(arg0, arg1);
         } catch (Error | RuntimeException exception) {
@@ -724,7 +533,11 @@ public final class NativeRuntime {
         }
     }
 
-    private static int invokeInt(MethodHandle handle, String symbol, MemorySegment arg0, MemorySegment arg1) {
+    private static void callStatus(MethodHandle handle, String errorMessage, MemorySegment arg0, MemorySegment arg1) {
+        throwIfFailed(errorMessage, invokeExactInt(handle, errorMessage, arg0, arg1));
+    }
+
+    private static int invokeExactInt(MethodHandle handle, String symbol, MemorySegment arg0, MemorySegment arg1) {
         try {
             return (int) handle.invokeExact(arg0, arg1);
         } catch (Error | RuntimeException exception) {
@@ -734,7 +547,19 @@ public final class NativeRuntime {
         }
     }
 
-    private static int invokeInt(
+    private static void callStatus(
+        MethodHandle handle,
+        String errorMessage,
+        MemorySegment arg0,
+        MemorySegment arg1,
+        MemorySegment arg2,
+        long arg3,
+        MemorySegment arg4
+    ) {
+        throwIfFailed(errorMessage, invokeExactInt(handle, errorMessage, arg0, arg1, arg2, arg3, arg4));
+    }
+
+    private static int invokeExactInt(
         MethodHandle handle,
         String symbol,
         MemorySegment arg0,
@@ -750,6 +575,29 @@ public final class NativeRuntime {
         } catch (Throwable exception) {
             throw new AssertionError("Failed to invoke " + symbol, exception);
         }
+    }
+
+    private static void throwIfFailed(String errorMessage, int result) {
+        if (result == GHOSTTY_SUCCESS) {
+            return;
+        }
+        if (result == GHOSTTY_OUT_OF_MEMORY) {
+            throw new ResultException(errorMessage + " failed: out of memory", result);
+        }
+        if (result == GHOSTTY_INVALID_VALUE) {
+            throw new ResultException(errorMessage + " failed: invalid value", result);
+        }
+        if (result == GHOSTTY_OUT_OF_SPACE) {
+            throw new ResultException(errorMessage + " failed: out of space", result);
+        }
+        if (result == GHOSTTY_NO_VALUE) {
+            throw new ResultException(errorMessage + " failed: no value", result);
+        }
+
+        throw new ResultException(
+            errorMessage + " failed with unexpected result code " + result,
+            result
+        );
     }
 
     private static void invokeVoid(MethodHandle handle, String symbol, MemorySegment arg0) {
@@ -820,8 +668,8 @@ public final class NativeRuntime {
 
     private record NativeKeyEncoder(NativeRuntime runtime, MemorySegment handle) implements AutoCloseable {
         static NativeKeyEncoder create(NativeRuntime runtime, Arena arena) {
-            MemorySegment encoderOut = arena.allocate(ValueLayout.ADDRESS);
-            checkKeyResult("ghostty_key_encoder_new", runtime.ghosttyKeyEncoderNew(MemorySegment.NULL, encoderOut));
+            var encoderOut = arena.allocate(ValueLayout.ADDRESS);
+            runtime.ghosttyKeyEncoderNew(MemorySegment.NULL, encoderOut);
             return new NativeKeyEncoder(runtime, encoderOut.get(ValueLayout.ADDRESS, 0));
         }
 
@@ -833,8 +681,8 @@ public final class NativeRuntime {
 
     private record NativeKeyEvent(NativeRuntime runtime, MemorySegment handle) implements AutoCloseable {
         static NativeKeyEvent create(NativeRuntime runtime, Arena arena) {
-            MemorySegment eventOut = arena.allocate(ValueLayout.ADDRESS);
-            checkKeyResult("ghostty_key_event_new", runtime.ghosttyKeyEventNew(MemorySegment.NULL, eventOut));
+            var eventOut = arena.allocate(ValueLayout.ADDRESS);
+            runtime.ghosttyKeyEventNew(MemorySegment.NULL, eventOut);
             return new NativeKeyEvent(runtime, eventOut.get(ValueLayout.ADDRESS, 0));
         }
 

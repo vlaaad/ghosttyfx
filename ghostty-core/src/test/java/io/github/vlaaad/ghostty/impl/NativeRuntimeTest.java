@@ -1,17 +1,15 @@
 package io.github.vlaaad.ghostty.impl;
 
-import io.github.vlaaad.ghostty.BuildInfo;
 import io.github.vlaaad.ghostty.Ghostty;
 import io.github.vlaaad.ghostty.Key;
 import io.github.vlaaad.ghostty.KeyAction;
-import io.github.vlaaad.ghostty.KeyCodec;
 import io.github.vlaaad.ghostty.KeyCodecConfig;
 import io.github.vlaaad.ghostty.KeyEvent;
 import io.github.vlaaad.ghostty.KeyModifiers;
 import io.github.vlaaad.ghostty.OptionAsAlt;
-import io.github.vlaaad.ghostty.TypeSchema;
-import java.lang.reflect.InvocationTargetException;
-import java.lang.reflect.Method;
+import java.lang.foreign.MemorySegment;
+import java.lang.invoke.MethodHandles;
+import java.lang.invoke.MethodType;
 import java.util.Locale;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -47,7 +45,7 @@ final class NativeRuntimeTest {
 
     @Test
     void exposesBuildInfo() {
-        BuildInfo buildInfo = runtime.buildInfo();
+        var buildInfo = runtime.buildInfo();
 
         assertFalse(buildInfo.version().isBlank());
         assertTrue(buildInfo.major() >= 0);
@@ -60,7 +58,7 @@ final class NativeRuntimeTest {
 
     @Test
     void exposesTypeSchema() {
-        TypeSchema schema = runtime.typeSchema();
+        var schema = runtime.typeSchema();
 
         assertFalse(schema.json().isBlank());
         assertTrue(schema.json().startsWith("{"));
@@ -74,22 +72,25 @@ final class NativeRuntimeTest {
     }
 
     @Test
-    void keyResultTreatsNoValueAsNoValue() throws ReflectiveOperationException {
-        Method checkKeyResult = NativeRuntime.class.getDeclaredMethod("checkKeyResult", String.class, int.class);
-        checkKeyResult.setAccessible(true);
-
-        InvocationTargetException exception = assertThrows(
-            InvocationTargetException.class,
-            () -> checkKeyResult.invoke(null, "ghostty_key_encoder_encode", -4)
+    void statusCallTreatsNoValueAsNoValue() throws ReflectiveOperationException {
+        var handle = MethodHandles.lookup().findStatic(
+            NativeRuntimeTest.class,
+            "returnNoValue",
+            MethodType.methodType(int.class, int.class, MemorySegment.class)
         );
 
-        assertEquals(IllegalStateException.class, exception.getCause().getClass());
-        assertEquals("ghostty_key_encoder_encode failed: no value", exception.getCause().getMessage());
+        var exception = assertThrows(
+            ResultException.class,
+            () -> NativeRuntime.callStatus(handle, "ghostty_key_encoder_encode", 0, MemorySegment.NULL)
+        );
+
+        assertEquals(-4, exception.result);
+        assertEquals("ghostty_key_encoder_encode failed: no value", exception.getMessage());
     }
 
     @Test
     void encodesCtrlC() {
-        KeyCodec codec = runtime.keyCodec(new KeyCodecConfig(false, false, false, false, false, null, null));
+        var codec = runtime.keyCodec(new KeyCodecConfig(false, false, false, false, false, null, null));
 
         assertArrayEquals(
             new byte[] {0x03},
@@ -99,10 +100,10 @@ final class NativeRuntimeTest {
 
     @Test
     void encodesArrowUpInNormalAndApplicationModes() {
-        KeyEvent event = new KeyEvent(KeyAction.PRESS, Key.ARROW_UP, NO_MODS, NO_MODS, false, null, 0);
+        var event = new KeyEvent(KeyAction.PRESS, Key.ARROW_UP, NO_MODS, NO_MODS, false, null, 0);
 
-        KeyCodec normal = runtime.keyCodec(new KeyCodecConfig(false, false, false, false, false, null, null));
-        KeyCodec application = runtime.keyCodec(new KeyCodecConfig(true, false, false, false, false, null, null));
+        var normal = runtime.keyCodec(new KeyCodecConfig(false, false, false, false, false, null, null));
+        var application = runtime.keyCodec(new KeyCodecConfig(true, false, false, false, false, null, null));
 
         assertArrayEquals(new byte[] {0x1b, '[', 'A'}, normal.encode(event));
         assertArrayEquals(new byte[] {0x1b, 'O', 'A'}, application.encode(event));
@@ -110,8 +111,8 @@ final class NativeRuntimeTest {
 
     @Test
     void encodesAltWithEscapePrefix() {
-        String osName = System.getProperty("os.name", "").toLowerCase(Locale.ROOT);
-        KeyCodec codec = runtime.keyCodec(new KeyCodecConfig(
+        var osName = System.getProperty("os.name", "").toLowerCase(Locale.ROOT);
+        var codec = runtime.keyCodec(new KeyCodecConfig(
             false,
             false,
             false,
@@ -129,7 +130,7 @@ final class NativeRuntimeTest {
 
     @Test
     void modifierKeyPressProducesNoBytes() {
-        KeyCodec codec = runtime.keyCodec(new KeyCodecConfig(false, false, false, false, false, null, null));
+        var codec = runtime.keyCodec(new KeyCodecConfig(false, false, false, false, false, null, null));
 
         assertArrayEquals(
             new byte[0],
@@ -137,4 +138,7 @@ final class NativeRuntimeTest {
         );
     }
 
+    private static int returnNoValue(int ignored, MemorySegment out) {
+        return -4;
+    }
 }
