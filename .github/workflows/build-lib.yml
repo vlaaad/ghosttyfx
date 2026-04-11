@@ -6,8 +6,41 @@ on:
   workflow_dispatch:
 
 jobs:
-  build-linux:
-    runs-on: ubuntu-latest
+  build:
+    name: ${{ matrix.artifact_name }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - artifact_name: libghostty-vt-linux-x86_64
+            runner: ubuntu-latest
+            zig_url: https://ziglang.org/download/0.15.2/zig-x86_64-linux-0.15.2.tar.xz
+            zig_dir: zig-x86_64-linux-0.15.2
+            built_lib: ghostty/zig-out/lib/libghostty-vt.so.0.1.0
+            packaged_lib: dist/platforms/libghostty-vt-linux-x86_64/lib/libghostty-vt-linux-x86_64.so
+            maven_modules: ghostty-core,ghostty-linux-x86_64
+          - artifact_name: libghostty-vt-macos-aarch64
+            runner: macos-latest
+            zig_url: https://ziglang.org/download/0.15.2/zig-aarch64-macos-0.15.2.tar.xz
+            zig_dir: zig-aarch64-macos-0.15.2
+            built_lib: ghostty/zig-out/lib/libghostty-vt.0.1.0.dylib
+            packaged_lib: dist/platforms/libghostty-vt-macos-aarch64/lib/libghostty-vt-macos-aarch64.dylib
+            maven_modules: ghostty-core,ghostty-macos-aarch64
+          - artifact_name: libghostty-vt-macos-x86_64
+            runner: macos-15-intel
+            zig_url: https://ziglang.org/download/0.15.2/zig-x86_64-macos-0.15.2.tar.xz
+            zig_dir: zig-x86_64-macos-0.15.2
+            built_lib: ghostty/zig-out/lib/libghostty-vt.0.1.0.dylib
+            packaged_lib: dist/platforms/libghostty-vt-macos-x86_64/lib/libghostty-vt-macos-x86_64.dylib
+            maven_modules: ghostty-core,ghostty-macos-x86_64
+          - artifact_name: libghostty-vt-windows-x86_64
+            runner: windows-latest
+            zig_url: https://ziglang.org/download/0.15.2/zig-x86_64-windows-0.15.2.zip
+            zig_dir: zig-x86_64-windows-0.15.2
+            built_lib: ghostty/zig-out/bin/ghostty-vt.dll
+            packaged_lib: dist/platforms/libghostty-vt-windows-x86_64/lib/libghostty-vt-windows-x86_64.dll
+            maven_modules: ghostty-core,ghostty-windows-x86_64
     steps:
       - uses: actions/checkout@v5
 
@@ -16,224 +49,83 @@ jobs:
           repository: ghostty-org/ghostty
           path: ghostty
 
-      - uses: actions/checkout@v5
-        with:
-          repository: google/highway
-          ref: 66486a10623fa0d72fe91260f96c892e41aceb06
-          path: ghostty/pkg/highway/vendor/highway
-
-      - name: Vendor highway dependency
-        run: cp scripts/ghostty-highway-build.zig.zon ghostty/pkg/highway/build.zig.zon
-
       - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "25"
           cache: maven
 
-      - name: Install Zig
+      - name: Install Zig (Unix)
+        if: runner.os != 'Windows'
         run: |
-          curl -L https://ziglang.org/download/0.15.2/zig-x86_64-linux-0.15.2.tar.xz | tar xJ
-          echo "${{ github.workspace }}/zig-x86_64-linux-0.15.2" >> $GITHUB_PATH
+          curl -L "${{ matrix.zig_url }}" | tar xJ
+          echo "${{ github.workspace }}/${{ matrix.zig_dir }}" >> $GITHUB_PATH
 
-      - name: Build
-        run: |
-          cd ghostty
-          zig build -Dapp-runtime=none -Demit-lib-vt=true
-
-      - name: Package
-        run: |
-          rm -rf dist/platforms/libghostty-vt-linux-x86_64
-          mkdir -p dist/platforms/libghostty-vt-linux-x86_64/lib
-          test -f ghostty/zig-out/lib/libghostty-vt.so.0.1.0
-          cp ghostty/zig-out/lib/libghostty-vt.so.0.1.0 dist/platforms/libghostty-vt-linux-x86_64/lib/libghostty-vt-linux-x86_64.so
-
-      - name: Test Java package
-        run: mvn -B -pl ghostty-core,ghostty-linux-x86_64 -am test
-
-      - uses: actions/upload-artifact@v6
-        if: github.event_name == 'workflow_dispatch'
-        with:
-          name: libghostty-vt-linux-x86_64
-          path: dist/platforms/libghostty-vt-linux-x86_64/
-          retention-days: 1
-          compression-level: 0
-
-  build-macos-arm64:
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v5
-
-      - uses: actions/checkout@v5
-        with:
-          repository: ghostty-org/ghostty
-          path: ghostty
-
-      - uses: actions/checkout@v5
-        with:
-          repository: google/highway
-          ref: 66486a10623fa0d72fe91260f96c892e41aceb06
-          path: ghostty/pkg/highway/vendor/highway
-
-      - name: Vendor highway dependency
-        run: cp scripts/ghostty-highway-build.zig.zon ghostty/pkg/highway/build.zig.zon
-
-      - uses: actions/setup-java@v5
-        with:
-          distribution: temurin
-          java-version: "25"
-          cache: maven
-
-      - name: Install Zig
-        run: |
-          curl -L https://ziglang.org/download/0.15.2/zig-aarch64-macos-0.15.2.tar.xz | tar xJ
-          echo "${{ github.workspace }}/zig-aarch64-macos-0.15.2" >> $GITHUB_PATH
-
-      - name: Build
-        run: |
-          cd ghostty
-          zig build -Dapp-runtime=none -Demit-lib-vt=true
-
-      - name: Package
-        run: |
-          rm -rf dist/platforms/libghostty-vt-macos-aarch64
-          mkdir -p dist/platforms/libghostty-vt-macos-aarch64/lib
-          test -f ghostty/zig-out/lib/libghostty-vt.0.1.0.dylib
-          cp ghostty/zig-out/lib/libghostty-vt.0.1.0.dylib dist/platforms/libghostty-vt-macos-aarch64/lib/libghostty-vt-macos-aarch64.dylib
-
-      - name: Test Java package
-        run: mvn -B -pl ghostty-core,ghostty-macos-aarch64 -am test
-
-      - uses: actions/upload-artifact@v6
-        if: github.event_name == 'workflow_dispatch'
-        with:
-          name: libghostty-vt-macos-aarch64
-          path: dist/platforms/libghostty-vt-macos-aarch64/
-          retention-days: 1
-          compression-level: 0
-
-  build-macos-x64:
-    runs-on: macos-15-intel
-    steps:
-      - uses: actions/checkout@v5
-
-      - uses: actions/checkout@v5
-        with:
-          repository: ghostty-org/ghostty
-          path: ghostty
-
-      - uses: actions/checkout@v5
-        with:
-          repository: google/highway
-          ref: 66486a10623fa0d72fe91260f96c892e41aceb06
-          path: ghostty/pkg/highway/vendor/highway
-
-      - name: Vendor highway dependency
-        run: cp scripts/ghostty-highway-build.zig.zon ghostty/pkg/highway/build.zig.zon
-
-      - uses: actions/setup-java@v5
-        with:
-          distribution: temurin
-          java-version: "25"
-          cache: maven
-
-      - name: Install Zig
-        run: |
-          curl -L https://ziglang.org/download/0.15.2/zig-x86_64-macos-0.15.2.tar.xz | tar xJ
-          echo "${{ github.workspace }}/zig-x86_64-macos-0.15.2" >> $GITHUB_PATH
-
-      - name: Build
-        run: |
-          cd ghostty
-          zig build -Dapp-runtime=none -Demit-lib-vt=true
-
-      - name: Package
-        run: |
-          rm -rf dist/platforms/libghostty-vt-macos-x86_64
-          mkdir -p dist/platforms/libghostty-vt-macos-x86_64/lib
-          test -f ghostty/zig-out/lib/libghostty-vt.0.1.0.dylib
-          cp ghostty/zig-out/lib/libghostty-vt.0.1.0.dylib dist/platforms/libghostty-vt-macos-x86_64/lib/libghostty-vt-macos-x86_64.dylib
-
-      - name: Test Java package
-        run: mvn -B -pl ghostty-core,ghostty-macos-x86_64 -am test
-
-      - uses: actions/upload-artifact@v6
-        if: github.event_name == 'workflow_dispatch'
-        with:
-          name: libghostty-vt-macos-x86_64
-          path: dist/platforms/libghostty-vt-macos-x86_64/
-          retention-days: 1
-          compression-level: 0
-
-  build-windows:
-    runs-on: windows-latest
-    env:
-      ZIG_LOCAL_CACHE_DIR: ${{ github.workspace }}\.zig-local-cache
-      ZIG_GLOBAL_CACHE_DIR: ${{ github.workspace }}\.zig-global-cache
-      TEMP: ${{ github.workspace }}\.tmp
-      TMP: ${{ github.workspace }}\.tmp
-    steps:
-      - uses: actions/checkout@v5
-
-      - uses: actions/checkout@v5
-        with:
-          repository: ghostty-org/ghostty
-          path: ghostty
-
-      - uses: actions/checkout@v5
-        with:
-          repository: google/highway
-          ref: 66486a10623fa0d72fe91260f96c892e41aceb06
-          path: ghostty/pkg/highway/vendor/highway
-
-      - name: Vendor highway dependency
-        shell: pwsh
-        run: Copy-Item scripts/ghostty-highway-build.zig.zon ghostty/pkg/highway/build.zig.zon
-
-      - uses: actions/setup-java@v5
-        with:
-          distribution: temurin
-          java-version: "25"
-          cache: maven
-
-      - name: Install Zig
+      - name: Install Zig (Windows)
+        if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          Invoke-WebRequest -Uri "https://ziglang.org/download/0.15.2/zig-x86_64-windows-0.15.2.zip" -OutFile zig.zip
+          Invoke-WebRequest -Uri "${{ matrix.zig_url }}" -OutFile zig.zip
           Expand-Archive -Path zig.zip -DestinationPath .
-          Add-Content -Path $env:GITHUB_PATH -Value "${{ github.workspace }}\zig-x86_64-windows-0.15.2"
+          Add-Content -Path $env:GITHUB_PATH -Value "${{ github.workspace }}\${{ matrix.zig_dir }}"
 
       - name: Prepare cache directories
+        if: runner.os == 'Windows'
         shell: pwsh
+        env:
+          ZIG_LOCAL_CACHE_DIR: ${{ github.workspace }}\.zig-local-cache
+          ZIG_GLOBAL_CACHE_DIR: ${{ github.workspace }}\.zig-global-cache
+          TEMP: ${{ github.workspace }}\.tmp
+          TMP: ${{ github.workspace }}\.tmp
         run: |
           New-Item -ItemType Directory -Force -Path $env:ZIG_LOCAL_CACHE_DIR | Out-Null
           New-Item -ItemType Directory -Force -Path $env:ZIG_GLOBAL_CACHE_DIR | Out-Null
           New-Item -ItemType Directory -Force -Path $env:TEMP | Out-Null
 
-      - name: Build
-        shell: pwsh
+      - name: Build (Unix)
+        if: runner.os != 'Windows'
         run: |
           cd ghostty
           zig build -Dapp-runtime=none -Demit-lib-vt=true
 
-      - name: Package
+      - name: Build (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          ZIG_LOCAL_CACHE_DIR: ${{ github.workspace }}\.zig-local-cache
+          ZIG_GLOBAL_CACHE_DIR: ${{ github.workspace }}\.zig-global-cache
+          TEMP: ${{ github.workspace }}\.tmp
+          TMP: ${{ github.workspace }}\.tmp
+        run: |
+          cd ghostty
+          zig build -Dapp-runtime=none -Demit-lib-vt=true
+
+      - name: Package (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          rm -rf dist/platforms/${{ matrix.artifact_name }}
+          mkdir -p dist/platforms/${{ matrix.artifact_name }}/lib
+          test -f "${{ matrix.built_lib }}"
+          cp "${{ matrix.built_lib }}" "${{ matrix.packaged_lib }}"
+
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          if (-not (Test-Path ghostty/zig-out/bin/ghostty-vt.dll)) {
-            throw "Expected Windows shared library at ghostty/zig-out/bin/ghostty-vt.dll"
+          if (-not (Test-Path "${{ matrix.built_lib }}")) {
+            throw "Expected Windows shared library at ${{ matrix.built_lib }}"
           }
-          Remove-Item -Recurse -Force dist/platforms/libghostty-vt-windows-x86_64 -ErrorAction SilentlyContinue
-          New-Item -ItemType Directory -Force -Path dist/platforms/libghostty-vt-windows-x86_64/lib | Out-Null
-          Copy-Item ghostty/zig-out/bin/ghostty-vt.dll dist/platforms/libghostty-vt-windows-x86_64/lib/libghostty-vt-windows-x86_64.dll
+          Remove-Item -Recurse -Force "dist/platforms/${{ matrix.artifact_name }}" -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force -Path "dist/platforms/${{ matrix.artifact_name }}/lib" | Out-Null
+          Copy-Item "${{ matrix.built_lib }}" "${{ matrix.packaged_lib }}"
 
       - name: Test Java package
-        shell: pwsh
-        run: mvn -B -pl ghostty-core,ghostty-windows-x86_64 -am test
+        run: mvn -B -pl ${{ matrix.maven_modules }} -am test
 
       - uses: actions/upload-artifact@v6
         if: github.event_name == 'workflow_dispatch'
         with:
-          name: libghostty-vt-windows-x86_64
-          path: dist/platforms/libghostty-vt-windows-x86_64/
+          name: ${{ matrix.artifact_name }}
+          path: dist/platforms/${{ matrix.artifact_name }}/
           retention-days: 1
           compression-level: 0
