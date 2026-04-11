@@ -16,6 +16,8 @@ jobs:
           - artifact_name: libghostty-vt-linux-x86_64
             runner: ubuntu-latest
             zig_url: https://ziglang.org/download/0.15.2/zig-x86_64-linux-0.15.2.tar.xz
+            zig_archive: zig.tar.xz
+            zig_sha256: 02aa270f183da276e5b5920b1dac44a63f1a49e55050ebde3aecc9eb82f93239
             zig_dir: zig-x86_64-linux-0.15.2
             built_lib: ghostty/zig-out/lib/libghostty-vt.so.0.1.0
             packaged_lib: dist/platforms/libghostty-vt-linux-x86_64/lib/libghostty-vt-linux-x86_64.so
@@ -23,6 +25,8 @@ jobs:
           - artifact_name: libghostty-vt-macos-aarch64
             runner: macos-latest
             zig_url: https://ziglang.org/download/0.15.2/zig-aarch64-macos-0.15.2.tar.xz
+            zig_archive: zig.tar.xz
+            zig_sha256: 3cc2bab367e185cdfb27501c4b30b1b0653c28d9f73df8dc91488e66ece5fa6b
             zig_dir: zig-aarch64-macos-0.15.2
             built_lib: ghostty/zig-out/lib/libghostty-vt.0.1.0.dylib
             packaged_lib: dist/platforms/libghostty-vt-macos-aarch64/lib/libghostty-vt-macos-aarch64.dylib
@@ -30,6 +34,8 @@ jobs:
           - artifact_name: libghostty-vt-macos-x86_64
             runner: macos-15-intel
             zig_url: https://ziglang.org/download/0.15.2/zig-x86_64-macos-0.15.2.tar.xz
+            zig_archive: zig.tar.xz
+            zig_sha256: 375b6909fc1495d16fc2c7db9538f707456bfc3373b14ee83fdd3e22b3d43f7f
             zig_dir: zig-x86_64-macos-0.15.2
             built_lib: ghostty/zig-out/lib/libghostty-vt.0.1.0.dylib
             packaged_lib: dist/platforms/libghostty-vt-macos-x86_64/lib/libghostty-vt-macos-x86_64.dylib
@@ -37,19 +43,22 @@ jobs:
           - artifact_name: libghostty-vt-windows-x86_64
             runner: windows-latest
             zig_url: https://ziglang.org/download/0.15.2/zig-x86_64-windows-0.15.2.zip
+            zig_archive: zig.zip
+            zig_sha256: 3a0ed1e8799a2f8ce2a6e6290a9ff22e6906f8227865911fb7ddedc3cc14cb0c
             zig_dir: zig-x86_64-windows-0.15.2
             built_lib: ghostty/zig-out/bin/ghostty-vt.dll
             packaged_lib: dist/platforms/libghostty-vt-windows-x86_64/lib/libghostty-vt-windows-x86_64.dll
             maven_modules: ghostty-core,ghostty-windows-x86_64
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
 
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
         with:
           repository: ghostty-org/ghostty
+          ref: 7421b4b13f87e101d4bbcedd4da84886ceae4e7b
           path: ghostty
 
-      - uses: actions/setup-java@v5
+      - uses: actions/setup-java@be666c2fcd27ec809703dec50e508c2fdc7f6654 # v5.2.0
         with:
           distribution: temurin
           java-version: "25"
@@ -58,15 +67,21 @@ jobs:
       - name: Install Zig (Unix)
         if: runner.os != 'Windows'
         run: |
-          curl -L "${{ matrix.zig_url }}" | tar xJ
+          curl -fL "${{ matrix.zig_url }}" -o "${{ matrix.zig_archive }}"
+          test "$(shasum -a 256 "${{ matrix.zig_archive }}" | cut -d ' ' -f 1)" = "${{ matrix.zig_sha256 }}"
+          tar -xJf "${{ matrix.zig_archive }}"
           echo "${{ github.workspace }}/${{ matrix.zig_dir }}" >> $GITHUB_PATH
 
       - name: Install Zig (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          Invoke-WebRequest -Uri "${{ matrix.zig_url }}" -OutFile zig.zip
-          Expand-Archive -Path zig.zip -DestinationPath .
+          Invoke-WebRequest -Uri "${{ matrix.zig_url }}" -OutFile "${{ matrix.zig_archive }}"
+          $actual = (Get-FileHash -Path "${{ matrix.zig_archive }}" -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actual -ne "${{ matrix.zig_sha256 }}") {
+            throw "Expected Zig archive SHA-256 ${{ matrix.zig_sha256 }}, got $actual"
+          }
+          Expand-Archive -Path "${{ matrix.zig_archive }}" -DestinationPath .
           Add-Content -Path $env:GITHUB_PATH -Value "${{ github.workspace }}\${{ matrix.zig_dir }}"
 
       - name: Prepare cache directories
@@ -122,7 +137,7 @@ jobs:
       - name: Test Java package
         run: mvn -B -pl ${{ matrix.maven_modules }} -am test
 
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         if: github.event_name == 'workflow_dispatch'
         with:
           name: ${{ matrix.artifact_name }}
