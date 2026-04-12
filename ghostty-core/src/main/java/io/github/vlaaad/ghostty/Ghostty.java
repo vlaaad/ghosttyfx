@@ -33,8 +33,7 @@ public final class Ghostty {
         TerminalQueries queries,
         TerminalEvents events
     ) {
-        NativeRuntime.instance();
-        throw new UnsupportedOperationException("Not yet implemented");
+        return NativeRuntime.instance().nativeTerminal.open(config, ptyWriter, queries, events);
     }
     
     /// Creates a standalone key codec for translating host key events into VT sequences.

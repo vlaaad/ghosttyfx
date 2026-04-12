@@ -11,7 +11,7 @@ import static java.lang.foreign.MemoryLayout.PathElement.groupElement;
 
 final class NativeString {
     private static final AddressLayout POINTER_LAYOUT = ValueLayout.ADDRESS;
-    private static final MemoryLayout LAYOUT = MemoryLayout.structLayout(
+    static final MemoryLayout LAYOUT = MemoryLayout.structLayout(
         POINTER_LAYOUT.withName("ptr"),
         NativeRuntime.SIZE_T_LAYOUT.withName("len")
     );

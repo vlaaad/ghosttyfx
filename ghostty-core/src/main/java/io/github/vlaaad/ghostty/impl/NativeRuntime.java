@@ -28,6 +28,7 @@ public final class NativeRuntime {
     public final NativeFocusCodec nativeFocusCodec;
     public final NativeSizeReportCodec nativeSizeReportCodec;
     public final NativeModeReportCodec nativeModeReportCodec;
+    public final NativeTerminalBindings nativeTerminal;
 
     private NativeRuntime() {
         var osName = System.getProperty("os.name", "");
@@ -88,6 +89,7 @@ public final class NativeRuntime {
         nativeFocusCodec = new NativeFocusCodec(lookup);
         nativeSizeReportCodec = new NativeSizeReportCodec(lookup);
         nativeModeReportCodec = new NativeModeReportCodec(lookup);
+        nativeTerminal = new NativeTerminalBindings(lookup);
     }
 
     public static NativeRuntime instance() {
@@ -109,6 +111,8 @@ public final class NativeRuntime {
         }
     }
 
+    // For status-returning native calls, invocation and result validation are the same semantic
+    // operation. Keep them coupled here instead of splitting "invoke" from "check result".
     static void invokeStatus(MethodHandle handle, String errorMessage, Object... args) {
         int result = NativeRuntime.invoke(handle, args);
         if (result == GHOSTTY_SUCCESS) {
@@ -133,7 +137,7 @@ public final class NativeRuntime {
     }
 
     @SuppressWarnings("unchecked")
-    private static <X extends Throwable> RuntimeException sneakyThrow(Throwable exception) throws X {
+    static <X extends Throwable> RuntimeException sneakyThrow(Throwable exception) throws X {
         throw (X) exception;
     }
 
