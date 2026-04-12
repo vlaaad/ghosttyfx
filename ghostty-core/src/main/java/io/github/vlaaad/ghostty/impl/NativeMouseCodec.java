@@ -15,7 +15,6 @@ import java.lang.foreign.MemorySegment;
 import java.lang.foreign.SymbolLookup;
 import java.lang.foreign.ValueLayout;
 import java.lang.invoke.MethodHandle;
-import java.lang.ref.Cleaner;
 import java.util.Objects;
 
 public final class NativeMouseCodec {
@@ -54,7 +53,6 @@ public final class NativeMouseCodec {
         ValueLayout.JAVA_INT.withName("padding_right"),
         ValueLayout.JAVA_INT.withName("padding_left")
     );
-
     private final MethodHandle ghosttyMouseEncoderNew;
     private final MethodHandle ghosttyMouseEncoderFree;
     private final MethodHandle ghosttyMouseEncoderSetopt;
@@ -177,24 +175,51 @@ public final class NativeMouseCodec {
 
     private void setMouseEncoderSizeOption(Arena arena, MemorySegment encoder, MouseEncoderSize size) {
         var segment = arena.allocate(MOUSE_ENCODER_SIZE_LAYOUT);
-        var offset = 0L;
-        segment.set(NativeRuntime.SIZE_T_LAYOUT, offset, MOUSE_ENCODER_SIZE_LAYOUT.byteSize());
-        offset += NativeRuntime.SIZE_T_LAYOUT.byteSize();
-        segment.set(ValueLayout.JAVA_INT, offset, size.screenWidth());
-        offset += Integer.BYTES;
-        segment.set(ValueLayout.JAVA_INT, offset, size.screenHeight());
-        offset += Integer.BYTES;
-        segment.set(ValueLayout.JAVA_INT, offset, size.cellWidth());
-        offset += Integer.BYTES;
-        segment.set(ValueLayout.JAVA_INT, offset, size.cellHeight());
-        offset += Integer.BYTES;
-        segment.set(ValueLayout.JAVA_INT, offset, size.paddingTop());
-        offset += Integer.BYTES;
-        segment.set(ValueLayout.JAVA_INT, offset, size.paddingBottom());
-        offset += Integer.BYTES;
-        segment.set(ValueLayout.JAVA_INT, offset, size.paddingRight());
-        offset += Integer.BYTES;
-        segment.set(ValueLayout.JAVA_INT, offset, size.paddingLeft());
+        segment.set(
+            NativeRuntime.SIZE_T_LAYOUT,
+            MOUSE_ENCODER_SIZE_LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("size")),
+            MOUSE_ENCODER_SIZE_LAYOUT.byteSize()
+        );
+        segment.set(
+            ValueLayout.JAVA_INT,
+            MOUSE_ENCODER_SIZE_LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("screen_width")),
+            size.screenWidth()
+        );
+        segment.set(
+            ValueLayout.JAVA_INT,
+            MOUSE_ENCODER_SIZE_LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("screen_height")),
+            size.screenHeight()
+        );
+        segment.set(
+            ValueLayout.JAVA_INT,
+            MOUSE_ENCODER_SIZE_LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("cell_width")),
+            size.cellWidth()
+        );
+        segment.set(
+            ValueLayout.JAVA_INT,
+            MOUSE_ENCODER_SIZE_LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("cell_height")),
+            size.cellHeight()
+        );
+        segment.set(
+            ValueLayout.JAVA_INT,
+            MOUSE_ENCODER_SIZE_LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("padding_top")),
+            size.paddingTop()
+        );
+        segment.set(
+            ValueLayout.JAVA_INT,
+            MOUSE_ENCODER_SIZE_LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("padding_bottom")),
+            size.paddingBottom()
+        );
+        segment.set(
+            ValueLayout.JAVA_INT,
+            MOUSE_ENCODER_SIZE_LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("padding_right")),
+            size.paddingRight()
+        );
+        segment.set(
+            ValueLayout.JAVA_INT,
+            MOUSE_ENCODER_SIZE_LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("padding_left")),
+            size.paddingLeft()
+        );
         NativeRuntime.invoke(ghosttyMouseEncoderSetopt, encoder, GHOSTTY_MOUSE_ENCODER_OPT_SIZE, segment);
     }
 
@@ -268,26 +293,18 @@ public final class NativeMouseCodec {
         }
     }
 
-    private record EncoderCleanup(NativeMouseCodec codec, long handleAddress) implements Runnable {
-        @Override
-        public void run() {
-            if (handleAddress != 0L) {
-                NativeRuntime.invoke(codec.ghosttyMouseEncoderFree, MemorySegment.ofAddress(handleAddress));
-            }
-        }
-    }
-
     private static final class NativeMouseCodecInstance implements MouseCodec {
         private final NativeMouseCodec codec;
         private final long handleAddress;
-        @SuppressWarnings("unused")
-        private final Cleaner.Cleanable cleanable;
         private MouseEncodeContext appliedContext;
 
         private NativeMouseCodecInstance(NativeMouseCodec codec, long handleAddress) {
             this.codec = codec;
             this.handleAddress = handleAddress;
-            cleanable = NativeRuntime.CLEANER.register(this, new EncoderCleanup(codec, handleAddress));
+            NativeRuntime.CLEANER.register(
+                this,
+                () -> NativeRuntime.invoke(codec.ghosttyMouseEncoderFree, MemorySegment.ofAddress(handleAddress))
+            );
         }
 
         @Override

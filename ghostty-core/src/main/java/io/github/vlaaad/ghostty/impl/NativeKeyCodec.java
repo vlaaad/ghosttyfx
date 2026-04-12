@@ -134,15 +134,14 @@ public final class NativeKeyCodec {
                 encoderOut
             );
             var handleAddress = encoderOut.get(ValueLayout.ADDRESS, 0).address();
-            try {
-                configureEncoder(arena, MemorySegment.ofAddress(handleAddress), config);
-                KeyCodec keyCodec = event -> encode(MemorySegment.ofAddress(handleAddress), event);
-                NativeRuntime.CLEANER.register(keyCodec, () -> freeEncoder(handleAddress));
-                return keyCodec;
-            } catch (RuntimeException exception) {
-                freeEncoder(handleAddress);
-                throw exception;
-            }
+            var encoder = MemorySegment.ofAddress(handleAddress);
+            configureEncoder(arena, encoder, config);
+            KeyCodec keyCodec = event -> encode(encoder, event);
+            NativeRuntime.CLEANER.register(
+                keyCodec,
+                () -> NativeRuntime.invoke(ghosttyKeyEncoderFree, encoder)
+            );
+            return keyCodec;
         }
     }
 
@@ -264,12 +263,6 @@ public final class NativeKeyCodec {
                 outLen
             );
             return out.asSlice(0, outLen.get(NativeRuntime.SIZE_T_LAYOUT, 0)).toArray(ValueLayout.JAVA_BYTE);
-        }
-    }
-
-    private void freeEncoder(long handleAddress) {
-        if (handleAddress != 0L) {
-            NativeRuntime.invoke(ghosttyKeyEncoderFree, MemorySegment.ofAddress(handleAddress));
         }
     }
 
