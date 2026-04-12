@@ -1,15 +1,15 @@
 package io.github.vlaaad.ghostty.impl;
 
-import io.github.vlaaad.ghostty.FocusCodec;
-import io.github.vlaaad.ghostty.FocusEvent;
 import java.lang.foreign.AddressLayout;
 import java.lang.foreign.Arena;
 import java.lang.foreign.FunctionDescriptor;
-import java.lang.foreign.MemorySegment;
 import java.lang.foreign.SymbolLookup;
 import java.lang.foreign.ValueLayout;
 import java.lang.invoke.MethodHandle;
 import java.util.Objects;
+
+import io.github.vlaaad.ghostty.FocusCodec;
+import io.github.vlaaad.ghostty.FocusEvent;
 
 public final class NativeFocusCodec implements FocusCodec {
     private static final long INITIAL_OUTPUT_CAPACITY = 3;

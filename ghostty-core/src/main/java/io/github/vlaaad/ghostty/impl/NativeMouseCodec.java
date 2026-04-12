@@ -1,12 +1,5 @@
 package io.github.vlaaad.ghostty.impl;
 
-import io.github.vlaaad.ghostty.KeyModifiers;
-import io.github.vlaaad.ghostty.ModifierSide;
-import io.github.vlaaad.ghostty.MouseCodec;
-import io.github.vlaaad.ghostty.MouseCodecConfig;
-import io.github.vlaaad.ghostty.MouseEncodeContext;
-import io.github.vlaaad.ghostty.MouseEncoderSize;
-import io.github.vlaaad.ghostty.MouseEvent;
 import java.lang.foreign.AddressLayout;
 import java.lang.foreign.Arena;
 import java.lang.foreign.FunctionDescriptor;
@@ -16,6 +9,14 @@ import java.lang.foreign.SymbolLookup;
 import java.lang.foreign.ValueLayout;
 import java.lang.invoke.MethodHandle;
 import java.util.Objects;
+
+import io.github.vlaaad.ghostty.KeyModifiers;
+import io.github.vlaaad.ghostty.ModifierSide;
+import io.github.vlaaad.ghostty.MouseCodec;
+import io.github.vlaaad.ghostty.MouseCodecConfig;
+import io.github.vlaaad.ghostty.MouseEncodeContext;
+import io.github.vlaaad.ghostty.MouseEncoderSize;
+import io.github.vlaaad.ghostty.MouseEvent;
 
 public final class NativeMouseCodec {
     private static final long INITIAL_OUTPUT_CAPACITY = 64;
@@ -140,24 +141,6 @@ public final class NativeMouseCodec {
             var handleAddress = encoderOut.get(ValueLayout.ADDRESS, 0).address();
             return new NativeMouseCodecInstance(this, handleAddress);
         }
-    }
-
-    private void configureEncoder(Arena arena, MemorySegment encoder, MouseEncodeContext context) {
-        setMouseEncoderEnumOption(arena, encoder, GHOSTTY_MOUSE_ENCODER_OPT_EVENT, context.trackingMode().ordinal());
-        setMouseEncoderEnumOption(arena, encoder, GHOSTTY_MOUSE_ENCODER_OPT_FORMAT, context.format().ordinal());
-        setMouseEncoderSizeOption(arena, encoder, context.size());
-        setMouseEncoderBooleanOption(
-            arena,
-            encoder,
-            GHOSTTY_MOUSE_ENCODER_OPT_ANY_BUTTON_PRESSED,
-            context.anyButtonPressed()
-        );
-        setMouseEncoderBooleanOption(
-            arena,
-            encoder,
-            GHOSTTY_MOUSE_ENCODER_OPT_TRACK_LAST_CELL,
-            context.trackLastCell()
-        );
     }
 
     private void setMouseEncoderEnumOption(Arena arena, MemorySegment encoder, int option, int value) {
