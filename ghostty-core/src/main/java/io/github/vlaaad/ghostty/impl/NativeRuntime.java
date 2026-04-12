@@ -24,6 +24,7 @@ public final class NativeRuntime {
     public final NativeMetadata metadata;
     public final NativeKeyCodec nativeKeyCodec;
     public final NativeMouseCodec nativeMouseCodec;
+    public final NativePasteCodec nativePasteCodec;
 
     private NativeRuntime() {
         var osName = System.getProperty("os.name", "");
@@ -80,6 +81,7 @@ public final class NativeRuntime {
         metadata = new NativeMetadata(lookup);
         nativeKeyCodec = new NativeKeyCodec(lookup);
         nativeMouseCodec = new NativeMouseCodec(lookup);
+        nativePasteCodec = new NativePasteCodec(lookup);
     }
 
     public static NativeRuntime instance() {

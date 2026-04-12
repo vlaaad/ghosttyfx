@@ -57,8 +57,7 @@ public final class Ghostty {
     ///
     /// @return paste codec instance
     public static PasteCodec pasteCodec() {
-        NativeRuntime.instance();
-        throw new UnsupportedOperationException("Not yet implemented");
+        return NativeRuntime.instance().nativePasteCodec;
     }
     
     /// Creates a standalone focus codec.

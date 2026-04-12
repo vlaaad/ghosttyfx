@@ -66,7 +66,6 @@ public final class NativeMouseCodec {
     private final MethodHandle ghosttyMouseEventSetPosition;
 
     NativeMouseCodec(SymbolLookup lookup) {
-        Objects.requireNonNull(lookup, "lookup");
         ghosttyMouseEncoderNew = NativeRuntime.bind(lookup, "ghostty_mouse_encoder_new", FunctionDescriptor.of(
             ValueLayout.JAVA_INT,
             C_POINTER,

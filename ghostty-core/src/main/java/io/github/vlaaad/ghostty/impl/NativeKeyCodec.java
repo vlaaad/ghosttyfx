@@ -59,7 +59,6 @@ public final class NativeKeyCodec {
     private final MethodHandle ghosttyKeyEventSetUnshiftedCodepoint;
 
     NativeKeyCodec(SymbolLookup lookup) {
-        Objects.requireNonNull(lookup, "lookup");
         ghosttyKeyEncoderNew = NativeRuntime.bind(lookup, "ghostty_key_encoder_new", FunctionDescriptor.of(
             ValueLayout.JAVA_INT,
             C_POINTER,
