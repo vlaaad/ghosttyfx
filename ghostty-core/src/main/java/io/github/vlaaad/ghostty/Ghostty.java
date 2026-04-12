@@ -71,8 +71,7 @@ public final class Ghostty {
     ///
     /// @return size report codec instance
     public static SizeReportCodec sizeReportCodec() {
-        NativeRuntime.instance();
-        throw new UnsupportedOperationException("Not yet implemented");
+        return NativeRuntime.instance().nativeSizeReportCodec;
     }
     
     /// Gets build information.

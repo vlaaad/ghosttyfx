@@ -11,4 +11,28 @@ public record TerminalSize(
     int rows,
     int cellWidthPx,
     int cellHeightPx
-) {}
+) {
+    private static final int MAX_CELL_COUNT = 0xFFFF;
+
+    public TerminalSize {
+        requireCellCount(columns, "columns");
+        requireCellCount(rows, "rows");
+        requireNonNegative(cellWidthPx, "cellWidthPx");
+        requireNonNegative(cellHeightPx, "cellHeightPx");
+    }
+
+    private static void requireCellCount(int value, String name) {
+        if (value <= 0) {
+            throw new IllegalArgumentException(name + " must be positive");
+        }
+        if (value > MAX_CELL_COUNT) {
+            throw new IllegalArgumentException(name + " must be <= " + MAX_CELL_COUNT);
+        }
+    }
+
+    private static void requireNonNegative(int value, String name) {
+        if (value < 0) {
+            throw new IllegalArgumentException(name + " must be non-negative");
+        }
+    }
+}
