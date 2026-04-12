@@ -1,31 +1,15 @@
 package io.github.vlaaad.ghostty.impl;
 
-import io.github.vlaaad.ghostty.ColorPalette;
-import io.github.vlaaad.ghostty.ColorScheme;
-import io.github.vlaaad.ghostty.ColorValue;
-import io.github.vlaaad.ghostty.Point;
-import io.github.vlaaad.ghostty.RowCoordinateSpace;
-import io.github.vlaaad.ghostty.Style;
-import io.github.vlaaad.ghostty.TerminalConfig;
-import io.github.vlaaad.ghostty.TerminalMode;
-import io.github.vlaaad.ghostty.TerminalScrollViewport;
-import io.github.vlaaad.ghostty.TerminalScrollbar;
-import io.github.vlaaad.ghostty.TerminalSession;
-import io.github.vlaaad.ghostty.TerminalSize;
-import io.github.vlaaad.ghostty.UnderlineStyle;
 import java.lang.foreign.AddressLayout;
-import java.lang.foreign.Arena;
 import java.lang.foreign.FunctionDescriptor;
 import java.lang.foreign.MemoryLayout;
-import java.lang.foreign.MemorySegment;
-import java.lang.foreign.SegmentAllocator;
+import static java.lang.foreign.MemoryLayout.PathElement.groupElement;
 import java.lang.foreign.SymbolLookup;
 import java.lang.foreign.ValueLayout;
 import java.lang.invoke.MethodHandle;
-import java.nio.charset.StandardCharsets;
-import java.util.Optional;
 
-import static java.lang.foreign.MemoryLayout.PathElement.groupElement;
+import io.github.vlaaad.ghostty.TerminalConfig;
+import io.github.vlaaad.ghostty.TerminalSession;
 
 public final class NativeTerminalBindings {
     static final AddressLayout C_POINTER = ValueLayout.ADDRESS;
@@ -315,7 +299,6 @@ public final class NativeTerminalBindings {
     final MethodHandle ghosttyRenderStateRowGet;
     final MethodHandle ghosttyRenderStateRowSet;
     final MethodHandle ghosttyRenderStateRowCellsNew;
-    final MethodHandle ghosttyRenderStateRowCellsSelect;
     final MethodHandle ghosttyRenderStateRowCellsNext;
     final MethodHandle ghosttyRenderStateRowCellsGet;
     final MethodHandle ghosttyRenderStateRowCellsFree;
@@ -351,7 +334,7 @@ public final class NativeTerminalBindings {
         ghosttyRenderStateRowGet = NativeRuntime.bind(lookup, "ghostty_render_state_row_get", FunctionDescriptor.of(ValueLayout.JAVA_INT, C_POINTER, ValueLayout.JAVA_INT, C_POINTER));
         ghosttyRenderStateRowSet = NativeRuntime.bind(lookup, "ghostty_render_state_row_set", FunctionDescriptor.of(ValueLayout.JAVA_INT, C_POINTER, ValueLayout.JAVA_INT, C_POINTER));
         ghosttyRenderStateRowCellsNew = NativeRuntime.bind(lookup, "ghostty_render_state_row_cells_new", FunctionDescriptor.of(ValueLayout.JAVA_INT, C_POINTER, C_POINTER));
-        ghosttyRenderStateRowCellsSelect = NativeRuntime.bind(lookup, "ghostty_render_state_row_cells_select", FunctionDescriptor.of(ValueLayout.JAVA_INT, C_POINTER, ValueLayout.JAVA_SHORT));
+        
         ghosttyRenderStateRowCellsNext = NativeRuntime.bind(lookup, "ghostty_render_state_row_cells_next", FunctionDescriptor.of(ValueLayout.JAVA_BOOLEAN, C_POINTER));
         ghosttyRenderStateRowCellsGet = NativeRuntime.bind(lookup, "ghostty_render_state_row_cells_get", FunctionDescriptor.of(ValueLayout.JAVA_INT, C_POINTER, ValueLayout.JAVA_INT, C_POINTER));
         ghosttyRenderStateRowCellsFree = NativeRuntime.bind(lookup, "ghostty_render_state_row_cells_free", FunctionDescriptor.ofVoid(C_POINTER));

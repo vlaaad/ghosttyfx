@@ -7,7 +7,6 @@ import io.github.vlaaad.ghostty.CellWidth;
 import io.github.vlaaad.ghostty.ColorPalette;
 import io.github.vlaaad.ghostty.ColorScheme;
 import io.github.vlaaad.ghostty.ColorValue;
-import io.github.vlaaad.ghostty.Cursor;
 import io.github.vlaaad.ghostty.DeviceAttributes;
 import io.github.vlaaad.ghostty.Frame;
 import io.github.vlaaad.ghostty.FrameColors;
@@ -36,8 +35,8 @@ import io.github.vlaaad.ghostty.TerminalScrollViewport;
 import io.github.vlaaad.ghostty.TerminalScrollbar;
 import io.github.vlaaad.ghostty.TerminalSession;
 import io.github.vlaaad.ghostty.TerminalSize;
-import io.github.vlaaad.ghostty.Theme;
 import io.github.vlaaad.ghostty.UnderlineStyle;
+
 import java.lang.foreign.Arena;
 import java.lang.foreign.FunctionDescriptor;
 import java.lang.foreign.Linker;
@@ -62,6 +61,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static java.lang.foreign.MemoryLayout.PathElement.groupElement;
+import java.util.concurrent.ExecutionException;
 
 final class NativeTerminalSession implements TerminalSession {
     private static final MethodHandles.Lookup LOOKUP = MethodHandles.lookup();
@@ -320,7 +320,7 @@ final class NativeTerminalSession implements TerminalSession {
         } catch (InterruptedException exception) {
             Thread.currentThread().interrupt();
             throw NativeRuntime.sneakyThrow(exception);
-        } catch (Exception exception) {
+        } catch (ExecutionException exception) {
             var cause = exception.getCause();
             throw NativeRuntime.sneakyThrow(cause == null ? exception : cause);
         }
@@ -336,18 +336,14 @@ final class NativeTerminalSession implements TerminalSession {
             return;
         }
         eventExecutor.execute(() -> {
-            try {
-                for (var i = 0; i < bells; i++) {
-                    events.bell(this);
-                }
-                if (titleChanged) {
-                    events.titleChanged(this, title);
-                }
-                if (stateChanged) {
-                    events.stateChanged(this);
-                }
-            } catch (Throwable throwable) {
-                throwable.printStackTrace();
+            for (var i = 0; i < bells; i++) {
+                events.bell(this);
+            }
+            if (titleChanged) {
+                events.titleChanged(this, title);
+            }
+            if (stateChanged) {
+                events.stateChanged(this);
             }
         });
     }
@@ -390,21 +386,6 @@ final class NativeTerminalSession implements TerminalSession {
             var out = arena.allocate(ValueLayout.JAVA_INT);
             NativeRuntime.invokeStatus(bindings.ghosttyTerminalGet, "ghostty_terminal_get", terminal, data, out);
             return out.get(ValueLayout.JAVA_INT, 0);
-        }
-    }
-
-    private Optional<ColorValue> optionalColor(int data) {
-        try (var arena = Arena.ofConfined()) {
-            var out = arena.allocate(NativeTerminalBindings.RGB_LAYOUT);
-            try {
-                NativeRuntime.invokeStatus(bindings.ghosttyTerminalGet, "ghostty_terminal_get", terminal, data, out);
-            } catch (ResultException exception) {
-                if (exception.result == NativeRuntime.GHOSTTY_NO_VALUE) {
-                    return Optional.empty();
-                }
-                throw exception;
-            }
-            return Optional.of(rgbColor(out));
         }
     }
 
@@ -494,15 +475,6 @@ final class NativeTerminalSession implements TerminalSession {
         );
     }
 
-    private Style cursorStyle() {
-        try (var arena = Arena.ofConfined()) {
-            var out = arena.allocate(NativeTerminalBindings.STYLE_LAYOUT);
-            out.set(NativeRuntime.SIZE_T_LAYOUT, NativeTerminalBindings.STYLE_SIZE_OFFSET, NativeTerminalBindings.STYLE_LAYOUT.byteSize());
-            NativeRuntime.invokeStatus(bindings.ghosttyTerminalGet, "ghostty_terminal_get", terminal, NativeTerminalBindings.DATA_CURSOR_STYLE, out);
-            return style(out);
-        }
-    }
-
     private MouseTrackingMode mouseTrackingMode() {
         if (modeValue(TerminalMode.ANY_MOUSE).orElse(false)) {
             return MouseTrackingMode.ANY;
@@ -542,42 +514,33 @@ final class NativeTerminalSession implements TerminalSession {
         }
     }
 
-    private Theme theme() {
-        return new Theme(
-            optionalColor(NativeTerminalBindings.DATA_COLOR_FOREGROUND).orElseGet(ColorValue.DefaultColor::new),
-            optionalColor(NativeTerminalBindings.DATA_COLOR_BACKGROUND).orElseGet(ColorValue.DefaultColor::new),
-            optionalColor(NativeTerminalBindings.DATA_COLOR_CURSOR).orElseGet(ColorValue.DefaultColor::new),
-            palette(NativeTerminalBindings.DATA_COLOR_PALETTE),
-            optionalColor(NativeTerminalBindings.DATA_COLOR_FOREGROUND_DEFAULT).orElseGet(ColorValue.DefaultColor::new),
-            optionalColor(NativeTerminalBindings.DATA_COLOR_BACKGROUND_DEFAULT).orElseGet(ColorValue.DefaultColor::new),
-            optionalColor(NativeTerminalBindings.DATA_COLOR_CURSOR_DEFAULT).orElseGet(ColorValue.DefaultColor::new),
-            palette(NativeTerminalBindings.DATA_COLOR_PALETTE_DEFAULT)
-        );
-    }
-
     private MemorySegment point(Arena arena, Point point) {
         var segment = arena.allocate(NativeTerminalBindings.POINT_LAYOUT);
-        if (point instanceof Point.ActivePoint active) {
-            segment.set(ValueLayout.JAVA_INT, NativeTerminalBindings.POINT_TAG_OFFSET, NativeTerminalBindings.POINT_ACTIVE);
-            segment.set(ValueLayout.JAVA_SHORT, NativeTerminalBindings.POINT_X_OFFSET, (short) active.column());
-            segment.set(ValueLayout.JAVA_INT, NativeTerminalBindings.POINT_Y_OFFSET, active.row());
-        } else if (point instanceof Point.ViewportPoint viewport) {
-            segment.set(ValueLayout.JAVA_INT, NativeTerminalBindings.POINT_TAG_OFFSET, NativeTerminalBindings.POINT_VIEWPORT);
-            segment.set(ValueLayout.JAVA_SHORT, NativeTerminalBindings.POINT_X_OFFSET, (short) viewport.column());
-            segment.set(ValueLayout.JAVA_INT, NativeTerminalBindings.POINT_Y_OFFSET, viewport.row());
-        } else if (point instanceof Point.ScreenPoint screen) {
-            segment.set(ValueLayout.JAVA_INT, NativeTerminalBindings.POINT_TAG_OFFSET, NativeTerminalBindings.POINT_SCREEN);
-            segment.set(ValueLayout.JAVA_SHORT, NativeTerminalBindings.POINT_X_OFFSET, (short) screen.column());
-            segment.set(ValueLayout.JAVA_INT, NativeTerminalBindings.POINT_Y_OFFSET, screen.row());
-        } else if (point instanceof Point.HistoryPoint history) {
-            if (history.row() > 0xFFFF_FFFFL) {
-                throw new IllegalArgumentException("history row out of range: " + history.row());
+        switch (point) {
+            case Point.ActivePoint active -> {
+                segment.set(ValueLayout.JAVA_INT, NativeTerminalBindings.POINT_TAG_OFFSET, NativeTerminalBindings.POINT_ACTIVE);
+                segment.set(ValueLayout.JAVA_SHORT, NativeTerminalBindings.POINT_X_OFFSET, (short) active.column());
+                segment.set(ValueLayout.JAVA_INT, NativeTerminalBindings.POINT_Y_OFFSET, active.row());
             }
-            segment.set(ValueLayout.JAVA_INT, NativeTerminalBindings.POINT_TAG_OFFSET, NativeTerminalBindings.POINT_HISTORY);
-            segment.set(ValueLayout.JAVA_SHORT, NativeTerminalBindings.POINT_X_OFFSET, (short) history.column());
-            segment.set(ValueLayout.JAVA_INT, NativeTerminalBindings.POINT_Y_OFFSET, (int) history.row());
-        } else {
-            throw new IllegalArgumentException("Unknown point type: " + point.getClass().getName());
+            case Point.ViewportPoint viewport -> {
+                segment.set(ValueLayout.JAVA_INT, NativeTerminalBindings.POINT_TAG_OFFSET, NativeTerminalBindings.POINT_VIEWPORT);
+                segment.set(ValueLayout.JAVA_SHORT, NativeTerminalBindings.POINT_X_OFFSET, (short) viewport.column());
+                segment.set(ValueLayout.JAVA_INT, NativeTerminalBindings.POINT_Y_OFFSET, viewport.row());
+            }
+            case Point.ScreenPoint screen -> {
+                segment.set(ValueLayout.JAVA_INT, NativeTerminalBindings.POINT_TAG_OFFSET, NativeTerminalBindings.POINT_SCREEN);
+                segment.set(ValueLayout.JAVA_SHORT, NativeTerminalBindings.POINT_X_OFFSET, (short) screen.column());
+                segment.set(ValueLayout.JAVA_INT, NativeTerminalBindings.POINT_Y_OFFSET, screen.row());
+            }
+            case Point.HistoryPoint history -> {
+                if (history.row() > 0xFFFF_FFFFL) {
+                    throw new IllegalArgumentException("history row out of range: " + history.row());
+                }
+                segment.set(ValueLayout.JAVA_INT, NativeTerminalBindings.POINT_TAG_OFFSET, NativeTerminalBindings.POINT_HISTORY);
+                segment.set(ValueLayout.JAVA_SHORT, NativeTerminalBindings.POINT_X_OFFSET, (short) history.column());
+                segment.set(ValueLayout.JAVA_INT, NativeTerminalBindings.POINT_Y_OFFSET, (int) history.row());
+            }
+            default -> throw new IllegalArgumentException("Unknown point type: " + point.getClass().getName());
         }
         return segment;
     }
@@ -1509,7 +1472,7 @@ final class NativeTerminalSession implements TerminalSession {
         } catch (InterruptedException exception) {
             Thread.currentThread().interrupt();
             throw NativeRuntime.sneakyThrow(exception);
-        } catch (Exception exception) {
+        } catch (ExecutionException exception) {
             var cause = exception.getCause();
             throw NativeRuntime.sneakyThrow(cause == null ? exception : cause);
         } finally {
