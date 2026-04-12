@@ -55,6 +55,29 @@ Then, we will use **Maven** for Java libs with runtime-scoped platform dependenc
 
 Use `mvn clean test` when validating local changes.
 
+## Perf Benchmarks
+
+Use the `ghostty-perf` module for before/after measurement of hot paths without mixing benchmark
+code into library or test sources.
+
+Run the fixed perf suite:
+
+`mvn -pl ghostty-perf -am verify`
+
+The suite is intentionally fixed and runs:
+
+- baseline `frame()` benchmarks across `80x24`, `120x40`, and `200x60`
+- a GC-profiled dirty viewport benchmark at `120x40`
+- a JFR-profiled dirty viewport benchmark at `120x40`
+
+Results are written to:
+
+- `ghostty-perf/target/jmh/report.md`
+- `ghostty-perf/target/jmh/baseline.json`
+- `ghostty-perf/target/jmh/dirty-gc.json`
+- `ghostty-perf/target/jmh/dirty-jfr.json`
+- `ghostty-perf/target/jmh/jfr/`
+
 ## Resources
 
 - [libghostty docs](https://libghostty.tip.ghostty.org/index.html)
