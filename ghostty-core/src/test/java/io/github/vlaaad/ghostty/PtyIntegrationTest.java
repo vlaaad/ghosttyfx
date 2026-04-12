@@ -72,7 +72,8 @@ class PtyIntegrationTest {
             return null;
         }
 
-        var extensions = executable.contains(".")
+        var windows = System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win");
+        var extensions = executable.contains(".") || !windows
             ? List.of("")
             : Arrays.stream(System.getenv().getOrDefault("PATHEXT", ".EXE;.CMD;.BAT;.COM").split(";"))
                 .filter(ext -> !ext.isBlank())
