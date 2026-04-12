@@ -1,20 +1,14 @@
 package io.github.vlaaad.ghostty;
 
 import java.nio.charset.StandardCharsets;
-import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 
-final class GhosttyMouseCodecTest {
+final class MouseCodecTest {
     private static final KeyModifiers NO_MODS = new KeyModifiers(false, false, false, false, false, false, null, null, null, null);
     private static final MouseEncoderSize SIMPLE_SIZE = new MouseEncoderSize(1_000, 1_000, 1, 1, 0, 0, 0, 0);
     private static final MouseEncoderSize GRID_SIZE = new MouseEncoderSize(800, 600, 10, 20, 0, 0, 0, 0);
-
-    @BeforeAll
-    static void requiresSupportedRuntime() {
-        GhosttyTestSupport.assumeRuntimeAvailable();
-    }
 
     @Test
     void encodesSgrPressUsingRendererGeometry() {

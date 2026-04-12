@@ -1,20 +1,14 @@
 package io.github.vlaaad.ghostty;
 
 import java.util.Locale;
-import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 
-final class GhosttyKeyCodecTest {
+final class KeyCodecTest {
     private static final KeyModifiers NO_MODS = new KeyModifiers(false, false, false, false, false, false, null, null, null, null);
     private static final KeyModifiers CTRL = new KeyModifiers(false, true, false, false, false, false, null, null, null, null);
     private static final KeyModifiers ALT = new KeyModifiers(false, false, true, false, false, false, null, null, null, null);
-
-    @BeforeAll
-    static void requiresSupportedRuntime() {
-        GhosttyTestSupport.assumeRuntimeAvailable();
-    }
 
     @Test
     void encodesControlCharacters() {

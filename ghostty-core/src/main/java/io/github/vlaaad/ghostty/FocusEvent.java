@@ -1,13 +1,14 @@
 package io.github.vlaaad.ghostty;
 
+import java.util.Objects;
+
 /// Focus event record.
 ///
-/// @param action focus action (IN or OUT)
+/// @param action focus action
 public record FocusEvent(
     FocusAction action
-) {}
-
-/// Focus action enum.
-enum FocusAction {
-    IN, OUT
+) {
+    public FocusEvent {
+        Objects.requireNonNull(action, "action");
+    }
 }

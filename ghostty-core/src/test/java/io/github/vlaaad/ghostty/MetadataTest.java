@@ -1,6 +1,5 @@
 package io.github.vlaaad.ghostty;
 
-import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -8,12 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-final class GhosttyMetadataTest {
-    @BeforeAll
-    static void requiresSupportedRuntime() {
-        GhosttyTestSupport.assumeRuntimeAvailable();
-    }
-
+final class MetadataTest {
     @Test
     void exposesBuildMetadata() {
         var buildInfo = Ghostty.buildInfo();

@@ -64,8 +64,7 @@ public final class Ghostty {
     ///
     /// @return focus codec instance
     public static FocusCodec focusCodec() {
-        NativeRuntime.instance();
-        throw new UnsupportedOperationException("Not yet implemented");
+        return NativeRuntime.instance().nativeFocusCodec;
     }
     
     /// Creates a standalone size-report codec.

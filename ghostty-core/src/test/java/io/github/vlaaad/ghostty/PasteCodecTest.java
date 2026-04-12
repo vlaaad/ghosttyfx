@@ -1,19 +1,13 @@
 package io.github.vlaaad.ghostty;
 
 import java.nio.charset.StandardCharsets;
-import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-final class GhosttyPasteCodecTest {
-    @BeforeAll
-    static void requiresSupportedRuntime() {
-        GhosttyTestSupport.assumeRuntimeAvailable();
-    }
-
+final class PasteCodecTest {
     @Test
     void detectsUnsafePastePayloads() {
         var codec = Ghostty.pasteCodec();
