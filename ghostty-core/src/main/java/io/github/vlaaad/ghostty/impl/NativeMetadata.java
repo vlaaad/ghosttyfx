@@ -27,7 +27,8 @@ public final class NativeMetadata {
     private static final int GHOSTTY_BUILD_INFO_VERSION_MAJOR = 6;
     private static final int GHOSTTY_BUILD_INFO_VERSION_MINOR = 7;
     private static final int GHOSTTY_BUILD_INFO_VERSION_PATCH = 8;
-    private static final int GHOSTTY_BUILD_INFO_VERSION_BUILD = 9;
+    private static final int GHOSTTY_BUILD_INFO_VERSION_PRE = 9;
+    private static final int GHOSTTY_BUILD_INFO_VERSION_BUILD = 10;
 
     private final MethodHandle ghosttyTypeJson;
     private final MethodHandle ghosttyBuildInfo;
@@ -74,6 +75,14 @@ public final class NativeMetadata {
                 "ghostty_build_info(version_patch)",
                 GHOSTTY_BUILD_INFO_VERSION_PATCH,
                 patchOut
+            );
+
+            var preOut = NativeString.allocate(arena);
+            NativeRuntime.invokeStatus(
+                ghosttyBuildInfo,
+                "ghostty_build_info(version_pre)",
+                GHOSTTY_BUILD_INFO_VERSION_PRE,
+                preOut
             );
 
             var buildOut = NativeString.allocate(arena);
@@ -133,6 +142,7 @@ public final class NativeMetadata {
                 majorOut.get(NativeRuntime.SIZE_T_LAYOUT, 0),
                 minorOut.get(NativeRuntime.SIZE_T_LAYOUT, 0),
                 patchOut.get(NativeRuntime.SIZE_T_LAYOUT, 0),
+                NativeString.readUtf8(preOut),
                 NativeString.readUtf8(buildOut),
                 switch (optimize) {
                     case GHOSTTY_OPTIMIZE_DEBUG -> BuildOptimize.DEBUG;

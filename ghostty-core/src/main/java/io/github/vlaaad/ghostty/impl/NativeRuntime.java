@@ -27,6 +27,7 @@ public final class NativeRuntime {
     public final NativePasteCodec nativePasteCodec;
     public final NativeFocusCodec nativeFocusCodec;
     public final NativeSizeReportCodec nativeSizeReportCodec;
+    public final NativeModeReportCodec nativeModeReportCodec;
 
     private NativeRuntime() {
         var osName = System.getProperty("os.name", "");
@@ -86,6 +87,7 @@ public final class NativeRuntime {
         nativePasteCodec = new NativePasteCodec(lookup);
         nativeFocusCodec = new NativeFocusCodec(lookup);
         nativeSizeReportCodec = new NativeSizeReportCodec(lookup);
+        nativeModeReportCodec = new NativeModeReportCodec(lookup);
     }
 
     public static NativeRuntime instance() {

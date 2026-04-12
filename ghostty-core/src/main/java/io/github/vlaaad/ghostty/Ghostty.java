@@ -73,6 +73,13 @@ public final class Ghostty {
     public static SizeReportCodec sizeReportCodec() {
         return NativeRuntime.instance().nativeSizeReportCodec;
     }
+
+    /// Creates a standalone mode-report codec.
+    ///
+    /// @return mode report codec instance
+    public static ModeReportCodec modeReportCodec() {
+        return NativeRuntime.instance().nativeModeReportCodec;
+    }
     
     /// Gets build information.
     ///
