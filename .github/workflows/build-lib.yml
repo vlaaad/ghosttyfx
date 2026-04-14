@@ -35,7 +35,7 @@ jobs:
           cd ghostty
           zig build -Dapp-runtime=none -Demit-lib-vt=true
           cd ../native/frame-snapshot
-          zig build -Dghostty-root=../../ghostty
+          zig build "-Dghostty-root=../../ghostty"
 
       - name: Package
         run: |
