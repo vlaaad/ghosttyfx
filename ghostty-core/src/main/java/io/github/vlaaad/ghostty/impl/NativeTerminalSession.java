@@ -49,7 +49,6 @@ import java.lang.invoke.MethodHandles;
 import java.lang.invoke.MethodType;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Objects;
@@ -956,13 +955,13 @@ final class NativeTerminalSession implements TerminalSession {
         var runsOffset = NativeFrameSnapshotLayout.u64(snapshot, NativeFrameSnapshotLayout.RUNS_OFFSET_OFFSET);
         var textBytesOffset = NativeFrameSnapshotLayout.u64(snapshot, NativeFrameSnapshotLayout.TEXT_BYTES_OFFSET_OFFSET);
 
-        var resolvedStyleIds = new int[styleCount];
+        var resolvedStyles = new FrameStyle[styleCount];
         for (var styleIndex = 0; styleIndex < styleCount; styleIndex++) {
             var style = NativeFrameSnapshotLayout.style(
                 snapshot,
                 stylesOffset + (long) styleIndex * NativeFrameSnapshotLayout.STYLE_ENTRY_SIZE
             );
-            resolvedStyleIds[styleIndex] = frameStyleId(styles, styleIds, style);
+            resolvedStyles[styleIndex] = styles.get(frameStyleId(styles, styleIds, style));
         }
 
         var previousRows = cachedFrame == null ? List.<FrameRow>of() : cachedFrame.rows();
@@ -986,7 +985,7 @@ final class NativeTerminalSession implements TerminalSession {
                 var textLength = NativeFrameSnapshotLayout.u32(snapshot, runOffset + NativeFrameSnapshotLayout.RUN_TEXT_LENGTH_OFFSET);
                 runs.add(new FrameRun(
                     NativeFrameSnapshotLayout.utf8(snapshot, textBytesOffset + textStart, textLength),
-                    resolvedStyleIds[styleIndex],
+                    resolvedStyles[styleIndex],
                     NativeFrameSnapshotLayout.u32(snapshot, runOffset + NativeFrameSnapshotLayout.RUN_COLUMNS_OFFSET)
                 ));
             }
@@ -1185,12 +1184,11 @@ final class NativeTerminalSession implements TerminalSession {
     public void write(byte[] vt, int offset, int length) {
         Objects.requireNonNull(vt, "vt");
         Objects.checkFromIndexSize(offset, length, vt.length);
-        var bytes = Arrays.copyOfRange(vt, offset, offset + length);
         mutate(() -> {
             try (var arena = Arena.ofConfined()) {
-                var input = arena.allocate(bytes.length);
-                input.copyFrom(MemorySegment.ofArray(bytes));
-                NativeRuntime.invoke(bindings.ghosttyTerminalVtWrite, terminal, input, (long) bytes.length);
+                var input = arena.allocate(length);
+                input.copyFrom(MemorySegment.ofArray(vt).asSlice(offset, length));
+                NativeRuntime.invoke(bindings.ghosttyTerminalVtWrite, terminal, input, (long) length);
             }
         }, true);
     }

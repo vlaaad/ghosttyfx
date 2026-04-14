@@ -1,16 +1,7 @@
 # Terminal Frame Progress
 
-Status legend: `todo`, `doing`, `done`.
+Evaluate:
 
-## Current target
-- `done` replace `snapshot()` with render-oriented `frame()`
-- `done` bind libghostty render-state API
-- `done` add detached Java frame model
-- `done` rewire terminal session to cache and reuse frame rows/styles
-- `done` update tests to exercise `frame()`
-
-## Notes
-- `frame()` is viewport-only and backed by libghostty render state.
-- Inspector APIs (`cell/row/screen`) remain detached and slower.
-- Native libghostty data is the source of truth.
-- Keep all mutable terminal access serialized on one internal actor thread.
+FrameStyle and KittyKeyboardFlags, RowFlags - can use int as a storage for flags, boolean as accessors
+Audit utf8 string helpers
+FrameRow, FrameRun - strings for text or a custom charsequence over backing codepoints array?
