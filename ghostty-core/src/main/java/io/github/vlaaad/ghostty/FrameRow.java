@@ -1,36 +1,30 @@
 package io.github.vlaaad.ghostty;
 
+import java.util.List;
 import java.util.Objects;
 
 /// Detached render row for a frame viewport.
 public final class FrameRow {
-    private static final CellWidth[] CELL_WIDTHS = CellWidth.values();
-
     private final int index;
     private final boolean dirty;
     private final RowFlags flags;
-    private final String[] text;
-    private final byte[] widths;
-    private final int[] styleIds;
+    private final List<FrameRun> runs;
+    private final int columns;
 
     public FrameRow(
         int index,
         boolean dirty,
         RowFlags flags,
-        String[] text,
-        byte[] widths,
-        int[] styleIds
+        List<FrameRun> runs
     ) {
-        this(index, dirty, flags, text, widths, styleIds, false);
+        this(index, dirty, flags, runs, false);
     }
 
     private FrameRow(
         int index,
         boolean dirty,
         RowFlags flags,
-        String[] text,
-        byte[] widths,
-        int[] styleIds,
+        List<FrameRun> runs,
         boolean trusted
     ) {
         if (index < 0) {
@@ -39,12 +33,12 @@ public final class FrameRow {
         this.index = index;
         this.dirty = dirty;
         this.flags = Objects.requireNonNull(flags, "flags");
-        this.text = trusted ? Objects.requireNonNull(text, "text") : Objects.requireNonNull(text, "text").clone();
-        this.widths = trusted ? Objects.requireNonNull(widths, "widths") : Objects.requireNonNull(widths, "widths").clone();
-        this.styleIds = trusted ? Objects.requireNonNull(styleIds, "styleIds") : Objects.requireNonNull(styleIds, "styleIds").clone();
-        if (this.text.length != this.widths.length || this.text.length != this.styleIds.length) {
-            throw new IllegalArgumentException("text, widths, and styleIds must have the same length");
+        this.runs = trusted ? Objects.requireNonNull(runs, "runs") : List.copyOf(runs);
+        var columns = 0;
+        for (var run : this.runs) {
+            columns += run.columns();
         }
+        this.columns = columns;
     }
 
     public int index() {
@@ -60,19 +54,22 @@ public final class FrameRow {
     }
 
     public int columns() {
-        return text.length;
+        return columns;
     }
 
-    public String text(int column) {
-        return text[columnIndex(column)];
+    public List<FrameRun> runs() {
+        return runs;
     }
 
-    public CellWidth width(int column) {
-        return CELL_WIDTHS[Byte.toUnsignedInt(widths[columnIndex(column)])];
-    }
-
-    public int styleId(int column) {
-        return styleIds[columnIndex(column)];
+    public String text() {
+        if (runs.isEmpty()) {
+            return "";
+        }
+        var builder = new StringBuilder();
+        for (var run : runs) {
+            builder.append(run.text());
+        }
+        return builder.toString();
     }
 
     public FrameRow withDirty(boolean dirty) {
@@ -90,14 +87,8 @@ public final class FrameRow {
                     flags.kittyVirtualPlaceholder(),
                     dirty
                 ),
-                text,
-                widths,
-                styleIds,
+                runs,
                 true
             );
-    }
-
-    private int columnIndex(int column) {
-        return Objects.checkIndex(column, text.length);
     }
 }

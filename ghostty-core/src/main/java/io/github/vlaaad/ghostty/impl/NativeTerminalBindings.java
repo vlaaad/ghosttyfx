@@ -302,8 +302,16 @@ public final class NativeTerminalBindings {
     final MethodHandle ghosttyRenderStateRowCellsNext;
     final MethodHandle ghosttyRenderStateRowCellsGet;
     final MethodHandle ghosttyRenderStateRowCellsFree;
+    private final NativeFrameSnapshotBindings frameSnapshotBindings;
+    private final String ghosttyVtLibraryPath;
 
-    NativeTerminalBindings(SymbolLookup lookup) {
+    NativeTerminalBindings(
+        SymbolLookup lookup,
+        NativeFrameSnapshotBindings frameSnapshotBindings,
+        String ghosttyVtLibraryPath
+    ) {
+        this.frameSnapshotBindings = frameSnapshotBindings;
+        this.ghosttyVtLibraryPath = ghosttyVtLibraryPath;
         ghosttyTerminalNew = NativeRuntime.bind(lookup, "ghostty_terminal_new", FunctionDescriptor.of(ValueLayout.JAVA_INT, C_POINTER, C_POINTER, TERMINAL_OPTIONS_LAYOUT));
         ghosttyTerminalFree = NativeRuntime.bind(lookup, "ghostty_terminal_free", FunctionDescriptor.ofVoid(C_POINTER));
         ghosttyTerminalReset = NativeRuntime.bind(lookup, "ghostty_terminal_reset", FunctionDescriptor.ofVoid(C_POINTER));
@@ -346,6 +354,6 @@ public final class NativeTerminalBindings {
         io.github.vlaaad.ghostty.TerminalQueries queries,
         io.github.vlaaad.ghostty.TerminalEvents events
     ) {
-        return new NativeTerminalSession(this, config, ptyWriter, queries, events);
+        return new NativeTerminalSession(this, frameSnapshotBindings, ghosttyVtLibraryPath, config, ptyWriter, queries, events);
     }
 }

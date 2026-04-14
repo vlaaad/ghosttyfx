@@ -34,13 +34,17 @@ jobs:
         run: |
           cd ghostty
           zig build -Dapp-runtime=none -Demit-lib-vt=true
+          cd ../native/frame-snapshot
+          zig build -Dghostty-root=../../ghostty
 
       - name: Package
         run: |
           rm -rf dist/platforms/libghostty-vt-linux-x86_64
           mkdir -p dist/platforms/libghostty-vt-linux-x86_64/lib
           test -f ghostty/zig-out/lib/libghostty-vt.so.0.1.0
+          test -f native/frame-snapshot/zig-out/lib/libghosttyfx-frame.so
           cp ghostty/zig-out/lib/libghostty-vt.so.0.1.0 dist/platforms/libghostty-vt-linux-x86_64/lib/libghostty-vt-linux-x86_64.so
+          cp native/frame-snapshot/zig-out/lib/libghosttyfx-frame.so dist/platforms/libghostty-vt-linux-x86_64/lib/libghosttyfx-frame-linux-x86_64.so
 
       - name: Test Java package
         run: mvn -B -pl ghostty-core,ghostty-linux-x86_64 -am test
@@ -81,13 +85,17 @@ jobs:
         run: |
           cd ghostty
           zig build -Dapp-runtime=none -Demit-lib-vt=true
+          cd ../native/frame-snapshot
+          zig build -Dghostty-root=../../ghostty
 
       - name: Package
         run: |
           rm -rf dist/platforms/libghostty-vt-macos-aarch64
           mkdir -p dist/platforms/libghostty-vt-macos-aarch64/lib
           test -f ghostty/zig-out/lib/libghostty-vt.0.1.0.dylib
+          test -f native/frame-snapshot/zig-out/lib/libghosttyfx-frame.dylib
           cp ghostty/zig-out/lib/libghostty-vt.0.1.0.dylib dist/platforms/libghostty-vt-macos-aarch64/lib/libghostty-vt-macos-aarch64.dylib
+          cp native/frame-snapshot/zig-out/lib/libghosttyfx-frame.dylib dist/platforms/libghostty-vt-macos-aarch64/lib/libghosttyfx-frame-macos-aarch64.dylib
 
       - name: Test Java package
         run: mvn -B -pl ghostty-core,ghostty-macos-aarch64 -am test
@@ -128,13 +136,17 @@ jobs:
         run: |
           cd ghostty
           zig build -Dapp-runtime=none -Demit-lib-vt=true
+          cd ../native/frame-snapshot
+          zig build -Dghostty-root=../../ghostty
 
       - name: Package
         run: |
           rm -rf dist/platforms/libghostty-vt-macos-x86_64
           mkdir -p dist/platforms/libghostty-vt-macos-x86_64/lib
           test -f ghostty/zig-out/lib/libghostty-vt.0.1.0.dylib
+          test -f native/frame-snapshot/zig-out/lib/libghosttyfx-frame.dylib
           cp ghostty/zig-out/lib/libghostty-vt.0.1.0.dylib dist/platforms/libghostty-vt-macos-x86_64/lib/libghostty-vt-macos-x86_64.dylib
+          cp native/frame-snapshot/zig-out/lib/libghosttyfx-frame.dylib dist/platforms/libghostty-vt-macos-x86_64/lib/libghosttyfx-frame-macos-x86_64.dylib
 
       - name: Test Java package
         run: mvn -B -pl ghostty-core,ghostty-macos-x86_64 -am test
@@ -192,6 +204,8 @@ jobs:
         run: |
           cd ghostty
           zig build -Dapp-runtime=none -Demit-lib-vt=true
+          cd ../native/frame-snapshot
+          zig build -Dghostty-root=../../ghostty
 
       - name: Package
         shell: pwsh
@@ -199,9 +213,13 @@ jobs:
           if (-not (Test-Path "ghostty/zig-out/bin/ghostty-vt.dll")) {
             throw "Expected Windows shared library at ghostty/zig-out/bin/ghostty-vt.dll"
           }
+          if (-not (Test-Path "native/frame-snapshot/zig-out/bin/ghosttyfx-frame.dll")) {
+            throw "Expected Windows shim at native/frame-snapshot/zig-out/bin/ghosttyfx-frame.dll"
+          }
           Remove-Item -Recurse -Force "dist/platforms/libghostty-vt-windows-x86_64" -ErrorAction SilentlyContinue
           New-Item -ItemType Directory -Force -Path "dist/platforms/libghostty-vt-windows-x86_64/lib" | Out-Null
           Copy-Item "ghostty/zig-out/bin/ghostty-vt.dll" "dist/platforms/libghostty-vt-windows-x86_64/lib/libghostty-vt-windows-x86_64.dll"
+          Copy-Item "native/frame-snapshot/zig-out/bin/ghosttyfx-frame.dll" "dist/platforms/libghostty-vt-windows-x86_64/lib/libghosttyfx-frame-windows-x86_64.dll"
 
       - name: Test Java package
         run: mvn -B -pl ghostty-core,ghostty-windows-x86_64 -am test

@@ -154,11 +154,7 @@ class TerminalSessionTest {
     }
 
     private static String rowText(FrameRow row) {
-        var builder = new StringBuilder();
-        for (var column = 0; column < row.columns(); column++) {
-            builder.append(row.text(column));
-        }
-        return builder.toString().stripTrailing();
+        return row.text().stripTrailing();
     }
 
     private static byte[] join(List<byte[]> chunks) {

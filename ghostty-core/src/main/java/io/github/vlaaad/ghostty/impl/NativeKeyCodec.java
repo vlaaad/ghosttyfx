@@ -123,7 +123,6 @@ public final class NativeKeyCodec {
     }
 
     public KeyCodec keyCodec(KeyCodecConfig config) {
-        Objects.requireNonNull(config, "config");
         try (var arena = Arena.ofConfined()) {
             var encoderOut = arena.allocate(ValueLayout.ADDRESS);
             NativeRuntime.invokeStatus(

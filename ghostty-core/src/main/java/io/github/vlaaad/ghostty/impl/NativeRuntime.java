@@ -8,7 +8,6 @@ import java.lang.foreign.ValueLayout;
 import java.lang.invoke.MethodHandle;
 import java.lang.ref.Cleaner;
 import java.nio.file.Files;
-import java.nio.file.StandardCopyOption;
 import java.util.Locale;
 
 public final class NativeRuntime {
@@ -28,6 +27,7 @@ public final class NativeRuntime {
     public final NativeFocusCodec nativeFocusCodec;
     public final NativeSizeReportCodec nativeSizeReportCodec;
     public final NativeModeReportCodec nativeModeReportCodec;
+    public final NativeFrameSnapshotBindings nativeFrameSnapshot;
     public final NativeTerminalBindings nativeTerminal;
 
     private NativeRuntime() {
@@ -59,27 +59,8 @@ public final class NativeRuntime {
         };
 
         var platform = os + "-" + arch;
-        var libraryFileName = "libghostty-vt-" + platform + extension;
-        var libraryResource = "native/" + platform + "/" + libraryFileName;
-
-        try (var input = NativeRuntime.class.getClassLoader().getResourceAsStream(libraryResource)) {
-            if (input == null) {
-                throw new UnsupportedOperationException(
-                    "Native runtime is not available for os '" + osName + "' and arch '" + archName
-                        + "': missing '" + libraryResource + "'"
-                );
-            }
-
-            var directory = Files.createTempDirectory("ghosttyfx-" + platform + "-");
-            directory.toFile().deleteOnExit();
-
-            var extracted = directory.resolve(libraryFileName);
-            Files.copy(input, extracted, StandardCopyOption.REPLACE_EXISTING);
-            extracted.toFile().deleteOnExit();
-            System.load(extracted.toAbsolutePath().toString());
-        } catch (IOException exception) {
-            throw sneakyThrow(exception);
-        }
+        var ghosttyVtLibrary = loadNativeLibrary(platform, extension, "libghostty-vt");
+        loadNativeLibrary(platform, extension, "libghosttyfx-frame");
 
         var lookup = SymbolLookup.loaderLookup();
         metadata = new NativeMetadata(lookup);
@@ -89,7 +70,8 @@ public final class NativeRuntime {
         nativeFocusCodec = new NativeFocusCodec(lookup);
         nativeSizeReportCodec = new NativeSizeReportCodec(lookup);
         nativeModeReportCodec = new NativeModeReportCodec(lookup);
-        nativeTerminal = new NativeTerminalBindings(lookup);
+        nativeFrameSnapshot = new NativeFrameSnapshotBindings(lookup);
+        nativeTerminal = new NativeTerminalBindings(lookup, nativeFrameSnapshot, ghosttyVtLibrary.toAbsolutePath().toString());
     }
 
     public static NativeRuntime instance() {
@@ -144,4 +126,28 @@ public final class NativeRuntime {
     private static final class Holder {
         private static final NativeRuntime INSTANCE = new NativeRuntime();
     }
+
+    private static java.nio.file.Path loadNativeLibrary(
+        String platform,
+        String extension,
+        String baseName
+    ) {
+        var libraryFileName = baseName + "-" + platform + extension;
+        var libraryResource = "native/" + platform + "/" + libraryFileName;
+        try (var input = NativeRuntime.class.getClassLoader().getResourceAsStream(libraryResource)) {
+            if (input == null) {
+                throw new UnsupportedOperationException(
+                    "Native runtime is not available: missing '" + libraryResource + "'"
+                );
+            }
+            var extracted = Files.createTempFile(baseName + "-" + platform + "-", extension);
+            Files.copy(input, extracted, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            extracted.toFile().deleteOnExit();
+            System.load(extracted.toAbsolutePath().toString());
+            return extracted;
+        } catch (IOException exception) {
+            throw sneakyThrow(exception);
+        }
+    }
+
 }

@@ -2,6 +2,8 @@ package io.github.vlaaad.ghostty;
 
 import io.github.vlaaad.ghostty.impl.NativeRuntime;
 
+import java.util.Objects;
+
 /// Public bootstrap entry point for the Ghostty core API.
 ///
 /// This facade is responsible for locating the platform-specific native adapter internally.
@@ -33,7 +35,12 @@ public final class Ghostty {
         TerminalQueries queries,
         TerminalEvents events
     ) {
-        return NativeRuntime.instance().nativeTerminal.open(config, ptyWriter, queries, events);
+        return NativeRuntime.instance().nativeTerminal.open(
+            Objects.requireNonNull(config, "config"),
+            Objects.requireNonNull(ptyWriter, "ptyWriter"),
+            Objects.requireNonNull(queries, "queries"),
+            Objects.requireNonNull(events, "events")
+        );
     }
     
     /// Creates a standalone key codec for translating host key events into VT sequences.
@@ -41,7 +48,7 @@ public final class Ghostty {
     /// @param config key codec configuration
     /// @return key codec instance
     public static KeyCodec keyCodec(KeyCodecConfig config) {
-        return NativeRuntime.instance().nativeKeyCodec.keyCodec(config);
+        return NativeRuntime.instance().nativeKeyCodec.keyCodec(Objects.requireNonNull(config, "config"));
     }
     
     /// Creates a standalone mouse codec for translating host mouse events into VT sequences.
@@ -49,7 +56,7 @@ public final class Ghostty {
     /// @param config mouse codec configuration
     /// @return mouse codec instance
     public static MouseCodec mouseCodec(MouseCodecConfig config) {
-        return NativeRuntime.instance().nativeMouseCodec.mouseCodec(config);
+        return NativeRuntime.instance().nativeMouseCodec.mouseCodec(Objects.requireNonNull(config, "config"));
     }
     
     /// Creates a standalone paste codec.

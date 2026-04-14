@@ -13,6 +13,7 @@ import io.github.vlaaad.ghostty.FrameColors;
 import io.github.vlaaad.ghostty.FrameCursor;
 import io.github.vlaaad.ghostty.FrameCursorStyle;
 import io.github.vlaaad.ghostty.FrameDirty;
+import io.github.vlaaad.ghostty.FrameRun;
 import io.github.vlaaad.ghostty.FrameRow;
 import io.github.vlaaad.ghostty.FrameStyle;
 import io.github.vlaaad.ghostty.Hyperlink;
@@ -139,8 +140,12 @@ final class NativeTerminalSession implements TerminalSession {
     private final MemorySegment sizeCallback;
     private final MemorySegment colorSchemeCallback;
     private final MemorySegment deviceAttributesCallback;
+    private final NativeFrameSnapshotBindings frameSnapshotBindings;
+    private final MemorySegment frameSnapshotLibraryPath;
+    private final MemorySegment frameSnapshotView = callbackArena.allocate(NativeFrameSnapshotBindings.SNAPSHOT_VIEW_LAYOUT);
 
     private volatile MemorySegment terminal = MemorySegment.NULL;
+    private volatile MemorySegment frameSnapshot = MemorySegment.NULL;
     private volatile MemorySegment renderState = MemorySegment.NULL;
     private volatile MemorySegment renderRowIterator = MemorySegment.NULL;
     private volatile MemorySegment renderRowCells = MemorySegment.NULL;
@@ -153,16 +158,20 @@ final class NativeTerminalSession implements TerminalSession {
 
     NativeTerminalSession(
         NativeTerminalBindings bindings,
+        NativeFrameSnapshotBindings frameSnapshotBindings,
+        String ghosttyVtLibraryPath,
         TerminalConfig config,
         PtyWriter ptyWriter,
         TerminalQueries queries,
         TerminalEvents events
     ) {
-        this.bindings = Objects.requireNonNull(bindings, "bindings");
-        this.config = Objects.requireNonNull(config, "config");
-        this.ptyWriter = Objects.requireNonNull(ptyWriter, "ptyWriter");
-        this.queries = Objects.requireNonNull(queries, "queries");
-        this.events = Objects.requireNonNull(events, "events");
+        this.bindings = bindings;
+        this.frameSnapshotBindings = frameSnapshotBindings;
+        this.frameSnapshotLibraryPath = nativeUtf8(ghosttyVtLibraryPath);
+        this.config = config;
+        this.ptyWriter = ptyWriter;
+        this.queries = queries;
+        this.events = events;
         emptyNativeString.set(NativeTerminalBindings.C_POINTER, 0, MemorySegment.NULL);
         emptyNativeString.set(NativeRuntime.SIZE_T_LAYOUT, ValueLayout.ADDRESS.byteSize(), 0L);
         actor = Executors.newSingleThreadExecutor(threadFactory("ghostty-terminal-actor", actorThread));
@@ -268,16 +277,33 @@ final class NativeTerminalSession implements TerminalSession {
             renderState = newHandle(bindings.ghosttyRenderStateNew, "ghostty_render_state_new");
             renderRowIterator = newHandle(bindings.ghosttyRenderStateRowIteratorNew, "ghostty_render_state_row_iterator_new");
             renderRowCells = newHandle(bindings.ghosttyRenderStateRowCellsNew, "ghostty_render_state_row_cells_new");
+            frameSnapshot = newHandle(
+                frameSnapshotBindings.ghosttyfxFrameSnapshotNew,
+                "ghosttyfx_frame_snapshot_new",
+                frameSnapshotLibraryPath
+            );
             return handle;
         }
     }
 
-    private MemorySegment newHandle(MethodHandle constructor, String action) {
+    private MemorySegment newHandle(MethodHandle constructor, String action, Object... arguments) {
         try (var arena = Arena.ofConfined()) {
             var out = arena.allocate(NativeTerminalBindings.C_POINTER);
-            NativeRuntime.invokeStatus(constructor, action, MemorySegment.NULL, out);
+            var args = new Object[arguments.length + 2];
+            args[0] = MemorySegment.NULL;
+            System.arraycopy(arguments, 0, args, 1, arguments.length);
+            args[args.length - 1] = out;
+            NativeRuntime.invokeStatus(constructor, action, args);
             return out.get(NativeTerminalBindings.C_POINTER, 0);
         }
+    }
+
+    private MemorySegment nativeUtf8(String value) {
+        var bytes = value.getBytes(StandardCharsets.UTF_8);
+        var data = callbackArena.allocate(bytes.length + 1L);
+        data.asSlice(0, bytes.length).copyFrom(MemorySegment.ofArray(bytes));
+        data.set(ValueLayout.JAVA_BYTE, bytes.length, (byte) 0);
+        return data;
     }
 
     private void setCallback(MemorySegment handle, int option, MemorySegment callback) {
@@ -840,65 +866,6 @@ final class NativeTerminalSession implements TerminalSession {
         }
     }
 
-    private ResolvedFrameColors frameColors(Arena arena) {
-        var out = arena.allocate(NativeTerminalBindings.RENDER_STATE_COLORS_LAYOUT);
-        out.set(NativeRuntime.SIZE_T_LAYOUT, NativeTerminalBindings.RENDER_STATE_COLORS_SIZE_OFFSET, NativeTerminalBindings.RENDER_STATE_COLORS_LAYOUT.byteSize());
-        NativeRuntime.invokeStatus(bindings.ghosttyRenderStateColorsGet, "ghostty_render_state_colors_get", renderState, out);
-        var palette = new int[256];
-        var stride = NativeTerminalBindings.RGB_LAYOUT.byteSize();
-        for (var i = 0; i < palette.length; i++) {
-            palette[i] = packedRgb(out.asSlice(
-                NativeTerminalBindings.RENDER_STATE_COLORS_PALETTE_OFFSET + (i * stride),
-                stride
-            ));
-        }
-        var cursorExplicit = out.get(ValueLayout.JAVA_BOOLEAN, NativeTerminalBindings.RENDER_STATE_COLORS_CURSOR_HAS_VALUE_OFFSET);
-        return new ResolvedFrameColors(
-            new FrameColors(
-                packedRgb(out.asSlice(NativeTerminalBindings.RENDER_STATE_COLORS_FOREGROUND_OFFSET, NativeTerminalBindings.RGB_LAYOUT.byteSize())),
-                packedRgb(out.asSlice(NativeTerminalBindings.RENDER_STATE_COLORS_BACKGROUND_OFFSET, NativeTerminalBindings.RGB_LAYOUT.byteSize())),
-                cursorExplicit
-                    ? packedRgb(out.asSlice(NativeTerminalBindings.RENDER_STATE_COLORS_CURSOR_OFFSET, NativeTerminalBindings.RGB_LAYOUT.byteSize()))
-                    : 0,
-                cursorExplicit
-            ),
-            palette
-        );
-    }
-
-    private FrameCursor frameCursor(Arena arena) {
-        var inViewport = renderStateBoolean(arena, NativeTerminalBindings.RENDER_STATE_DATA_CURSOR_VIEWPORT_HAS_VALUE);
-        return new FrameCursor(
-            renderStateBoolean(arena, NativeTerminalBindings.RENDER_STATE_DATA_CURSOR_VISIBLE),
-            renderStateBoolean(arena, NativeTerminalBindings.RENDER_STATE_DATA_CURSOR_BLINKING),
-            renderStateBoolean(arena, NativeTerminalBindings.RENDER_STATE_DATA_CURSOR_PASSWORD_INPUT),
-            inViewport,
-            inViewport ? renderStateU16(arena, NativeTerminalBindings.RENDER_STATE_DATA_CURSOR_VIEWPORT_X) : -1,
-            inViewport ? renderStateU16(arena, NativeTerminalBindings.RENDER_STATE_DATA_CURSOR_VIEWPORT_Y) : -1,
-            inViewport && renderStateBoolean(arena, NativeTerminalBindings.RENDER_STATE_DATA_CURSOR_VIEWPORT_WIDE_TAIL),
-            FrameCursorStyle.values()[renderStateInt(arena, NativeTerminalBindings.RENDER_STATE_DATA_CURSOR_VISUAL_STYLE)]
-        );
-    }
-
-    private FrameStyle frameStyle(MemorySegment segment, int foreground, int background, int[] palette) {
-        var underlineStyle = UnderlineStyle.values()[segment.get(ValueLayout.JAVA_INT, NativeTerminalBindings.STYLE_UNDERLINE_OFFSET)];
-        return new FrameStyle(
-            foreground,
-            background,
-            resolveStyleColor(segment, NativeTerminalBindings.STYLE_UNDERLINE_COLOR_OFFSET, palette, foreground),
-            underlineStyle,
-            segment.get(ValueLayout.JAVA_BOOLEAN, NativeTerminalBindings.STYLE_BOLD_OFFSET),
-            segment.get(ValueLayout.JAVA_BOOLEAN, NativeTerminalBindings.STYLE_FAINT_OFFSET),
-            segment.get(ValueLayout.JAVA_BOOLEAN, NativeTerminalBindings.STYLE_ITALIC_OFFSET),
-            underlineStyle != UnderlineStyle.NONE,
-            segment.get(ValueLayout.JAVA_BOOLEAN, NativeTerminalBindings.STYLE_BLINK_OFFSET),
-            segment.get(ValueLayout.JAVA_BOOLEAN, NativeTerminalBindings.STYLE_INVERSE_OFFSET),
-            segment.get(ValueLayout.JAVA_BOOLEAN, NativeTerminalBindings.STYLE_INVISIBLE_OFFSET),
-            segment.get(ValueLayout.JAVA_BOOLEAN, NativeTerminalBindings.STYLE_STRIKETHROUGH_OFFSET),
-            segment.get(ValueLayout.JAVA_BOOLEAN, NativeTerminalBindings.STYLE_OVERLINE_OFFSET)
-        );
-    }
-
     private int frameStyleId(List<FrameStyle> styles, HashMap<FrameStyle, Integer> styleIds, FrameStyle style) {
         var existing = styleIds.get(style);
         if (existing != null) {
@@ -908,37 +875,6 @@ final class NativeTerminalSession implements TerminalSession {
         styles.add(style);
         styleIds.put(style, index);
         return index;
-    }
-
-    private RowFlags rowFlags(Arena arena, long rawRow, boolean dirty) {
-        return new RowFlags(
-            rowBoolean(arena, rawRow, NativeTerminalBindings.ROW_DATA_WRAP),
-            rowBoolean(arena, rawRow, NativeTerminalBindings.ROW_DATA_WRAP_CONTINUATION),
-            rowBoolean(arena, rawRow, NativeTerminalBindings.ROW_DATA_GRAPHEME),
-            rowBoolean(arena, rawRow, NativeTerminalBindings.ROW_DATA_STYLED),
-            rowBoolean(arena, rawRow, NativeTerminalBindings.ROW_DATA_HYPERLINK),
-            rowBoolean(arena, rawRow, NativeTerminalBindings.ROW_DATA_KITTY_VIRTUAL_PLACEHOLDER),
-            dirty
-        );
-    }
-
-    private String renderCellText(Arena arena, int graphemeCount) {
-        if (graphemeCount == 0) {
-            return EMPTY_TEXT;
-        }
-        var out = arena.allocate(ValueLayout.JAVA_INT, graphemeCount);
-        NativeRuntime.invokeStatus(
-            bindings.ghosttyRenderStateRowCellsGet,
-            "ghostty_render_state_row_cells_get",
-            renderRowCells,
-            NativeTerminalBindings.RENDER_STATE_ROW_CELLS_DATA_GRAPHEMES_BUF,
-            out
-        );
-        var codepoints = new int[graphemeCount];
-        for (var i = 0; i < graphemeCount; i++) {
-            codepoints[i] = out.getAtIndex(ValueLayout.JAVA_INT, i);
-        }
-        return new String(codepoints, 0, graphemeCount);
     }
 
     private List<FrameRow> cleanFrameRows(List<FrameRow> rows) {
@@ -975,122 +911,176 @@ final class NativeTerminalSession implements TerminalSession {
             && frame.workingDirectory().equals(pwd);
     }
 
+    private MemorySegment captureFrameSnapshot() {
+        frameSnapshotView.set(
+            NativeRuntime.SIZE_T_LAYOUT,
+            NativeFrameSnapshotBindings.SNAPSHOT_VIEW_SIZE_OFFSET,
+            NativeFrameSnapshotBindings.SNAPSHOT_VIEW_LAYOUT.byteSize()
+        );
+        NativeRuntime.invokeStatus(
+            frameSnapshotBindings.ghosttyfxFrameSnapshotCapture,
+            "ghosttyfx_frame_snapshot_capture",
+            frameSnapshot,
+            terminal,
+            frameSnapshotView
+        );
+        var data = frameSnapshotView.get(NativeTerminalBindings.C_POINTER, NativeFrameSnapshotBindings.SNAPSHOT_VIEW_DATA_OFFSET);
+        var len = frameSnapshotView.get(NativeRuntime.SIZE_T_LAYOUT, NativeFrameSnapshotBindings.SNAPSHOT_VIEW_LEN_OFFSET);
+        return data.reinterpret(len);
+    }
+
+    private RowFlags rowFlags(int flags) {
+        return new RowFlags(
+            (flags & NativeFrameSnapshotLayout.ROW_FLAG_WRAPPED) != 0,
+            (flags & NativeFrameSnapshotLayout.ROW_FLAG_WRAP_CONTINUATION) != 0,
+            (flags & NativeFrameSnapshotLayout.ROW_FLAG_GRAPHEME) != 0,
+            (flags & NativeFrameSnapshotLayout.ROW_FLAG_STYLED) != 0,
+            (flags & NativeFrameSnapshotLayout.ROW_FLAG_HYPERLINK) != 0,
+            (flags & NativeFrameSnapshotLayout.ROW_FLAG_KITTY_VIRTUAL_PLACEHOLDER) != 0,
+            (flags & NativeFrameSnapshotLayout.ROW_FLAG_DIRTY) != 0
+        );
+    }
+
     private List<FrameRow> frameRows(
-        Arena arena,
-        FrameDirty dirty,
+        MemorySegment snapshot,
         TerminalSize size,
-        ResolvedFrameColors colors,
         List<FrameStyle> styles,
         HashMap<FrameStyle, Integer> styleIds
     ) {
+        var rowCount = NativeFrameSnapshotLayout.u32(snapshot, NativeFrameSnapshotLayout.ROW_COUNT_OFFSET);
+        var styleCount = NativeFrameSnapshotLayout.u32(snapshot, NativeFrameSnapshotLayout.STYLE_COUNT_OFFSET);
+        var runCount = NativeFrameSnapshotLayout.u32(snapshot, NativeFrameSnapshotLayout.RUN_COUNT_OFFSET);
+        var textByteCount = NativeFrameSnapshotLayout.u32(snapshot, NativeFrameSnapshotLayout.TEXT_BYTE_COUNT_OFFSET);
+        var rowsOffset = NativeFrameSnapshotLayout.u64(snapshot, NativeFrameSnapshotLayout.ROWS_OFFSET_OFFSET);
+        var stylesOffset = NativeFrameSnapshotLayout.u64(snapshot, NativeFrameSnapshotLayout.STYLES_OFFSET_OFFSET);
+        var runsOffset = NativeFrameSnapshotLayout.u64(snapshot, NativeFrameSnapshotLayout.RUNS_OFFSET_OFFSET);
+        var textBytesOffset = NativeFrameSnapshotLayout.u64(snapshot, NativeFrameSnapshotLayout.TEXT_BYTES_OFFSET_OFFSET);
+
+        var resolvedStyleIds = new int[styleCount];
+        for (var styleIndex = 0; styleIndex < styleCount; styleIndex++) {
+            var style = NativeFrameSnapshotLayout.style(
+                snapshot,
+                stylesOffset + (long) styleIndex * NativeFrameSnapshotLayout.STYLE_ENTRY_SIZE
+            );
+            resolvedStyleIds[styleIndex] = frameStyleId(styles, styleIds, style);
+        }
+
         var previousRows = cachedFrame == null ? List.<FrameRow>of() : cachedFrame.rows();
         var rows = new ArrayList<FrameRow>(size.rows());
-        populateRenderRowIterator(arena);
-        var styleOut = arena.allocate(NativeTerminalBindings.STYLE_LAYOUT);
-        styleOut.set(NativeRuntime.SIZE_T_LAYOUT, NativeTerminalBindings.STYLE_SIZE_OFFSET, NativeTerminalBindings.STYLE_LAYOUT.byteSize());
         for (var rowIndex = 0; rowIndex < size.rows(); rowIndex++) {
-            if (!(boolean) NativeRuntime.invoke(bindings.ghosttyRenderStateRowIteratorNext, renderRowIterator)) {
-                throw new IllegalStateException("Render row iterator ended before viewport rows were exhausted");
-            }
-            var rowDirty = dirty == FrameDirty.FULL || renderRowBoolean(arena, NativeTerminalBindings.RENDER_STATE_ROW_DATA_DIRTY);
+            var rowOffset = rowsOffset + (long) rowIndex * NativeFrameSnapshotLayout.ROW_ENTRY_SIZE;
+            var rowFlags = NativeFrameSnapshotLayout.u32(snapshot, rowOffset + NativeFrameSnapshotLayout.ROW_FLAGS_OFFSET);
+            var rowDirty = (rowFlags & NativeFrameSnapshotLayout.ROW_FLAG_DIRTY) != 0;
             if (!rowDirty && rowIndex < previousRows.size()) {
                 rows.add(previousRows.get(rowIndex).withDirty(false));
                 continue;
             }
-            var rawRow = renderRowRaw(arena);
-            populateRenderRowCells(arena);
-            var text = new String[size.columns()];
-            var widths = new byte[size.columns()];
-            var rowStyleIds = new int[size.columns()];
-            for (var column = 0; column < size.columns(); column++) {
-                if (!(boolean) NativeRuntime.invoke(bindings.ghosttyRenderStateRowCellsNext, renderRowCells)) {
-                    throw new IllegalStateException("Render row cells iterator ended before viewport columns were exhausted");
-                }
-                var rawCell = renderRowCellRaw(arena);
-                text[column] = renderCellText(arena, renderRowCellInt(arena, NativeTerminalBindings.RENDER_STATE_ROW_CELLS_DATA_GRAPHEMES_LEN));
-                var width = cellInt(arena, rawCell, NativeTerminalBindings.CELL_DATA_WIDE);
-                widths[column] = (byte) width;
-                styleOut.set(NativeRuntime.SIZE_T_LAYOUT, NativeTerminalBindings.STYLE_SIZE_OFFSET, NativeTerminalBindings.STYLE_LAYOUT.byteSize());
-                NativeRuntime.invokeStatus(
-                    bindings.ghosttyRenderStateRowCellsGet,
-                    "ghostty_render_state_row_cells_get",
-                    renderRowCells,
-                    NativeTerminalBindings.RENDER_STATE_ROW_CELLS_DATA_STYLE,
-                    styleOut
-                );
-                var style = frameStyle(
-                    styleOut,
-                    renderRowCellColor(arena, NativeTerminalBindings.RENDER_STATE_ROW_CELLS_DATA_FG_COLOR, colors.value().foreground()),
-                    renderRowCellColor(arena, NativeTerminalBindings.RENDER_STATE_ROW_CELLS_DATA_BG_COLOR, colors.value().background()),
-                    colors.palette()
-                );
-                rowStyleIds[column] = frameStyleId(styles, styleIds, style);
+
+            var rowRunStart = NativeFrameSnapshotLayout.u32(snapshot, rowOffset + NativeFrameSnapshotLayout.ROW_RUN_START_OFFSET);
+            var rowRunCount = NativeFrameSnapshotLayout.u32(snapshot, rowOffset + NativeFrameSnapshotLayout.ROW_RUN_COUNT_OFFSET);
+            var runs = new ArrayList<FrameRun>(rowRunCount);
+            for (var runIndex = 0; runIndex < rowRunCount; runIndex++) {
+                var runOffset = runsOffset + (long) (rowRunStart + runIndex) * NativeFrameSnapshotLayout.RUN_ENTRY_SIZE;
+                var styleIndex = NativeFrameSnapshotLayout.u32(snapshot, runOffset + NativeFrameSnapshotLayout.RUN_STYLE_INDEX_OFFSET);
+                var textStart = NativeFrameSnapshotLayout.u32(snapshot, runOffset + NativeFrameSnapshotLayout.RUN_TEXT_START_OFFSET);
+                var textLength = NativeFrameSnapshotLayout.u32(snapshot, runOffset + NativeFrameSnapshotLayout.RUN_TEXT_LENGTH_OFFSET);
+                runs.add(new FrameRun(
+                    NativeFrameSnapshotLayout.utf8(snapshot, textBytesOffset + textStart, textLength),
+                    resolvedStyleIds[styleIndex],
+                    NativeFrameSnapshotLayout.u32(snapshot, runOffset + NativeFrameSnapshotLayout.RUN_COLUMNS_OFFSET)
+                ));
             }
-            rows.add(new FrameRow(rowIndex, true, rowFlags(arena, rawRow, true), text, widths, rowStyleIds));
-            var clean = arena.allocate(ValueLayout.JAVA_BOOLEAN);
-            clean.set(ValueLayout.JAVA_BOOLEAN, 0, false);
-            NativeRuntime.invokeStatus(bindings.ghosttyRenderStateRowSet, "ghostty_render_state_row_set(dirty)", renderRowIterator, NativeTerminalBindings.RENDER_STATE_ROW_OPTION_DIRTY, clean);
+
+            rows.add(new FrameRow(rowIndex, rowDirty, rowFlags(rowFlags), runs));
         }
-        var clean = arena.allocate(ValueLayout.JAVA_INT);
-        clean.set(ValueLayout.JAVA_INT, 0, NativeTerminalBindings.RENDER_STATE_DIRTY_FALSE);
-        NativeRuntime.invokeStatus(bindings.ghosttyRenderStateSet, "ghostty_render_state_set(dirty)", renderState, NativeTerminalBindings.RENDER_STATE_OPTION_DIRTY, clean);
         return rows;
     }
 
     private Frame frameInternal() {
-        NativeRuntime.invokeStatus(bindings.ghosttyRenderStateUpdate, "ghostty_render_state_update", renderState, terminal);
-        try (var arena = Arena.ofConfined()) {
-            var size = currentSize();
-            var activeScreen = ScreenKind.values()[getInt(NativeTerminalBindings.DATA_ACTIVE_SCREEN)];
-            var colors = frameColors(arena);
-            var cursor = frameCursor(arena);
-            var dirty = FrameDirty.values()[renderStateInt(arena, NativeTerminalBindings.RENDER_STATE_DATA_DIRTY)];
-            var mouseTracking = mouseTrackingMode();
-            var kittyKeyboardFlags = kittyKeyboardFlags();
-            var scrollbar = scrollbar();
-            var title = currentTitle();
-            var pwd = currentPwd();
-            var rebuildRows = cachedFrame == null
-                || dirty == FrameDirty.FULL
-                || (cachedFrame != null && (
-                    cachedFrame.size().columns() != size.columns()
-                        || cachedFrame.size().rows() != size.rows()
-                        || cachedFrame.activeScreen() != activeScreen
-                ));
-            if (!rebuildRows && dirty == FrameDirty.CLEAN && cachedFrame != null && cachedFrame.dirty() == FrameDirty.CLEAN
-                && sameFrameScalars(cachedFrame, size, activeScreen, cursor, colors.value(), mouseTracking, kittyKeyboardFlags, scrollbar, title, pwd)) {
-                return cachedFrame;
-            }
-            var effectiveDirty = rebuildRows ? FrameDirty.FULL : dirty;
-            var frameStyles = rebuildRows || cachedFrame == null
-                ? new ArrayList<FrameStyle>()
-                : new ArrayList<>(cachedFrame.styles());
-            var styleIds = new HashMap<FrameStyle, Integer>(Math.max(16, frameStyles.size() * 2 + 1));
-            for (var i = 0; i < frameStyles.size(); i++) {
-                styleIds.put(frameStyles.get(i), i);
-            }
-            var rows = switch (effectiveDirty) {
-                case CLEAN -> cachedFrame == null ? List.<FrameRow>of() : cleanFrameRows(cachedFrame.rows());
-                case PARTIAL, FULL -> frameRows(arena, effectiveDirty, size, colors, frameStyles, styleIds);
-            };
-            var frame = new Frame(
-                ++frameRevision,
-                effectiveDirty,
-                size,
-                activeScreen,
-                cursor,
-                colors.value(),
-                mouseTracking,
-                kittyKeyboardFlags,
-                scrollbar,
-                title,
-                pwd,
-                frameStyles,
-                rows
-            );
-            cachedFrame = frame;
-            return frame;
+        var snapshot = captureFrameSnapshot();
+
+        var size = new TerminalSize(
+            NativeFrameSnapshotLayout.u32(snapshot, NativeFrameSnapshotLayout.COLUMNS_OFFSET),
+            NativeFrameSnapshotLayout.u32(snapshot, NativeFrameSnapshotLayout.ROWS_OFFSET),
+            NativeFrameSnapshotLayout.u32(snapshot, NativeFrameSnapshotLayout.CELL_WIDTH_PX_OFFSET),
+            NativeFrameSnapshotLayout.u32(snapshot, NativeFrameSnapshotLayout.CELL_HEIGHT_PX_OFFSET)
+        );
+        var activeScreen = ScreenKind.values()[NativeFrameSnapshotLayout.u32(snapshot, NativeFrameSnapshotLayout.ACTIVE_SCREEN_OFFSET)];
+        var cursor = new FrameCursor(
+            NativeFrameSnapshotLayout.u32(snapshot, NativeFrameSnapshotLayout.CURSOR_VISIBLE_OFFSET) != 0,
+            NativeFrameSnapshotLayout.u32(snapshot, NativeFrameSnapshotLayout.CURSOR_BLINKING_OFFSET) != 0,
+            NativeFrameSnapshotLayout.u32(snapshot, NativeFrameSnapshotLayout.CURSOR_PASSWORD_INPUT_OFFSET) != 0,
+            NativeFrameSnapshotLayout.u32(snapshot, NativeFrameSnapshotLayout.CURSOR_IN_VIEWPORT_OFFSET) != 0,
+            snapshot.get(ValueLayout.JAVA_INT_UNALIGNED, NativeFrameSnapshotLayout.CURSOR_X_OFFSET),
+            snapshot.get(ValueLayout.JAVA_INT_UNALIGNED, NativeFrameSnapshotLayout.CURSOR_Y_OFFSET),
+            NativeFrameSnapshotLayout.u32(snapshot, NativeFrameSnapshotLayout.CURSOR_WIDE_TAIL_OFFSET) != 0,
+            FrameCursorStyle.values()[NativeFrameSnapshotLayout.u32(snapshot, NativeFrameSnapshotLayout.CURSOR_STYLE_OFFSET)]
+        );
+        var colors = new FrameColors(
+            NativeFrameSnapshotLayout.u32(snapshot, NativeFrameSnapshotLayout.COLORS_FOREGROUND_OFFSET),
+            NativeFrameSnapshotLayout.u32(snapshot, NativeFrameSnapshotLayout.COLORS_BACKGROUND_OFFSET),
+            NativeFrameSnapshotLayout.u32(snapshot, NativeFrameSnapshotLayout.COLORS_CURSOR_OFFSET),
+            NativeFrameSnapshotLayout.u32(snapshot, NativeFrameSnapshotLayout.COLORS_CURSOR_EXPLICIT_OFFSET) != 0
+        );
+        var dirty = FrameDirty.values()[NativeFrameSnapshotLayout.u32(snapshot, NativeFrameSnapshotLayout.DIRTY_OFFSET)];
+        var mouseTracking = MouseTrackingMode.values()[NativeFrameSnapshotLayout.u32(snapshot, NativeFrameSnapshotLayout.MOUSE_TRACKING_OFFSET)];
+        var kittyFlags = NativeFrameSnapshotLayout.u32(snapshot, NativeFrameSnapshotLayout.KITTY_FLAGS_OFFSET);
+        var kittyKeyboardFlags = new KittyKeyboardFlags(
+            (kittyFlags & NativeTerminalBindings.KITTY_DISAMBIGUATE) != 0,
+            (kittyFlags & NativeTerminalBindings.KITTY_REPORT_EVENTS) != 0,
+            (kittyFlags & NativeTerminalBindings.KITTY_REPORT_ALTERNATES) != 0,
+            (kittyFlags & NativeTerminalBindings.KITTY_REPORT_ALL) != 0,
+            (kittyFlags & NativeTerminalBindings.KITTY_REPORT_ASSOCIATED) != 0
+        );
+        var scrollbar = new TerminalScrollbar(
+            NativeFrameSnapshotLayout.u64(snapshot, NativeFrameSnapshotLayout.SCROLLBAR_TOTAL_OFFSET),
+            NativeFrameSnapshotLayout.u64(snapshot, NativeFrameSnapshotLayout.SCROLLBAR_OFFSET_OFFSET),
+            NativeFrameSnapshotLayout.u64(snapshot, NativeFrameSnapshotLayout.SCROLLBAR_LENGTH_OFFSET)
+        );
+        var title = NativeFrameSnapshotLayout.utf8(
+            snapshot,
+            NativeFrameSnapshotLayout.u64(snapshot, NativeFrameSnapshotLayout.TITLE_OFFSET_OFFSET),
+            NativeFrameSnapshotLayout.u32(snapshot, NativeFrameSnapshotLayout.TITLE_LENGTH_OFFSET)
+        );
+        var pwd = NativeFrameSnapshotLayout.utf8(
+            snapshot,
+            NativeFrameSnapshotLayout.u64(snapshot, NativeFrameSnapshotLayout.PWD_OFFSET_OFFSET),
+            NativeFrameSnapshotLayout.u32(snapshot, NativeFrameSnapshotLayout.PWD_LENGTH_OFFSET)
+        );
+
+        if (dirty == FrameDirty.CLEAN && cachedFrame != null && cachedFrame.dirty() == FrameDirty.CLEAN
+            && sameFrameScalars(cachedFrame, size, activeScreen, cursor, colors, mouseTracking, kittyKeyboardFlags, scrollbar, title, pwd)) {
+            return cachedFrame;
         }
+
+        var frameStyles = dirty == FrameDirty.FULL || cachedFrame == null
+            ? new ArrayList<FrameStyle>()
+            : new ArrayList<>(cachedFrame.styles());
+        var styleIds = new HashMap<FrameStyle, Integer>(Math.max(16, frameStyles.size() * 2 + 1));
+        for (var i = 0; i < frameStyles.size(); i++) {
+            styleIds.put(frameStyles.get(i), i);
+        }
+        var rows = switch (dirty) {
+            case CLEAN -> cachedFrame == null ? List.<FrameRow>of() : cleanFrameRows(cachedFrame.rows());
+            case PARTIAL, FULL -> frameRows(snapshot, size, frameStyles, styleIds);
+        };
+        var frame = new Frame(
+            ++frameRevision,
+            dirty,
+            size,
+            activeScreen,
+            cursor,
+            colors,
+            mouseTracking,
+            kittyKeyboardFlags,
+            scrollbar,
+            title,
+            pwd,
+            frameStyles,
+            rows
+        );
+        cachedFrame = frame;
+        return frame;
     }
 
     private MemorySegment encodeString(Arena arena, String value) {
@@ -1450,6 +1440,10 @@ final class NativeTerminalSession implements TerminalSession {
         }
         try {
             Future<?> future = actor.submit(() -> {
+                if (frameSnapshot != MemorySegment.NULL) {
+                    NativeRuntime.invoke(frameSnapshotBindings.ghosttyfxFrameSnapshotFree, frameSnapshot);
+                    frameSnapshot = MemorySegment.NULL;
+                }
                 if (renderRowCells != MemorySegment.NULL) {
                     NativeRuntime.invoke(bindings.ghosttyRenderStateRowCellsFree, renderRowCells);
                     renderRowCells = MemorySegment.NULL;
@@ -1485,6 +1479,4 @@ final class NativeTerminalSession implements TerminalSession {
     private interface ThrowingSupplier<T> {
         T get() throws Exception;
     }
-
-    private record ResolvedFrameColors(FrameColors value, int[] palette) {}
 }

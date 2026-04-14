@@ -185,8 +185,8 @@ class PtyIntegrationTest {
         private static String frameText(Frame frame) {
             var builder = new StringBuilder();
             for (var row : frame.rows()) {
-                for (var column = 0; column < row.columns(); column++) {
-                    builder.append(row.text(column));
+                for (var run : row.runs()) {
+                    builder.append(run.text());
                 }
                 builder.append('\n');
             }

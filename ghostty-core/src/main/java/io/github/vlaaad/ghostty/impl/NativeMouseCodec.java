@@ -128,8 +128,6 @@ public final class NativeMouseCodec {
     }
 
     public MouseCodec mouseCodec(MouseCodecConfig config) {
-        Objects.requireNonNull(config, "config");
-
         try (var arena = Arena.ofConfined()) {
             var encoderOut = arena.allocate(ValueLayout.ADDRESS);
             NativeRuntime.invokeStatus(
