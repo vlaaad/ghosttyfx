@@ -119,21 +119,12 @@ final class NativeFrameSnapshotLayout {
     }
 
     static FrameStyle style(MemorySegment segment, long offset) {
-        var flags = u32(segment, offset + STYLE_FLAGS_OFFSET);
         return new FrameStyle(
             u32(segment, offset + STYLE_FOREGROUND_OFFSET),
             u32(segment, offset + STYLE_BACKGROUND_OFFSET),
             u32(segment, offset + STYLE_UNDERLINE_COLOR_OFFSET),
             io.github.vlaaad.ghostty.UnderlineStyle.values()[u32(segment, offset + STYLE_UNDERLINE_STYLE_OFFSET)],
-            (flags & STYLE_FLAG_BOLD) != 0,
-            (flags & STYLE_FLAG_FAINT) != 0,
-            (flags & STYLE_FLAG_ITALIC) != 0,
-            (flags & STYLE_FLAG_UNDERLINE) != 0,
-            (flags & STYLE_FLAG_BLINK) != 0,
-            (flags & STYLE_FLAG_INVERSE) != 0,
-            (flags & STYLE_FLAG_INVISIBLE) != 0,
-            (flags & STYLE_FLAG_STRIKETHROUGH) != 0,
-            (flags & STYLE_FLAG_OVERLINE) != 0
+            u32(segment, offset + STYLE_FLAGS_OFFSET)
         );
     }
 

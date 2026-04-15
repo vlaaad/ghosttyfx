@@ -78,15 +78,7 @@ public final class FrameRow {
             : new FrameRow(
                 index,
                 dirty,
-                new RowFlags(
-                    flags.wrapped(),
-                    flags.wrapContinuation(),
-                    flags.grapheme(),
-                    flags.styled(),
-                    flags.hyperlink(),
-                    flags.kittyVirtualPlaceholder(),
-                    dirty
-                ),
+                flags.withDirty(dirty),
                 runs,
                 true
             );

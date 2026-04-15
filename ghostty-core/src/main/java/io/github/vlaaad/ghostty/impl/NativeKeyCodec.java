@@ -307,24 +307,7 @@ public final class NativeKeyCodec {
         if (flags == null) {
             return 0;
         }
-
-        var result = 0;
-        if (flags.disambiguate()) {
-            result |= GHOSTTY_KITTY_KEY_DISAMBIGUATE;
-        }
-        if (flags.reportEvents()) {
-            result |= GHOSTTY_KITTY_KEY_REPORT_EVENTS;
-        }
-        if (flags.reportAlternates()) {
-            result |= GHOSTTY_KITTY_KEY_REPORT_ALTERNATES;
-        }
-        if (flags.reportAll()) {
-            result |= GHOSTTY_KITTY_KEY_REPORT_ALL;
-        }
-        if (flags.reportAssociated()) {
-            result |= GHOSTTY_KITTY_KEY_REPORT_ASSOCIATED;
-        }
-        return (byte) result;
+        return (byte) flags.flags();
     }
 
     private record NativeKeyEvent(NativeKeyCodec codec, MemorySegment handle) implements AutoCloseable {

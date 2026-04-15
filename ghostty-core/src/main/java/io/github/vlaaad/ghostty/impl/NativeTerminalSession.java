@@ -517,14 +517,7 @@ final class NativeTerminalSession implements TerminalSession {
     }
 
     private KittyKeyboardFlags kittyKeyboardFlags() {
-        var bits = getInt(NativeTerminalBindings.DATA_KITTY_KEYBOARD_FLAGS);
-        return new KittyKeyboardFlags(
-            (bits & NativeTerminalBindings.KITTY_DISAMBIGUATE) != 0,
-            (bits & NativeTerminalBindings.KITTY_REPORT_EVENTS) != 0,
-            (bits & NativeTerminalBindings.KITTY_REPORT_ALTERNATES) != 0,
-            (bits & NativeTerminalBindings.KITTY_REPORT_ALL) != 0,
-            (bits & NativeTerminalBindings.KITTY_REPORT_ASSOCIATED) != 0
-        );
+        return new KittyKeyboardFlags(getInt(NativeTerminalBindings.DATA_KITTY_KEYBOARD_FLAGS));
     }
 
     private TerminalScrollbar scrollbar() {
@@ -929,15 +922,7 @@ final class NativeTerminalSession implements TerminalSession {
     }
 
     private RowFlags rowFlags(int flags) {
-        return new RowFlags(
-            (flags & NativeFrameSnapshotLayout.ROW_FLAG_WRAPPED) != 0,
-            (flags & NativeFrameSnapshotLayout.ROW_FLAG_WRAP_CONTINUATION) != 0,
-            (flags & NativeFrameSnapshotLayout.ROW_FLAG_GRAPHEME) != 0,
-            (flags & NativeFrameSnapshotLayout.ROW_FLAG_STYLED) != 0,
-            (flags & NativeFrameSnapshotLayout.ROW_FLAG_HYPERLINK) != 0,
-            (flags & NativeFrameSnapshotLayout.ROW_FLAG_KITTY_VIRTUAL_PLACEHOLDER) != 0,
-            (flags & NativeFrameSnapshotLayout.ROW_FLAG_DIRTY) != 0
-        );
+        return new RowFlags(flags);
     }
 
     private List<FrameRow> frameRows(
@@ -1024,13 +1009,7 @@ final class NativeTerminalSession implements TerminalSession {
         var dirty = FrameDirty.values()[NativeFrameSnapshotLayout.u32(snapshot, NativeFrameSnapshotLayout.DIRTY_OFFSET)];
         var mouseTracking = MouseTrackingMode.values()[NativeFrameSnapshotLayout.u32(snapshot, NativeFrameSnapshotLayout.MOUSE_TRACKING_OFFSET)];
         var kittyFlags = NativeFrameSnapshotLayout.u32(snapshot, NativeFrameSnapshotLayout.KITTY_FLAGS_OFFSET);
-        var kittyKeyboardFlags = new KittyKeyboardFlags(
-            (kittyFlags & NativeTerminalBindings.KITTY_DISAMBIGUATE) != 0,
-            (kittyFlags & NativeTerminalBindings.KITTY_REPORT_EVENTS) != 0,
-            (kittyFlags & NativeTerminalBindings.KITTY_REPORT_ALTERNATES) != 0,
-            (kittyFlags & NativeTerminalBindings.KITTY_REPORT_ALL) != 0,
-            (kittyFlags & NativeTerminalBindings.KITTY_REPORT_ASSOCIATED) != 0
-        );
+        var kittyKeyboardFlags = new KittyKeyboardFlags(kittyFlags);
         var scrollbar = new TerminalScrollbar(
             NativeFrameSnapshotLayout.u64(snapshot, NativeFrameSnapshotLayout.SCROLLBAR_TOTAL_OFFSET),
             NativeFrameSnapshotLayout.u64(snapshot, NativeFrameSnapshotLayout.SCROLLBAR_OFFSET_OFFSET),
