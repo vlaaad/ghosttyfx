@@ -6,8 +6,7 @@ import java.util.Optional;
 ///
 /// All public methods may be called from any thread. Implementations serialize interaction with
 /// mutable native terminal state on an internal actor thread and return only immutable Java values.
-/// Reads such as {@link #frame()}, {@link #cell(Point)}, {@link #row(long, RowCoordinateSpace)},
-/// and {@link #screen(ScreenKind)} never expose live native references.
+/// Reads such as {@link #frame()} never expose live native references.
 ///
 /// Notification callbacks delivered through {@link TerminalEvents} must not run on the internal
 /// actor thread. They may safely call back into this session. In contrast, {@link TerminalQueries}
@@ -40,9 +39,6 @@ public interface TerminalSession extends AutoCloseable {
     void scrollBy(long delta);
     void scrollViewport(TerminalScrollViewport behavior);
 
-    Optional<Cell> cell(Point point);
-    Optional<Row> row(long rowIndex, RowCoordinateSpace space);
-    Screen screen(ScreenKind screen);
     Optional<DeviceAttributes> deviceAttributes();
 
     @Override

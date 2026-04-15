@@ -1,9 +1,5 @@
 package io.github.vlaaad.ghostty.impl;
 
-import io.github.vlaaad.ghostty.Cell;
-import io.github.vlaaad.ghostty.CellContentTag;
-import io.github.vlaaad.ghostty.CellSemantic;
-import io.github.vlaaad.ghostty.CellWidth;
 import io.github.vlaaad.ghostty.ColorPalette;
 import io.github.vlaaad.ghostty.ColorScheme;
 import io.github.vlaaad.ghostty.ColorValue;
@@ -16,18 +12,11 @@ import io.github.vlaaad.ghostty.FrameDirty;
 import io.github.vlaaad.ghostty.FrameRun;
 import io.github.vlaaad.ghostty.FrameRow;
 import io.github.vlaaad.ghostty.FrameStyle;
-import io.github.vlaaad.ghostty.Hyperlink;
 import io.github.vlaaad.ghostty.KittyKeyboardFlags;
 import io.github.vlaaad.ghostty.MouseTrackingMode;
-import io.github.vlaaad.ghostty.Point;
 import io.github.vlaaad.ghostty.PtyWriter;
-import io.github.vlaaad.ghostty.Row;
-import io.github.vlaaad.ghostty.RowCoordinateSpace;
 import io.github.vlaaad.ghostty.RowFlags;
-import io.github.vlaaad.ghostty.RowSemanticPrompt;
-import io.github.vlaaad.ghostty.Screen;
 import io.github.vlaaad.ghostty.ScreenKind;
-import io.github.vlaaad.ghostty.Style;
 import io.github.vlaaad.ghostty.TerminalConfig;
 import io.github.vlaaad.ghostty.TerminalEvents;
 import io.github.vlaaad.ghostty.TerminalMode;
@@ -36,7 +25,6 @@ import io.github.vlaaad.ghostty.TerminalScrollViewport;
 import io.github.vlaaad.ghostty.TerminalScrollbar;
 import io.github.vlaaad.ghostty.TerminalSession;
 import io.github.vlaaad.ghostty.TerminalSize;
-import io.github.vlaaad.ghostty.UnderlineStyle;
 
 import java.lang.foreign.Arena;
 import java.lang.foreign.FunctionDescriptor;
@@ -66,7 +54,6 @@ import java.util.concurrent.ExecutionException;
 final class NativeTerminalSession implements TerminalSession {
     private static final MethodHandles.Lookup LOOKUP = MethodHandles.lookup();
     private static final Linker LINKER = Linker.nativeLinker();
-    private static final String EMPTY_TEXT = "";
 
     private static final MemoryLayout DEVICE_ATTRIBUTES_PRIMARY_LAYOUT = MemoryLayout.structLayout(
         ValueLayout.JAVA_SHORT.withName("conformance_level"),
@@ -394,22 +381,6 @@ final class NativeTerminalSession implements TerminalSession {
         }
     }
 
-    private int getU16(int data) {
-        try (var arena = Arena.ofConfined()) {
-            var out = arena.allocate(ValueLayout.JAVA_SHORT);
-            NativeRuntime.invokeStatus(bindings.ghosttyTerminalGet, "ghostty_terminal_get", terminal, data, out);
-            return Short.toUnsignedInt(out.get(ValueLayout.JAVA_SHORT, 0));
-        }
-    }
-
-    private int getInt(int data) {
-        try (var arena = Arena.ofConfined()) {
-            var out = arena.allocate(ValueLayout.JAVA_INT);
-            NativeRuntime.invokeStatus(bindings.ghosttyTerminalGet, "ghostty_terminal_get", terminal, data, out);
-            return out.get(ValueLayout.JAVA_INT, 0);
-        }
-    }
-
     private ColorPalette palette(int data) {
         try (var arena = Arena.ofConfined()) {
             var out = arena.allocate(NativeTerminalBindings.PALETTE_LAYOUT);
@@ -423,286 +394,12 @@ final class NativeTerminalSession implements TerminalSession {
         }
     }
 
-    private TerminalSize currentSize() {
-        var columns = getU16(NativeTerminalBindings.DATA_COLS);
-        var rows = getU16(NativeTerminalBindings.DATA_ROWS);
-        var widthPx = getInt(NativeTerminalBindings.DATA_WIDTH_PX);
-        var heightPx = getInt(NativeTerminalBindings.DATA_HEIGHT_PX);
-        return new TerminalSize(
-            columns,
-            rows,
-            columns == 0 ? 0 : widthPx / columns,
-            rows == 0 ? 0 : heightPx / rows
-        );
-    }
-
     private ColorValue.RgbColor rgbColor(MemorySegment segment) {
         return new ColorValue.RgbColor(
             Byte.toUnsignedInt(segment.get(ValueLayout.JAVA_BYTE, NativeTerminalBindings.RGB_R_OFFSET)),
             Byte.toUnsignedInt(segment.get(ValueLayout.JAVA_BYTE, NativeTerminalBindings.RGB_G_OFFSET)),
             Byte.toUnsignedInt(segment.get(ValueLayout.JAVA_BYTE, NativeTerminalBindings.RGB_B_OFFSET))
         );
-    }
-
-    private ColorValue styleColor(MemorySegment segment, long offset) {
-        var tag = segment.get(ValueLayout.JAVA_INT, offset + NativeTerminalBindings.STYLE_COLOR_TAG_OFFSET);
-        return switch (tag) {
-            case NativeTerminalBindings.STYLE_COLOR_NONE -> new ColorValue.DefaultColor();
-            case NativeTerminalBindings.STYLE_COLOR_PALETTE -> new ColorValue.PaletteColor(Byte.toUnsignedInt(
-                segment.get(ValueLayout.JAVA_BYTE, offset + NativeTerminalBindings.STYLE_COLOR_PALETTE_OFFSET)
-            ));
-            case NativeTerminalBindings.STYLE_COLOR_RGB -> rgbColor(segment.asSlice(offset + NativeTerminalBindings.STYLE_COLOR_RGB_OFFSET, NativeTerminalBindings.RGB_LAYOUT.byteSize()));
-            default -> throw new IllegalStateException("Unknown style color tag: " + tag);
-        };
-    }
-
-    private Style style(MemorySegment segment) {
-        var underlineStyle = UnderlineStyle.values()[segment.get(ValueLayout.JAVA_INT, NativeTerminalBindings.STYLE_UNDERLINE_OFFSET)];
-        return new Style(
-            styleColor(segment, NativeTerminalBindings.STYLE_FG_COLOR_OFFSET),
-            styleColor(segment, NativeTerminalBindings.STYLE_BG_COLOR_OFFSET),
-            styleColor(segment, NativeTerminalBindings.STYLE_UNDERLINE_COLOR_OFFSET),
-            underlineStyle,
-            segment.get(ValueLayout.JAVA_BOOLEAN, NativeTerminalBindings.STYLE_BOLD_OFFSET),
-            segment.get(ValueLayout.JAVA_BOOLEAN, NativeTerminalBindings.STYLE_FAINT_OFFSET),
-            segment.get(ValueLayout.JAVA_BOOLEAN, NativeTerminalBindings.STYLE_ITALIC_OFFSET),
-            underlineStyle != UnderlineStyle.NONE,
-            segment.get(ValueLayout.JAVA_BOOLEAN, NativeTerminalBindings.STYLE_BLINK_OFFSET),
-            segment.get(ValueLayout.JAVA_BOOLEAN, NativeTerminalBindings.STYLE_INVERSE_OFFSET),
-            segment.get(ValueLayout.JAVA_BOOLEAN, NativeTerminalBindings.STYLE_INVISIBLE_OFFSET),
-            segment.get(ValueLayout.JAVA_BOOLEAN, NativeTerminalBindings.STYLE_STRIKETHROUGH_OFFSET),
-            segment.get(ValueLayout.JAVA_BOOLEAN, NativeTerminalBindings.STYLE_OVERLINE_OFFSET)
-        );
-    }
-
-    private MemorySegment point(Arena arena, Point point) {
-        var segment = arena.allocate(NativeTerminalBindings.POINT_LAYOUT);
-        switch (point) {
-            case Point.ActivePoint active -> {
-                segment.set(ValueLayout.JAVA_INT, NativeTerminalBindings.POINT_TAG_OFFSET, NativeTerminalBindings.POINT_ACTIVE);
-                segment.set(ValueLayout.JAVA_SHORT, NativeTerminalBindings.POINT_X_OFFSET, (short) active.column());
-                segment.set(ValueLayout.JAVA_INT, NativeTerminalBindings.POINT_Y_OFFSET, active.row());
-            }
-            case Point.ViewportPoint viewport -> {
-                segment.set(ValueLayout.JAVA_INT, NativeTerminalBindings.POINT_TAG_OFFSET, NativeTerminalBindings.POINT_VIEWPORT);
-                segment.set(ValueLayout.JAVA_SHORT, NativeTerminalBindings.POINT_X_OFFSET, (short) viewport.column());
-                segment.set(ValueLayout.JAVA_INT, NativeTerminalBindings.POINT_Y_OFFSET, viewport.row());
-            }
-            case Point.ScreenPoint screen -> {
-                segment.set(ValueLayout.JAVA_INT, NativeTerminalBindings.POINT_TAG_OFFSET, NativeTerminalBindings.POINT_SCREEN);
-                segment.set(ValueLayout.JAVA_SHORT, NativeTerminalBindings.POINT_X_OFFSET, (short) screen.column());
-                segment.set(ValueLayout.JAVA_INT, NativeTerminalBindings.POINT_Y_OFFSET, screen.row());
-            }
-            case Point.HistoryPoint history -> {
-                if (history.row() > 0xFFFF_FFFFL) {
-                    throw new IllegalArgumentException("history row out of range: " + history.row());
-                }
-                segment.set(ValueLayout.JAVA_INT, NativeTerminalBindings.POINT_TAG_OFFSET, NativeTerminalBindings.POINT_HISTORY);
-                segment.set(ValueLayout.JAVA_SHORT, NativeTerminalBindings.POINT_X_OFFSET, (short) history.column());
-                segment.set(ValueLayout.JAVA_INT, NativeTerminalBindings.POINT_Y_OFFSET, (int) history.row());
-            }
-            default -> throw new IllegalArgumentException("Unknown point type: " + point.getClass().getName());
-        }
-        return segment;
-    }
-
-    private Point pointForRow(long rowIndex, RowCoordinateSpace space) {
-        if (rowIndex < 0) {
-            throw new IllegalArgumentException("rowIndex must be non-negative");
-        }
-        return switch (space) {
-            case ACTIVE -> new Point.ActivePoint(0, Math.toIntExact(rowIndex));
-            case VIEWPORT -> new Point.ViewportPoint(0, Math.toIntExact(rowIndex));
-            case SCREEN -> new Point.ScreenPoint(0, Math.toIntExact(rowIndex));
-        };
-    }
-
-    private MemorySegment gridRef(Arena arena, Point point) {
-        var ref = arena.allocate(NativeTerminalBindings.GRID_REF_LAYOUT);
-        ref.set(NativeRuntime.SIZE_T_LAYOUT, NativeTerminalBindings.GRID_REF_SIZE_OFFSET, NativeTerminalBindings.GRID_REF_LAYOUT.byteSize());
-        try {
-            NativeRuntime.invokeStatus(bindings.ghosttyTerminalGridRef, "ghostty_terminal_grid_ref", terminal, point(arena, point), ref);
-            return ref;
-        } catch (ResultException exception) {
-            if (exception.result == NativeRuntime.GHOSTTY_INVALID_VALUE || exception.result == NativeRuntime.GHOSTTY_NO_VALUE) {
-                return MemorySegment.NULL;
-            }
-            throw exception;
-        }
-    }
-
-    private long gridRefCell(Arena arena, MemorySegment ref) {
-        var out = arena.allocate(ValueLayout.JAVA_LONG);
-        NativeRuntime.invokeStatus(bindings.ghosttyGridRefCell, "ghostty_grid_ref_cell", ref, out);
-        return out.get(ValueLayout.JAVA_LONG, 0);
-    }
-
-    private long gridRefRow(Arena arena, MemorySegment ref) {
-        var out = arena.allocate(ValueLayout.JAVA_LONG);
-        NativeRuntime.invokeStatus(bindings.ghosttyGridRefRow, "ghostty_grid_ref_row", ref, out);
-        return out.get(ValueLayout.JAVA_LONG, 0);
-    }
-
-    private String graphemes(Arena arena, MemorySegment ref) {
-        var outLen = arena.allocate(NativeRuntime.SIZE_T_LAYOUT);
-        try {
-            NativeRuntime.invokeStatus(bindings.ghosttyGridRefGraphemes, "ghostty_grid_ref_graphemes", ref, MemorySegment.NULL, 0L, outLen);
-            return "";
-        } catch (ResultException exception) {
-            if (exception.result != NativeRuntime.GHOSTTY_OUT_OF_SPACE) {
-                throw exception;
-            }
-        }
-        var required = outLen.get(NativeRuntime.SIZE_T_LAYOUT, 0);
-        if (required == 0) {
-            return "";
-        }
-        var codepoints = arena.allocate(ValueLayout.JAVA_INT, required);
-        NativeRuntime.invokeStatus(bindings.ghosttyGridRefGraphemes, "ghostty_grid_ref_graphemes", ref, codepoints, required, outLen);
-        var count = Math.toIntExact(outLen.get(NativeRuntime.SIZE_T_LAYOUT, 0));
-        var builder = new StringBuilder();
-        for (var i = 0; i < count; i++) {
-            builder.appendCodePoint(codepoints.getAtIndex(ValueLayout.JAVA_INT, i));
-        }
-        return builder.toString();
-    }
-
-    private Hyperlink hyperlink(Arena arena, MemorySegment ref) {
-        var outLen = arena.allocate(NativeRuntime.SIZE_T_LAYOUT);
-        try {
-            NativeRuntime.invokeStatus(bindings.ghosttyGridRefHyperlinkUri, "ghostty_grid_ref_hyperlink_uri", ref, MemorySegment.NULL, 0L, outLen);
-            return null;
-        } catch (ResultException exception) {
-            if (exception.result != NativeRuntime.GHOSTTY_OUT_OF_SPACE) {
-                throw exception;
-            }
-        }
-        var required = outLen.get(NativeRuntime.SIZE_T_LAYOUT, 0);
-        if (required == 0) {
-            return null;
-        }
-        var out = arena.allocate(required);
-        NativeRuntime.invokeStatus(bindings.ghosttyGridRefHyperlinkUri, "ghostty_grid_ref_hyperlink_uri", ref, out, required, outLen);
-        return new Hyperlink(new String(out.reinterpret(outLen.get(NativeRuntime.SIZE_T_LAYOUT, 0)).toArray(ValueLayout.JAVA_BYTE), StandardCharsets.UTF_8));
-    }
-
-    private Style cellStyle(Arena arena, MemorySegment ref) {
-        var out = arena.allocate(NativeTerminalBindings.STYLE_LAYOUT);
-        out.set(NativeRuntime.SIZE_T_LAYOUT, NativeTerminalBindings.STYLE_SIZE_OFFSET, NativeTerminalBindings.STYLE_LAYOUT.byteSize());
-        NativeRuntime.invokeStatus(bindings.ghosttyGridRefStyle, "ghostty_grid_ref_style", ref, out);
-        return style(out);
-    }
-
-    private int cellInt(Arena arena, long cell, int data) {
-        var out = arena.allocate(ValueLayout.JAVA_INT);
-        NativeRuntime.invokeStatus(bindings.ghosttyCellGet, "ghostty_cell_get", cell, data, out);
-        return out.get(ValueLayout.JAVA_INT, 0);
-    }
-
-    private boolean cellBoolean(Arena arena, long cell, int data) {
-        var out = arena.allocate(ValueLayout.JAVA_BOOLEAN);
-        NativeRuntime.invokeStatus(bindings.ghosttyCellGet, "ghostty_cell_get", cell, data, out);
-        return out.get(ValueLayout.JAVA_BOOLEAN, 0);
-    }
-
-    private int cellUnsignedByte(Arena arena, long cell, int data) {
-        var out = arena.allocate(ValueLayout.JAVA_BYTE);
-        NativeRuntime.invokeStatus(bindings.ghosttyCellGet, "ghostty_cell_get", cell, data, out);
-        return Byte.toUnsignedInt(out.get(ValueLayout.JAVA_BYTE, 0));
-    }
-
-    private boolean rowBoolean(Arena arena, long row, int data) {
-        var out = arena.allocate(ValueLayout.JAVA_BOOLEAN);
-        NativeRuntime.invokeStatus(bindings.ghosttyRowGet, "ghostty_row_get", row, data, out);
-        return out.get(ValueLayout.JAVA_BOOLEAN, 0);
-    }
-
-    private int rowInt(Arena arena, long row, int data) {
-        var out = arena.allocate(ValueLayout.JAVA_INT);
-        NativeRuntime.invokeStatus(bindings.ghosttyRowGet, "ghostty_row_get", row, data, out);
-        return out.get(ValueLayout.JAVA_INT, 0);
-    }
-
-    private ColorValue backgroundFill(Arena arena, long cell, CellContentTag tag) {
-        return switch (tag) {
-            case BG_COLOR_PALETTE -> new ColorValue.PaletteColor(cellUnsignedByte(arena, cell, NativeTerminalBindings.CELL_DATA_COLOR_PALETTE));
-            case BG_COLOR_RGB -> {
-                var out = arena.allocate(NativeTerminalBindings.RGB_LAYOUT);
-                NativeRuntime.invokeStatus(bindings.ghosttyCellGet, "ghostty_cell_get", cell, NativeTerminalBindings.CELL_DATA_COLOR_RGB, out);
-                yield rgbColor(out);
-            }
-            default -> new ColorValue.DefaultColor();
-        };
-    }
-
-    private Cell cell(Arena arena, long rawCell, MemorySegment ref, int column) {
-        var tag = CellContentTag.values()[cellInt(arena, rawCell, NativeTerminalBindings.CELL_DATA_CONTENT_TAG)];
-        return new Cell(
-            column,
-            graphemes(arena, ref),
-            cellInt(arena, rawCell, NativeTerminalBindings.CELL_DATA_CODEPOINT),
-            tag,
-            CellWidth.values()[cellInt(arena, rawCell, NativeTerminalBindings.CELL_DATA_WIDE)],
-            backgroundFill(arena, rawCell, tag),
-            cellStyle(arena, ref),
-            hyperlink(arena, ref),
-            CellSemantic.values()[cellInt(arena, rawCell, NativeTerminalBindings.CELL_DATA_SEMANTIC_CONTENT)],
-            cellBoolean(arena, rawCell, NativeTerminalBindings.CELL_DATA_PROTECTED)
-        );
-    }
-
-    private Optional<Cell> cellInternal(Point point) {
-        try (var arena = Arena.ofConfined()) {
-            var ref = gridRef(arena, point);
-            if (ref == MemorySegment.NULL) {
-                return Optional.empty();
-            }
-            var column = switch (point) {
-                case Point.ActivePoint active -> active.column();
-                case Point.ViewportPoint viewport -> viewport.column();
-                case Point.ScreenPoint screen -> screen.column();
-                case Point.HistoryPoint history -> history.column();
-            };
-            return Optional.of(cell(arena, gridRefCell(arena, ref), ref, column));
-        }
-    }
-
-    private Optional<Row> rowInternal(long rowIndex, RowCoordinateSpace space) {
-        try (var arena = Arena.ofConfined()) {
-            var ref = gridRef(arena, pointForRow(rowIndex, space));
-            if (ref == MemorySegment.NULL) {
-                return Optional.empty();
-            }
-            var rawRow = gridRefRow(arena, ref);
-            var size = currentSize();
-            var cells = new ArrayList<Cell>(size.columns());
-            for (var column = 0; column < size.columns(); column++) {
-                var point = switch (space) {
-                    case ACTIVE -> new Point.ActivePoint(column, Math.toIntExact(rowIndex));
-                    case VIEWPORT -> new Point.ViewportPoint(column, Math.toIntExact(rowIndex));
-                    case SCREEN -> new Point.ScreenPoint(column, Math.toIntExact(rowIndex));
-                };
-                var cellRef = gridRef(arena, point);
-                if (cellRef == MemorySegment.NULL) {
-                    break;
-                }
-                cells.add(cell(arena, gridRefCell(arena, cellRef), cellRef, column));
-            }
-            return Optional.of(new Row(
-                rowIndex,
-                new RowFlags(
-                    rowBoolean(arena, rawRow, NativeTerminalBindings.ROW_DATA_WRAP),
-                    rowBoolean(arena, rawRow, NativeTerminalBindings.ROW_DATA_WRAP_CONTINUATION),
-                    rowBoolean(arena, rawRow, NativeTerminalBindings.ROW_DATA_GRAPHEME),
-                    rowBoolean(arena, rawRow, NativeTerminalBindings.ROW_DATA_STYLED),
-                    rowBoolean(arena, rawRow, NativeTerminalBindings.ROW_DATA_HYPERLINK),
-                    rowBoolean(arena, rawRow, NativeTerminalBindings.ROW_DATA_KITTY_VIRTUAL_PLACEHOLDER),
-                    rowBoolean(arena, rawRow, NativeTerminalBindings.ROW_DATA_DIRTY)
-                ),
-                RowSemanticPrompt.values()[rowInt(arena, rawRow, NativeTerminalBindings.ROW_DATA_SEMANTIC_PROMPT)],
-                List.copyOf(cells)
-            ));
-        }
     }
 
     private Optional<Boolean> modeValue(TerminalMode mode) {
@@ -718,18 +415,6 @@ final class NativeTerminalSession implements TerminalSession {
                 throw exception;
             }
         }
-    }
-
-    private Screen screenInternal(ScreenKind kind) {
-        var size = currentSize();
-        if (kind != ScreenKind.values()[getInt(NativeTerminalBindings.DATA_ACTIVE_SCREEN)]) {
-            return new Screen(kind, size.columns(), size.rows(), List.of());
-        }
-        var rows = new ArrayList<Row>(size.rows());
-        for (var row = 0; row < size.rows(); row++) {
-            rowInternal(row, RowCoordinateSpace.VIEWPORT).ifPresent(rows::add);
-        }
-        return new Screen(kind, size.columns(), size.rows(), List.copyOf(rows));
     }
 
     private int frameStyleId(List<FrameStyle> styles, HashMap<FrameStyle, Integer> styleIds, FrameStyle style) {
@@ -1141,24 +826,6 @@ final class NativeTerminalSession implements TerminalSession {
                 NativeRuntime.invoke(bindings.ghosttyTerminalScrollViewport, terminal, scroll);
             }
         }, true);
-    }
-
-    @Override
-    public Optional<Cell> cell(Point point) {
-        Objects.requireNonNull(point, "point");
-        return callActor(() -> cellInternal(point));
-    }
-
-    @Override
-    public Optional<Row> row(long rowIndex, RowCoordinateSpace space) {
-        Objects.requireNonNull(space, "space");
-        return callActor(() -> rowInternal(rowIndex, space));
-    }
-
-    @Override
-    public Screen screen(ScreenKind screen) {
-        Objects.requireNonNull(screen, "screen");
-        return callActor(() -> screenInternal(screen));
     }
 
     @Override

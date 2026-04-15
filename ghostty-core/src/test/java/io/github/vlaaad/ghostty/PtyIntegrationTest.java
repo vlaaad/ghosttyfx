@@ -2,8 +2,8 @@ package io.github.vlaaad.ghostty;
 
 import com.pty4j.PtyProcess;
 import com.pty4j.PtyProcessBuilder;
+
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -13,9 +13,9 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
-import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -105,14 +105,12 @@ class PtyIntegrationTest {
     private record ShellSpec(String name, String[] command, String expectedText) {}
 
     private static final class PtyHarness implements AutoCloseable {
-        private final ShellSpec shell;
         private final PtyProcess process;
         private final TerminalSession session;
         private final Thread reader;
         private final AtomicBoolean closed = new AtomicBoolean();
 
         private PtyHarness(ShellSpec shell) throws IOException {
-            this.shell = shell;
             process = new PtyProcessBuilder(shell.command())
                 .setEnvironment(new HashMap<>(System.getenv()))
                 .setDirectory(System.getProperty("user.home"))
@@ -177,8 +175,9 @@ class PtyIntegrationTest {
                     process.destroyForcibly();
                 }
             } finally {
-                reader.join(TimeUnit.SECONDS.toMillis(5));
-                session.close();
+                try (session) {
+                    reader.join(TimeUnit.SECONDS.toMillis(5));
+                }
             }
         }
 

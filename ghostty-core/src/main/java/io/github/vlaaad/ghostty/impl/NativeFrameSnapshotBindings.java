@@ -7,7 +7,7 @@ import java.lang.foreign.SymbolLookup;
 import java.lang.foreign.ValueLayout;
 import java.lang.invoke.MethodHandle;
 
-final class NativeFrameSnapshotBindings {
+public final class NativeFrameSnapshotBindings {
     static final MemoryLayout SNAPSHOT_VIEW_LAYOUT = MemoryLayout.structLayout(
         NativeRuntime.SIZE_T_LAYOUT.withName("size"),
         NativeTerminalBindings.C_POINTER.withName("data"),

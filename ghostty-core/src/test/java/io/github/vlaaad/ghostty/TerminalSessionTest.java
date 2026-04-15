@@ -16,7 +16,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class TerminalSessionTest {
     @Test
-    void writeFrameRowAndCellReads() {
+    void writeFrameRead() {
         try (var session = Ghostty.open(
             new TerminalConfig(8, 4, 128),
             bytes -> {},
@@ -29,14 +29,6 @@ class TerminalSessionTest {
             assertEquals("hello", rowText(frame.rows().getFirst()));
             assertEquals(FrameDirty.FULL, frame.dirty());
             assertEquals(ScreenKind.PRIMARY, frame.activeScreen());
-
-            var row = session.row(0, RowCoordinateSpace.VIEWPORT).orElseThrow();
-            assertEquals("hello", rowText(row));
-
-            var firstCell = session.cell(new Point.ViewportPoint(0, 0)).orElseThrow();
-            assertEquals("h", firstCell.text());
-            assertEquals(CellContentTag.CODEPOINT, firstCell.contentTag());
-            assertEquals(new ColorValue.DefaultColor(), firstCell.backgroundFill());
         }
     }
 
@@ -143,14 +135,6 @@ class TerminalSessionTest {
             assertTrue(partial.rows().get(2).dirty());
             assertSame(clean.rows().get(0), partial.rows().get(0));
         }
-    }
-
-    private static String rowText(Row row) {
-        var builder = new StringBuilder();
-        for (var cell : row.cells()) {
-            builder.append(cell.text());
-        }
-        return builder.toString().stripTrailing();
     }
 
     private static String rowText(FrameRow row) {

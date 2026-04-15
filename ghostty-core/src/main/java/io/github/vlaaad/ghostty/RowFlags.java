@@ -10,18 +10,6 @@ public record RowFlags(int flags) {
     private static final int FLAG_KITTY_VIRTUAL_PLACEHOLDERS = 1 << 5;
     private static final int FLAG_DIRTY = 1 << 6;
 
-    public RowFlags(
-        boolean wrapped,
-        boolean wrapContinuation,
-        boolean graphemeClusters,
-        boolean styledCells,
-        boolean hyperlinks,
-        boolean kittyVirtualPlaceholders,
-        boolean dirty
-    ) {
-        this(packFlags(wrapped, wrapContinuation, graphemeClusters, styledCells, hyperlinks, kittyVirtualPlaceholders, dirty));
-    }
-
     public boolean isWrapped() {
         return hasFlag(FLAG_WRAPPED);
     }
@@ -57,39 +45,5 @@ public record RowFlags(int flags) {
 
     private boolean hasFlag(int flag) {
         return (flags & flag) != 0;
-    }
-
-    private static int packFlags(
-        boolean wrapped,
-        boolean wrapContinuation,
-        boolean graphemeClusters,
-        boolean styledCells,
-        boolean hyperlinks,
-        boolean kittyVirtualPlaceholders,
-        boolean dirty
-    ) {
-        var flags = 0;
-        if (wrapped) {
-            flags |= FLAG_WRAPPED;
-        }
-        if (wrapContinuation) {
-            flags |= FLAG_WRAP_CONTINUATION;
-        }
-        if (graphemeClusters) {
-            flags |= FLAG_GRAPHEME_CLUSTERS;
-        }
-        if (styledCells) {
-            flags |= FLAG_STYLED_CELLS;
-        }
-        if (hyperlinks) {
-            flags |= FLAG_HYPERLINKS;
-        }
-        if (kittyVirtualPlaceholders) {
-            flags |= FLAG_KITTY_VIRTUAL_PLACEHOLDERS;
-        }
-        if (dirty) {
-            flags |= FLAG_DIRTY;
-        }
-        return flags;
     }
 }

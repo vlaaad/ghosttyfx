@@ -1,9 +1,10 @@
 package io.github.vlaaad.ghostty.impl;
 
-import io.github.vlaaad.ghostty.FrameStyle;
 import java.lang.foreign.MemorySegment;
 import java.lang.foreign.ValueLayout;
 import java.nio.charset.StandardCharsets;
+
+import io.github.vlaaad.ghostty.FrameStyle;
 
 final class NativeFrameSnapshotLayout {
     static final int ROW_ENTRY_SIZE = 16;
@@ -64,31 +65,7 @@ final class NativeFrameSnapshotLayout {
     static final long RUN_TEXT_LENGTH_OFFSET = 8;
     static final long RUN_COLUMNS_OFFSET = 12;
 
-    static final long CELL_STYLE_INDEX_OFFSET = 0;
-    static final long CELL_CODEPOINT_START_OFFSET = 4;
-    static final long CELL_CODEPOINT_LENGTH_OFFSET = 8;
-    static final long CELL_WIDTH_OFFSET = 12;
-
-    static final int ROW_FLAG_WRAPPED = 1 << 0;
-    static final int ROW_FLAG_WRAP_CONTINUATION = 1 << 1;
-    static final int ROW_FLAG_GRAPHEME = 1 << 2;
-    static final int ROW_FLAG_STYLED = 1 << 3;
-    static final int ROW_FLAG_HYPERLINK = 1 << 4;
-    static final int ROW_FLAG_KITTY_VIRTUAL_PLACEHOLDER = 1 << 5;
     static final int ROW_FLAG_DIRTY = 1 << 6;
-
-    static final int STYLE_FLAG_BOLD = 1 << 0;
-    static final int STYLE_FLAG_FAINT = 1 << 1;
-    static final int STYLE_FLAG_ITALIC = 1 << 2;
-    static final int STYLE_FLAG_UNDERLINE = 1 << 3;
-    static final int STYLE_FLAG_BLINK = 1 << 4;
-    static final int STYLE_FLAG_INVERSE = 1 << 5;
-    static final int STYLE_FLAG_INVISIBLE = 1 << 6;
-    static final int STYLE_FLAG_STRIKETHROUGH = 1 << 7;
-    static final int STYLE_FLAG_OVERLINE = 1 << 8;
-
-    static final String EMPTY_TEXT = "";
-    static final String[] ASCII = ascii();
 
     private NativeFrameSnapshotLayout() {}
 
@@ -112,35 +89,9 @@ final class NativeFrameSnapshotLayout {
 
     static String utf8(MemorySegment segment, long offset, int len) {
         if (len == 0) {
-            return EMPTY_TEXT;
+            return "";
         }
         return new String(segment.asSlice(offset, len).toArray(ValueLayout.JAVA_BYTE), StandardCharsets.UTF_8);
     }
 
-    static String cellText(MemorySegment segment, long codepointsOffset, int codepointStart, int codepointLength) {
-        if (codepointLength == 0) {
-            return EMPTY_TEXT;
-        }
-        var offset = codepointsOffset + (long) codepointStart * Integer.BYTES;
-        if (codepointLength == 1) {
-            var codepoint = u32(segment, offset);
-            if (codepoint >= 0 && codepoint < ASCII.length) {
-                return ASCII[codepoint];
-            }
-            return new String(Character.toChars(codepoint));
-        }
-        var codepoints = new int[codepointLength];
-        for (var i = 0; i < codepointLength; i++) {
-            codepoints[i] = u32(segment, offset + (long) i * Integer.BYTES);
-        }
-        return new String(codepoints, 0, codepointLength);
-    }
-
-    private static String[] ascii() {
-        var values = new String[128];
-        for (var i = 0; i < values.length; i++) {
-            values[i] = new String(new char[] {(char) i});
-        }
-        return values;
-    }
 }

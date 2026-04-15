@@ -10,16 +10,6 @@ public record KittyKeyboardFlags(int flags) {
     private static final int FLAG_REPORT_ALL_KEYS = 1 << 3;
     private static final int FLAG_REPORT_ASSOCIATED_KEYS = 1 << 4;
 
-    public KittyKeyboardFlags(
-        boolean disambiguateEscapes,
-        boolean reportEventTypes,
-        boolean reportAlternateKeys,
-        boolean reportAllKeys,
-        boolean reportAssociatedKeys
-    ) {
-        this(packFlags(disambiguateEscapes, reportEventTypes, reportAlternateKeys, reportAllKeys, reportAssociatedKeys));
-    }
-
     public boolean disambiguatesEscapes() {
         return hasFlag(FLAG_DISAMBIGUATE_ESCAPES);
     }
@@ -42,31 +32,5 @@ public record KittyKeyboardFlags(int flags) {
 
     private boolean hasFlag(int flag) {
         return (flags & flag) != 0;
-    }
-
-    private static int packFlags(
-        boolean disambiguateEscapes,
-        boolean reportEventTypes,
-        boolean reportAlternateKeys,
-        boolean reportAllKeys,
-        boolean reportAssociatedKeys
-    ) {
-        var flags = 0;
-        if (disambiguateEscapes) {
-            flags |= FLAG_DISAMBIGUATE_ESCAPES;
-        }
-        if (reportEventTypes) {
-            flags |= FLAG_REPORT_EVENT_TYPES;
-        }
-        if (reportAlternateKeys) {
-            flags |= FLAG_REPORT_ALTERNATE_KEYS;
-        }
-        if (reportAllKeys) {
-            flags |= FLAG_REPORT_ALL_KEYS;
-        }
-        if (reportAssociatedKeys) {
-            flags |= FLAG_REPORT_ASSOCIATED_KEYS;
-        }
-        return flags;
     }
 }

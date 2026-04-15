@@ -6,4 +6,10 @@ public record FrameColors(
     int background,
     int cursor,
     boolean cursorExplicit
-) {}
+) {
+    public FrameColors {
+        if (!cursorExplicit) {
+            cursor = 0;
+        }
+    }
+}

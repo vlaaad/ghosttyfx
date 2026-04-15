@@ -1,11 +1,5 @@
 package io.github.vlaaad.ghostty.impl;
 
-import io.github.vlaaad.ghostty.KeyCodec;
-import io.github.vlaaad.ghostty.KeyCodecConfig;
-import io.github.vlaaad.ghostty.KeyEvent;
-import io.github.vlaaad.ghostty.KeyModifiers;
-import io.github.vlaaad.ghostty.KittyKeyboardFlags;
-import io.github.vlaaad.ghostty.ModifierSide;
 import java.lang.foreign.AddressLayout;
 import java.lang.foreign.Arena;
 import java.lang.foreign.FunctionDescriptor;
@@ -15,6 +9,13 @@ import java.lang.foreign.ValueLayout;
 import java.lang.invoke.MethodHandle;
 import java.nio.charset.StandardCharsets;
 import java.util.Objects;
+
+import io.github.vlaaad.ghostty.KeyCodec;
+import io.github.vlaaad.ghostty.KeyCodecConfig;
+import io.github.vlaaad.ghostty.KeyEvent;
+import io.github.vlaaad.ghostty.KeyModifiers;
+import io.github.vlaaad.ghostty.KittyKeyboardFlags;
+import io.github.vlaaad.ghostty.ModifierSide;
 
 public final class NativeKeyCodec {
     private static final int GHOSTTY_KEY_ENCODER_OPT_CURSOR_KEY_APPLICATION = 0;
@@ -35,12 +36,6 @@ public final class NativeKeyCodec {
     private static final int GHOSTTY_MODS_CTRL_SIDE = 128;
     private static final int GHOSTTY_MODS_ALT_SIDE = 256;
     private static final int GHOSTTY_MODS_SUPER_SIDE = 512;
-
-    private static final int GHOSTTY_KITTY_KEY_DISAMBIGUATE = 1;
-    private static final int GHOSTTY_KITTY_KEY_REPORT_EVENTS = 2;
-    private static final int GHOSTTY_KITTY_KEY_REPORT_ALTERNATES = 4;
-    private static final int GHOSTTY_KITTY_KEY_REPORT_ALL = 8;
-    private static final int GHOSTTY_KITTY_KEY_REPORT_ASSOCIATED = 16;
 
     private static final AddressLayout C_POINTER = ValueLayout.ADDRESS;
 

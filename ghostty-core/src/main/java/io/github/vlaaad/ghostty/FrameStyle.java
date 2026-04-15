@@ -26,30 +26,6 @@ public record FrameStyle(
         Objects.requireNonNull(underlineStyle, "underlineStyle");
     }
 
-    public FrameStyle(
-        int foreground,
-        int background,
-        int underlineColor,
-        UnderlineStyle underlineStyle,
-        boolean bold,
-        boolean faint,
-        boolean italic,
-        boolean underlined,
-        boolean blinking,
-        boolean inverse,
-        boolean invisible,
-        boolean strikethrough,
-        boolean overlined
-    ) {
-        this(
-            foreground,
-            background,
-            underlineColor,
-            underlineStyle,
-            packFlags(bold, faint, italic, underlined, blinking, inverse, invisible, strikethrough, overlined)
-        );
-    }
-
     public boolean isBold() {
         return hasFlag(FLAG_BOLD);
     }
@@ -88,47 +64,5 @@ public record FrameStyle(
 
     private boolean hasFlag(int flag) {
         return (flags & flag) != 0;
-    }
-
-    private static int packFlags(
-        boolean bold,
-        boolean faint,
-        boolean italic,
-        boolean underlined,
-        boolean blinking,
-        boolean inverse,
-        boolean invisible,
-        boolean strikethrough,
-        boolean overlined
-    ) {
-        var flags = 0;
-        if (bold) {
-            flags |= FLAG_BOLD;
-        }
-        if (faint) {
-            flags |= FLAG_FAINT;
-        }
-        if (italic) {
-            flags |= FLAG_ITALIC;
-        }
-        if (underlined) {
-            flags |= FLAG_UNDERLINE;
-        }
-        if (blinking) {
-            flags |= FLAG_BLINK;
-        }
-        if (inverse) {
-            flags |= FLAG_INVERSE;
-        }
-        if (invisible) {
-            flags |= FLAG_INVISIBLE;
-        }
-        if (strikethrough) {
-            flags |= FLAG_STRIKETHROUGH;
-        }
-        if (overlined) {
-            flags |= FLAG_OVERLINE;
-        }
-        return flags;
     }
 }
