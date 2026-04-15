@@ -386,10 +386,6 @@ final class NativeTerminalSession implements TerminalSession {
         return borrowedString(NativeTerminalBindings.DATA_TITLE);
     }
 
-    private String currentPwd() {
-        return borrowedString(NativeTerminalBindings.DATA_PWD);
-    }
-
     private String borrowedString(int data) {
         try (var arena = Arena.ofConfined()) {
             var out = NativeString.allocate(arena);
@@ -448,12 +444,6 @@ final class NativeTerminalSession implements TerminalSession {
         );
     }
 
-    private int packedRgb(MemorySegment segment) {
-        return (Byte.toUnsignedInt(segment.get(ValueLayout.JAVA_BYTE, NativeTerminalBindings.RGB_R_OFFSET)) << 16)
-            | (Byte.toUnsignedInt(segment.get(ValueLayout.JAVA_BYTE, NativeTerminalBindings.RGB_G_OFFSET)) << 8)
-            | Byte.toUnsignedInt(segment.get(ValueLayout.JAVA_BYTE, NativeTerminalBindings.RGB_B_OFFSET));
-    }
-
     private ColorValue styleColor(MemorySegment segment, long offset) {
         var tag = segment.get(ValueLayout.JAVA_INT, offset + NativeTerminalBindings.STYLE_COLOR_TAG_OFFSET);
         return switch (tag) {
@@ -462,21 +452,6 @@ final class NativeTerminalSession implements TerminalSession {
                 segment.get(ValueLayout.JAVA_BYTE, offset + NativeTerminalBindings.STYLE_COLOR_PALETTE_OFFSET)
             ));
             case NativeTerminalBindings.STYLE_COLOR_RGB -> rgbColor(segment.asSlice(offset + NativeTerminalBindings.STYLE_COLOR_RGB_OFFSET, NativeTerminalBindings.RGB_LAYOUT.byteSize()));
-            default -> throw new IllegalStateException("Unknown style color tag: " + tag);
-        };
-    }
-
-    private int resolveStyleColor(MemorySegment segment, long offset, int[] palette, int fallback) {
-        var tag = segment.get(ValueLayout.JAVA_INT, offset + NativeTerminalBindings.STYLE_COLOR_TAG_OFFSET);
-        return switch (tag) {
-            case NativeTerminalBindings.STYLE_COLOR_NONE -> fallback;
-            case NativeTerminalBindings.STYLE_COLOR_PALETTE -> palette[Byte.toUnsignedInt(
-                segment.get(ValueLayout.JAVA_BYTE, offset + NativeTerminalBindings.STYLE_COLOR_PALETTE_OFFSET)
-            )];
-            case NativeTerminalBindings.STYLE_COLOR_RGB -> packedRgb(segment.asSlice(
-                offset + NativeTerminalBindings.STYLE_COLOR_RGB_OFFSET,
-                NativeTerminalBindings.RGB_LAYOUT.byteSize()
-            ));
             default -> throw new IllegalStateException("Unknown style color tag: " + tag);
         };
     }
@@ -498,38 +473,6 @@ final class NativeTerminalSession implements TerminalSession {
             segment.get(ValueLayout.JAVA_BOOLEAN, NativeTerminalBindings.STYLE_STRIKETHROUGH_OFFSET),
             segment.get(ValueLayout.JAVA_BOOLEAN, NativeTerminalBindings.STYLE_OVERLINE_OFFSET)
         );
-    }
-
-    private MouseTrackingMode mouseTrackingMode() {
-        if (modeValue(TerminalMode.ANY_MOUSE).orElse(false)) {
-            return MouseTrackingMode.ANY;
-        }
-        if (modeValue(TerminalMode.BUTTON_MOUSE).orElse(false)) {
-            return MouseTrackingMode.BUTTON;
-        }
-        if (modeValue(TerminalMode.NORMAL_MOUSE).orElse(false)) {
-            return MouseTrackingMode.NORMAL;
-        }
-        if (modeValue(TerminalMode.X10_MOUSE).orElse(false)) {
-            return MouseTrackingMode.X10;
-        }
-        return MouseTrackingMode.NONE;
-    }
-
-    private KittyKeyboardFlags kittyKeyboardFlags() {
-        return new KittyKeyboardFlags(getInt(NativeTerminalBindings.DATA_KITTY_KEYBOARD_FLAGS));
-    }
-
-    private TerminalScrollbar scrollbar() {
-        try (var arena = Arena.ofConfined()) {
-            var out = arena.allocate(NativeTerminalBindings.TERMINAL_SCROLLBAR_LAYOUT);
-            NativeRuntime.invokeStatus(bindings.ghosttyTerminalGet, "ghostty_terminal_get", terminal, NativeTerminalBindings.DATA_SCROLLBAR, out);
-            return new TerminalScrollbar(
-                out.get(ValueLayout.JAVA_LONG, NativeTerminalBindings.TERMINAL_SCROLLBAR_TOTAL_OFFSET),
-                out.get(ValueLayout.JAVA_LONG, NativeTerminalBindings.TERMINAL_SCROLLBAR_OFFSET_OFFSET),
-                out.get(ValueLayout.JAVA_LONG, NativeTerminalBindings.TERMINAL_SCROLLBAR_LEN_OFFSET)
-            );
-        }
     }
 
     private MemorySegment point(Arena arena, Point point) {
@@ -789,75 +732,6 @@ final class NativeTerminalSession implements TerminalSession {
         return new Screen(kind, size.columns(), size.rows(), List.copyOf(rows));
     }
 
-    private int renderStateU16(Arena arena, int data) {
-        var out = arena.allocate(ValueLayout.JAVA_SHORT);
-        NativeRuntime.invokeStatus(bindings.ghosttyRenderStateGet, "ghostty_render_state_get", renderState, data, out);
-        return Short.toUnsignedInt(out.get(ValueLayout.JAVA_SHORT, 0));
-    }
-
-    private int renderStateInt(Arena arena, int data) {
-        var out = arena.allocate(ValueLayout.JAVA_INT);
-        NativeRuntime.invokeStatus(bindings.ghosttyRenderStateGet, "ghostty_render_state_get", renderState, data, out);
-        return out.get(ValueLayout.JAVA_INT, 0);
-    }
-
-    private boolean renderStateBoolean(Arena arena, int data) {
-        var out = arena.allocate(ValueLayout.JAVA_BOOLEAN);
-        NativeRuntime.invokeStatus(bindings.ghosttyRenderStateGet, "ghostty_render_state_get", renderState, data, out);
-        return out.get(ValueLayout.JAVA_BOOLEAN, 0);
-    }
-
-    private boolean renderRowBoolean(Arena arena, int data) {
-        var out = arena.allocate(ValueLayout.JAVA_BOOLEAN);
-        NativeRuntime.invokeStatus(bindings.ghosttyRenderStateRowGet, "ghostty_render_state_row_get", renderRowIterator, data, out);
-        return out.get(ValueLayout.JAVA_BOOLEAN, 0);
-    }
-
-    private long renderRowRaw(Arena arena) {
-        var out = arena.allocate(ValueLayout.JAVA_LONG);
-        NativeRuntime.invokeStatus(bindings.ghosttyRenderStateRowGet, "ghostty_render_state_row_get", renderRowIterator, NativeTerminalBindings.RENDER_STATE_ROW_DATA_RAW, out);
-        return out.get(ValueLayout.JAVA_LONG, 0);
-    }
-
-    private void populateRenderRowIterator(Arena arena) {
-        var out = arena.allocate(NativeTerminalBindings.C_POINTER);
-        out.set(NativeTerminalBindings.C_POINTER, 0, renderRowIterator);
-        NativeRuntime.invokeStatus(bindings.ghosttyRenderStateGet, "ghostty_render_state_get", renderState, NativeTerminalBindings.RENDER_STATE_DATA_ROW_ITERATOR, out);
-        renderRowIterator = out.get(NativeTerminalBindings.C_POINTER, 0);
-    }
-
-    private void populateRenderRowCells(Arena arena) {
-        var out = arena.allocate(NativeTerminalBindings.C_POINTER);
-        out.set(NativeTerminalBindings.C_POINTER, 0, renderRowCells);
-        NativeRuntime.invokeStatus(bindings.ghosttyRenderStateRowGet, "ghostty_render_state_row_get", renderRowIterator, NativeTerminalBindings.RENDER_STATE_ROW_DATA_CELLS, out);
-        renderRowCells = out.get(NativeTerminalBindings.C_POINTER, 0);
-    }
-
-    private long renderRowCellRaw(Arena arena) {
-        var out = arena.allocate(ValueLayout.JAVA_LONG);
-        NativeRuntime.invokeStatus(bindings.ghosttyRenderStateRowCellsGet, "ghostty_render_state_row_cells_get", renderRowCells, NativeTerminalBindings.RENDER_STATE_ROW_CELLS_DATA_RAW, out);
-        return out.get(ValueLayout.JAVA_LONG, 0);
-    }
-
-    private int renderRowCellInt(Arena arena, int data) {
-        var out = arena.allocate(ValueLayout.JAVA_INT);
-        NativeRuntime.invokeStatus(bindings.ghosttyRenderStateRowCellsGet, "ghostty_render_state_row_cells_get", renderRowCells, data, out);
-        return out.get(ValueLayout.JAVA_INT, 0);
-    }
-
-    private int renderRowCellColor(Arena arena, int data, int fallback) {
-        var out = arena.allocate(NativeTerminalBindings.RGB_LAYOUT);
-        try {
-            NativeRuntime.invokeStatus(bindings.ghosttyRenderStateRowCellsGet, "ghostty_render_state_row_cells_get", renderRowCells, data, out);
-            return packedRgb(out);
-        } catch (ResultException exception) {
-            if (exception.result == NativeRuntime.GHOSTTY_INVALID_VALUE || exception.result == NativeRuntime.GHOSTTY_NO_VALUE) {
-                return fallback;
-            }
-            throw exception;
-        }
-    }
-
     private int frameStyleId(List<FrameStyle> styles, HashMap<FrameStyle, Integer> styleIds, FrameStyle style) {
         var existing = styleIds.get(style);
         if (existing != null) {
@@ -931,10 +805,7 @@ final class NativeTerminalSession implements TerminalSession {
         List<FrameStyle> styles,
         HashMap<FrameStyle, Integer> styleIds
     ) {
-        var rowCount = NativeFrameSnapshotLayout.u32(snapshot, NativeFrameSnapshotLayout.ROW_COUNT_OFFSET);
         var styleCount = NativeFrameSnapshotLayout.u32(snapshot, NativeFrameSnapshotLayout.STYLE_COUNT_OFFSET);
-        var runCount = NativeFrameSnapshotLayout.u32(snapshot, NativeFrameSnapshotLayout.RUN_COUNT_OFFSET);
-        var textByteCount = NativeFrameSnapshotLayout.u32(snapshot, NativeFrameSnapshotLayout.TEXT_BYTE_COUNT_OFFSET);
         var rowsOffset = NativeFrameSnapshotLayout.u64(snapshot, NativeFrameSnapshotLayout.ROWS_OFFSET_OFFSET);
         var stylesOffset = NativeFrameSnapshotLayout.u64(snapshot, NativeFrameSnapshotLayout.STYLES_OFFSET_OFFSET);
         var runsOffset = NativeFrameSnapshotLayout.u64(snapshot, NativeFrameSnapshotLayout.RUNS_OFFSET_OFFSET);
@@ -1031,8 +902,8 @@ final class NativeTerminalSession implements TerminalSession {
             return cachedFrame;
         }
 
-        var frameStyles = dirty == FrameDirty.FULL || cachedFrame == null
-            ? new ArrayList<FrameStyle>()
+        ArrayList<FrameStyle> frameStyles = dirty == FrameDirty.FULL || cachedFrame == null
+            ? new ArrayList<>()
             : new ArrayList<>(cachedFrame.styles());
         var styleIds = new HashMap<FrameStyle, Integer>(Math.max(16, frameStyles.size() * 2 + 1));
         for (var i = 0; i < frameStyles.size(); i++) {
@@ -1309,6 +1180,7 @@ final class NativeTerminalSession implements TerminalSession {
         return string;
     }
 
+    @SuppressWarnings("unused")
     private void writePtyCallback(MemorySegment ignoredTerminal, MemorySegment ignoredUserdata, MemorySegment data, long len) {
         try {
             ptyWriter.writePty(data.reinterpret(len).toArray(ValueLayout.JAVA_BYTE));
@@ -1317,10 +1189,12 @@ final class NativeTerminalSession implements TerminalSession {
         }
     }
 
+    @SuppressWarnings("unused")
     private void bellCallback(MemorySegment ignoredTerminal, MemorySegment ignoredUserdata) {
         pendingBells++;
     }
 
+    @SuppressWarnings("unused")
     private MemorySegment enquiryCallback(MemorySegment ignoredTerminal, MemorySegment ignoredUserdata) {
         try {
             return callbackString(queries.enquiryReply());
@@ -1330,6 +1204,7 @@ final class NativeTerminalSession implements TerminalSession {
         }
     }
 
+    @SuppressWarnings("unused")
     private MemorySegment xtversionCallback(MemorySegment ignoredTerminal, MemorySegment ignoredUserdata) {
         try {
             return callbackString(queries.xtversionReply());
@@ -1339,10 +1214,12 @@ final class NativeTerminalSession implements TerminalSession {
         }
     }
 
+    @SuppressWarnings("unused")
     private void titleChangedCallback(MemorySegment ignoredTerminal, MemorySegment ignoredUserdata) {
         pendingTitleChanged = true;
     }
 
+    @SuppressWarnings("unused")
     private boolean sizeCallback(MemorySegment ignoredTerminal, MemorySegment ignoredUserdata, MemorySegment outSize) {
         try {
             var size = Objects.requireNonNull(queries.sizeReportValue(), "sizeReportValue() returned null");
@@ -1362,6 +1239,7 @@ final class NativeTerminalSession implements TerminalSession {
         }
     }
 
+    @SuppressWarnings("unused")
     private boolean colorSchemeCallback(MemorySegment ignoredTerminal, MemorySegment ignoredUserdata, MemorySegment outScheme) {
         try {
             var scheme = Optional.ofNullable(colorSchemeOverride).or(() -> Objects.requireNonNull(queries.colorSchemeValue(), "colorSchemeValue() returned null"));
@@ -1376,6 +1254,7 @@ final class NativeTerminalSession implements TerminalSession {
         }
     }
 
+    @SuppressWarnings("unused")
     private boolean deviceAttributesCallback(MemorySegment ignoredTerminal, MemorySegment ignoredUserdata, MemorySegment outAttributes) {
         try {
             var attributes = Objects.requireNonNull(queries.deviceAttributesValue(), "deviceAttributesValue() returned null");
@@ -1417,27 +1296,28 @@ final class NativeTerminalSession implements TerminalSession {
         }
         try {
             Future<?> future = actor.submit(() -> {
-                if (frameSnapshot != MemorySegment.NULL) {
-                    NativeRuntime.invoke(frameSnapshotBindings.ghosttyfxFrameSnapshotFree, frameSnapshot);
-                    frameSnapshot = MemorySegment.NULL;
+                try (callbackArena) {
+                    if (frameSnapshot != MemorySegment.NULL) {
+                        NativeRuntime.invoke(frameSnapshotBindings.ghosttyfxFrameSnapshotFree, frameSnapshot);
+                        frameSnapshot = MemorySegment.NULL;
+                    }
+                    if (renderRowCells != MemorySegment.NULL) {
+                        NativeRuntime.invoke(bindings.ghosttyRenderStateRowCellsFree, renderRowCells);
+                        renderRowCells = MemorySegment.NULL;
+                    }
+                    if (renderRowIterator != MemorySegment.NULL) {
+                        NativeRuntime.invoke(bindings.ghosttyRenderStateRowIteratorFree, renderRowIterator);
+                        renderRowIterator = MemorySegment.NULL;
+                    }
+                    if (renderState != MemorySegment.NULL) {
+                        NativeRuntime.invoke(bindings.ghosttyRenderStateFree, renderState);
+                        renderState = MemorySegment.NULL;
+                    }
+                    if (terminal != MemorySegment.NULL) {
+                        NativeRuntime.invoke(bindings.ghosttyTerminalFree, terminal);
+                        terminal = MemorySegment.NULL;
+                    }
                 }
-                if (renderRowCells != MemorySegment.NULL) {
-                    NativeRuntime.invoke(bindings.ghosttyRenderStateRowCellsFree, renderRowCells);
-                    renderRowCells = MemorySegment.NULL;
-                }
-                if (renderRowIterator != MemorySegment.NULL) {
-                    NativeRuntime.invoke(bindings.ghosttyRenderStateRowIteratorFree, renderRowIterator);
-                    renderRowIterator = MemorySegment.NULL;
-                }
-                if (renderState != MemorySegment.NULL) {
-                    NativeRuntime.invoke(bindings.ghosttyRenderStateFree, renderState);
-                    renderState = MemorySegment.NULL;
-                }
-                if (terminal != MemorySegment.NULL) {
-                    NativeRuntime.invoke(bindings.ghosttyTerminalFree, terminal);
-                    terminal = MemorySegment.NULL;
-                }
-                callbackArena.close();
             });
             future.get();
         } catch (InterruptedException exception) {

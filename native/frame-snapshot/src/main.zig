@@ -7,8 +7,7 @@ const c = @cImport({
 
 const native_allocator = std.heap.page_allocator;
 
-const magic: u32 = 0x58465447;
-const header_size: usize = 208;
+const header_size: usize = 176;
 const row_entry_size: usize = 16;
 const style_entry_size: usize = 20;
 const run_entry_size: usize = 16;
@@ -530,58 +529,44 @@ fn buildPayload(
     self.buffer.appendNTimes(native_allocator, 0, total_size) catch return c.GHOSTTY_OUT_OF_MEMORY;
     const bytes = self.buffer.items;
 
-    writeU32(bytes, 0, magic);
-    writeU16(bytes, 4, 0);
-    writeU16(bytes, 6, @intCast(header_size));
-    writeU16(bytes, 8, @intCast(row_entry_size));
-    writeU16(bytes, 10, @intCast(style_entry_size));
-    writeU16(bytes, 12, @intCast(run_entry_size));
-    writeU16(bytes, 14, 0);
-    writeU64(bytes, 16, total_size);
+    writeU32(bytes, 0, dirty);
+    writeU32(bytes, 4, active_screen);
+    writeU32(bytes, 8, mouse_tracking);
+    writeU32(bytes, 12, kitty_flags);
 
-    writeU32(bytes, 24, dirty);
-    writeU32(bytes, 28, active_screen);
-    writeU32(bytes, 32, mouse_tracking);
-    writeU32(bytes, 36, kitty_flags);
+    writeU32(bytes, 16, cols);
+    writeU32(bytes, 20, rows);
+    writeU32(bytes, 24, cell_width_px);
+    writeU32(bytes, 28, cell_height_px);
 
-    writeU32(bytes, 40, cols);
-    writeU32(bytes, 44, rows);
-    writeU32(bytes, 48, cell_width_px);
-    writeU32(bytes, 52, cell_height_px);
+    writeU32(bytes, 32, boolU32(cursor_visible));
+    writeU32(bytes, 36, boolU32(cursor_blinking));
+    writeU32(bytes, 40, boolU32(cursor_password));
+    writeU32(bytes, 44, boolU32(cursor_in_viewport));
+    writeI32(bytes, 48, cursor_x);
+    writeI32(bytes, 52, cursor_y);
+    writeU32(bytes, 56, boolU32(cursor_wide_tail));
+    writeU32(bytes, 60, cursor_style);
 
-    writeU32(bytes, 56, boolU32(cursor_visible));
-    writeU32(bytes, 60, boolU32(cursor_blinking));
-    writeU32(bytes, 64, boolU32(cursor_password));
-    writeU32(bytes, 68, boolU32(cursor_in_viewport));
-    writeI32(bytes, 72, cursor_x);
-    writeI32(bytes, 76, cursor_y);
-    writeU32(bytes, 80, boolU32(cursor_wide_tail));
-    writeU32(bytes, 84, cursor_style);
+    writeU32(bytes, 64, packRgb(colors.foreground));
+    writeU32(bytes, 68, packRgb(colors.background));
+    writeU32(bytes, 72, packRgb(colors.cursor));
+    writeU32(bytes, 76, boolU32(colors.cursor_has_value));
 
-    writeU32(bytes, 88, packRgb(colors.foreground));
-    writeU32(bytes, 92, packRgb(colors.background));
-    writeU32(bytes, 96, packRgb(colors.cursor));
-    writeU32(bytes, 100, boolU32(colors.cursor_has_value));
+    writeU64(bytes, 80, scrollbar.total);
+    writeU64(bytes, 88, scrollbar.offset);
+    writeU64(bytes, 96, scrollbar.len);
 
-    writeU64(bytes, 104, scrollbar.total);
-    writeU64(bytes, 112, scrollbar.offset);
-    writeU64(bytes, 120, scrollbar.len);
+    writeU32(bytes, 104, castU32(styles_len) orelse return c.GHOSTTY_INVALID_VALUE);
 
-    writeU32(bytes, 128, castU32(rows_len) orelse return c.GHOSTTY_INVALID_VALUE);
-    writeU32(bytes, 132, castU32(styles_len) orelse return c.GHOSTTY_INVALID_VALUE);
-    writeU32(bytes, 136, castU32(runs_len) orelse return c.GHOSTTY_INVALID_VALUE);
-    writeU32(bytes, 140, castU32(text_bytes_len) orelse return c.GHOSTTY_INVALID_VALUE);
-
-    writeU64(bytes, 144, rows_offset);
-    writeU64(bytes, 152, styles_offset);
-    writeU64(bytes, 160, runs_offset);
-    writeU64(bytes, 168, text_bytes_offset);
-    writeU64(bytes, 176, title_offset);
-    writeU32(bytes, 184, castU32(title_len) orelse return c.GHOSTTY_INVALID_VALUE);
-    writeU32(bytes, 188, 0);
-    writeU64(bytes, 192, pwd_offset);
-    writeU32(bytes, 200, castU32(pwd_len) orelse return c.GHOSTTY_INVALID_VALUE);
-    writeU32(bytes, 204, 0);
+    writeU64(bytes, 108, rows_offset);
+    writeU64(bytes, 116, styles_offset);
+    writeU64(bytes, 124, runs_offset);
+    writeU64(bytes, 132, text_bytes_offset);
+    writeU64(bytes, 140, title_offset);
+    writeU32(bytes, 148, castU32(title_len) orelse return c.GHOSTTY_INVALID_VALUE);
+    writeU64(bytes, 152, pwd_offset);
+    writeU32(bytes, 160, castU32(pwd_len) orelse return c.GHOSTTY_INVALID_VALUE);
 
     for (self.rows.items, 0..) |row, index| {
         const offset = rows_offset + index * row_entry_size;
@@ -801,10 +786,6 @@ fn cellWide(api: *const Api, cell: c.GhosttyCell, out_result: *c.GhosttyResult) 
 
 fn packRgb(rgb: c.GhosttyColorRgb) u32 {
     return (@as(u32, rgb.r) << 16) | (@as(u32, rgb.g) << 8) | @as(u32, rgb.b);
-}
-
-fn writeU16(bytes: []u8, offset: usize, value: u16) void {
-    std.mem.writeInt(u16, bytes[offset..][0..2], value, .little);
 }
 
 fn writeU32(bytes: []u8, offset: usize, value: u32) void {

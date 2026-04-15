@@ -6,62 +6,48 @@ import java.lang.foreign.ValueLayout;
 import java.nio.charset.StandardCharsets;
 
 final class NativeFrameSnapshotLayout {
-    static final int MAGIC = 0x58465447;
-    static final int HEADER_SIZE = 208;
     static final int ROW_ENTRY_SIZE = 16;
     static final int STYLE_ENTRY_SIZE = 20;
-    static final int CELL_ENTRY_SIZE = 16;
     static final int RUN_ENTRY_SIZE = 16;
 
-    static final long MAGIC_OFFSET = 0;
-    static final long VERSION_OFFSET = 4;
-    static final long HEADER_SIZE_OFFSET = 6;
-    static final long ROW_ENTRY_SIZE_OFFSET = 8;
-    static final long STYLE_ENTRY_SIZE_OFFSET = 10;
-    static final long RUN_ENTRY_SIZE_OFFSET = 12;
-    static final long TOTAL_SIZE_OFFSET = 16;
+    static final long DIRTY_OFFSET = 0;
+    static final long ACTIVE_SCREEN_OFFSET = 4;
+    static final long MOUSE_TRACKING_OFFSET = 8;
+    static final long KITTY_FLAGS_OFFSET = 12;
 
-    static final long DIRTY_OFFSET = 24;
-    static final long ACTIVE_SCREEN_OFFSET = 28;
-    static final long MOUSE_TRACKING_OFFSET = 32;
-    static final long KITTY_FLAGS_OFFSET = 36;
+    static final long COLUMNS_OFFSET = 16;
+    static final long ROWS_OFFSET = 20;
+    static final long CELL_WIDTH_PX_OFFSET = 24;
+    static final long CELL_HEIGHT_PX_OFFSET = 28;
 
-    static final long COLUMNS_OFFSET = 40;
-    static final long ROWS_OFFSET = 44;
-    static final long CELL_WIDTH_PX_OFFSET = 48;
-    static final long CELL_HEIGHT_PX_OFFSET = 52;
+    static final long CURSOR_VISIBLE_OFFSET = 32;
+    static final long CURSOR_BLINKING_OFFSET = 36;
+    static final long CURSOR_PASSWORD_INPUT_OFFSET = 40;
+    static final long CURSOR_IN_VIEWPORT_OFFSET = 44;
+    static final long CURSOR_X_OFFSET = 48;
+    static final long CURSOR_Y_OFFSET = 52;
+    static final long CURSOR_WIDE_TAIL_OFFSET = 56;
+    static final long CURSOR_STYLE_OFFSET = 60;
 
-    static final long CURSOR_VISIBLE_OFFSET = 56;
-    static final long CURSOR_BLINKING_OFFSET = 60;
-    static final long CURSOR_PASSWORD_INPUT_OFFSET = 64;
-    static final long CURSOR_IN_VIEWPORT_OFFSET = 68;
-    static final long CURSOR_X_OFFSET = 72;
-    static final long CURSOR_Y_OFFSET = 76;
-    static final long CURSOR_WIDE_TAIL_OFFSET = 80;
-    static final long CURSOR_STYLE_OFFSET = 84;
+    static final long COLORS_FOREGROUND_OFFSET = 64;
+    static final long COLORS_BACKGROUND_OFFSET = 68;
+    static final long COLORS_CURSOR_OFFSET = 72;
+    static final long COLORS_CURSOR_EXPLICIT_OFFSET = 76;
 
-    static final long COLORS_FOREGROUND_OFFSET = 88;
-    static final long COLORS_BACKGROUND_OFFSET = 92;
-    static final long COLORS_CURSOR_OFFSET = 96;
-    static final long COLORS_CURSOR_EXPLICIT_OFFSET = 100;
+    static final long SCROLLBAR_TOTAL_OFFSET = 80;
+    static final long SCROLLBAR_OFFSET_OFFSET = 88;
+    static final long SCROLLBAR_LENGTH_OFFSET = 96;
 
-    static final long SCROLLBAR_TOTAL_OFFSET = 104;
-    static final long SCROLLBAR_OFFSET_OFFSET = 112;
-    static final long SCROLLBAR_LENGTH_OFFSET = 120;
+    static final long STYLE_COUNT_OFFSET = 104;
 
-    static final long ROW_COUNT_OFFSET = 128;
-    static final long STYLE_COUNT_OFFSET = 132;
-    static final long RUN_COUNT_OFFSET = 136;
-    static final long TEXT_BYTE_COUNT_OFFSET = 140;
-
-    static final long ROWS_OFFSET_OFFSET = 144;
-    static final long STYLES_OFFSET_OFFSET = 152;
-    static final long RUNS_OFFSET_OFFSET = 160;
-    static final long TEXT_BYTES_OFFSET_OFFSET = 168;
-    static final long TITLE_OFFSET_OFFSET = 176;
-    static final long TITLE_LENGTH_OFFSET = 184;
-    static final long PWD_OFFSET_OFFSET = 192;
-    static final long PWD_LENGTH_OFFSET = 200;
+    static final long ROWS_OFFSET_OFFSET = 108;
+    static final long STYLES_OFFSET_OFFSET = 116;
+    static final long RUNS_OFFSET_OFFSET = 124;
+    static final long TEXT_BYTES_OFFSET_OFFSET = 132;
+    static final long TITLE_OFFSET_OFFSET = 140;
+    static final long TITLE_LENGTH_OFFSET = 148;
+    static final long PWD_OFFSET_OFFSET = 152;
+    static final long PWD_LENGTH_OFFSET = 160;
 
     static final long ROW_FLAGS_OFFSET = 0;
     static final long ROW_RUN_START_OFFSET = 4;
@@ -112,10 +98,6 @@ final class NativeFrameSnapshotLayout {
 
     static int u32(MemorySegment segment, long offset) {
         return segment.get(ValueLayout.JAVA_INT_UNALIGNED, offset);
-    }
-
-    static short u16(MemorySegment segment, long offset) {
-        return segment.get(ValueLayout.JAVA_SHORT_UNALIGNED, offset);
     }
 
     static FrameStyle style(MemorySegment segment, long offset) {
