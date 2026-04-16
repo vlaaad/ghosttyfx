@@ -286,8 +286,11 @@ public final class GhosttyBuild {
         if (isWindows()) {
             environment.putAll(windowsToolchainEnvironment());
         }
-        var basePath = environment.getOrDefault("PATH", System.getenv().getOrDefault("PATH", ""));
-        environment.put("PATH", zigHome + java.io.File.pathSeparator + basePath);
+        var pathKey = environmentKey(environment, "PATH");
+        var basePath = pathKey == null
+            ? System.getenv().getOrDefault("PATH", "")
+            : environment.get(pathKey);
+        environment.put(pathKey == null ? "PATH" : pathKey, zigHome + java.io.File.pathSeparator + basePath);
         var localCache = repo.resolve(".zig-local-cache");
         var globalCache = repo.resolve(".zig-global-cache");
         var tmpDir = repo.resolve(".tmp");
@@ -340,10 +343,19 @@ public final class GhosttyBuild {
             }
             environment.put(line.substring(0, separator), line.substring(separator + 1));
         }
-        if (!environment.containsKey("PATH")) {
+        if (environmentKey(environment, "PATH") == null) {
             throw new IllegalStateException("failed to capture Windows toolchain environment from " + script);
         }
         return environment;
+    }
+
+    private static String environmentKey(Map<String, String> environment, String name) {
+        for (var key : environment.keySet()) {
+            if (key.equalsIgnoreCase(name)) {
+                return key;
+            }
+        }
+        return null;
     }
 
     private static Optional<Path> findWindowsToolchainScript() {
