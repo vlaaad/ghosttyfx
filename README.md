@@ -1,84 +1,51 @@
 # GhosttyFX
 
-JavaFX/cljfx terminal emulator using libghostty with handwritten FFM bindings.
+Generated per-platform `jextract` bindings for `libghostty-vt`.
 
-## CI Build
+## Layout
 
-Builds libghostty-vt for Linux, macOS (arm64/x64), and Windows via GitHub Actions.
-Each CI job uploads a per-platform artifact containing only the native library that the Java
-wrapper loads at runtime.
+- `ghosttyfx`: shared Java module
+- `ghosttyfx-linux-x86_64`
+- `ghosttyfx-macos-x86_64`
+- `ghosttyfx-macos-aarch64`
+- `ghosttyfx-windows-x86_64`
+- `ghostty`: pinned Git submodule for the upstream Ghostty source tree
 
-### Windows Build Issue
+## Local Build
 
-Zig bug #25805 causes builds to fail on Windows when cwd and cache paths are on different drives.
-The bug exists in Zig 0.12.x - 0.15.x and some 0.16.0-dev builds. It is fixed in Zig 0.16.0.
+Run:
 
-Ghostty's CI works because they use `namespace-profile-ghostty-windows` runners where the working
-directory and temp path are on the same drive by default. Our `windows-latest` runners have them
-on different drives (D: for temp, C: for workspace), triggering the bug.
+`mvn clean test`
 
-Workaround: Set `ZIG_CACHE_DIR` to a path on the same drive as the runner's working directory.
+The Maven build invokes [scripts/GhosttyBuild.java](/C:/Users/Vlaaad/Projects/ghosttyfx/scripts/GhosttyBuild.java), which:
 
-## Setup
+- ensures the `ghostty` submodule is initialized to the repo-pinned commit
+- downloads and caches Zig in `.tools/zig`
+- downloads and caches `jextract` in `.tools/jextract`
+- builds `libghostty-vt` for the current host platform
+- runs `jextract` with a shared Java package name
+- writes generated sources under `target/generated-sources/jextract`
+- writes generated resources under `target/generated-resources/ghosttyfx`
+- writes CI/download artifacts under `target/ghosttyfx-artifact`
 
-1. Install Java 25+
-2. Install build tools: CMake, Zig
-3. Clone libghostty: `git clone https://github.com/ghostty-org/ghostty`
-4. Build libghostty-vt shared library
-5. Create Java wrapper layer
-6. Build JavaFX terminal component
-7. Create cljfx handler
+Artifacts contain:
 
-## Artifact Download
+- `src/`
+- `resources/`
 
-Run `python scripts/download_lib.py` to trigger the workflow and download:
+## CI
 
-- one downloaded artifact per platform into `dist/platforms/`
-- each platform artifact contains `lib/`
+CI only needs to:
 
-## Binding Strategy
+1. check out this repository with submodules
+2. set up Java
+3. run `mvn clean test`
+4. upload `<platform-module>/target/ghosttyfx-artifact/`
 
-The binding layer is handwritten in `ghostty-core`, with the small subset of FFM calls and ABI
-layouts the wrapper actually uses today.
+## Notes
 
-The plan is:
-
-- keep a handwritten common Java API in a core module
-- keep the handwritten binding/runtime code in `ghostty-core`
-- package platform-specific native libraries/modules for Linux, macOS arm64, macOS x64, and Windows x64
-- keep the JavaFX/cljfx code talking only to the common handwritten API, not to generated classes directly
-
-
-Then, we will use **Maven** for Java libs with runtime-scoped platform dependencies.
-
-## Running Tests
-
-Use `mvn clean test` when validating local changes.
-
-## Perf Benchmarks
-
-Use the `ghostty-perf` module for before/after measurement of hot paths without mixing benchmark
-code into library or test sources.
-
-Run the fixed perf suite:
-
-`mvn -pl ghostty-perf -am verify`
-
-The suite is intentionally fixed and runs:
-
-- baseline `frame()` benchmarks across `80x24`, `120x40`, and `200x60`
-- a GC-profiled dirty viewport benchmark at `120x40`
-- a JFR-profiled dirty viewport benchmark at `120x40`
-
-Results are written to:
-
-- `ghostty-perf/target/jmh/report.md`
-- `ghostty-perf/target/jmh/baseline.json`
-- `ghostty-perf/target/jmh/dirty-gc.json`
-- `ghostty-perf/target/jmh/dirty-jfr.json`
-- `ghostty-perf/target/jmh/jfr/`
-
-## Resources
-
-- [libghostty docs](https://libghostty.tip.ghostty.org/index.html)
-- [Ghostling example](https://github.com/ghostty-org/ghostling)
+- Local generation is host-only.
+- Cross-platform artifact sets come from CI running the same build on each target host.
+- Local Windows builds still require Visual Studio Build Tools plus the Windows SDK.
+- `ghostty-reference` is no longer part of the build path.
+- No extra gitignore entry is needed for generated bindings because they live under `target/`.

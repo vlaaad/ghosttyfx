@@ -5,37 +5,26 @@
     <modelVersion>4.0.0</modelVersion>
 
     <groupId>io.github.vlaaad</groupId>
-    <artifactId>ghostty-parent</artifactId>
+    <artifactId>ghosttyfx-parent</artifactId>
     <version>1.0.0-SNAPSHOT</version>
     <packaging>pom</packaging>
 
-    <name>Ghostty Parent</name>
-    <description>Parent POM for Ghostty terminal emulator</description>
+    <name>GhosttyFX Parent</name>
+    <description>Parent POM for GhosttyFX generated bindings</description>
 
     <properties>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <maven.compiler.source>25</maven.compiler.source>
         <maven.compiler.target>25</maven.compiler.target>
-        <ghostty.version>${project.version}</ghostty.version>
         <junit.version>5.12.2</junit.version>
     </properties>
 
     <modules>
-        <module>ghostty-core</module>
-        <module>ghostty-perf</module>
-        <module>ghostty-linux-x86_64</module>
-        <module>ghostty-macos-x86_64</module>
-        <module>ghostty-macos-aarch64</module>
-        <module>ghostty-windows-x86_64</module>
+        <module>ghosttyfx</module>
     </modules>
 
     <dependencyManagement>
         <dependencies>
-            <dependency>
-                <groupId>io.github.vlaaad</groupId>
-                <artifactId>ghostty-core</artifactId>
-                <version>${ghostty.version}</version>
-            </dependency>
             <dependency>
                 <groupId>org.junit.jupiter</groupId>
                 <artifactId>junit-jupiter</artifactId>
@@ -44,6 +33,111 @@
             </dependency>
         </dependencies>
     </dependencyManagement>
+
+    <profiles>
+        <profile>
+            <id>linux-amd64</id>
+            <activation>
+                <os>
+                    <family>unix</family>
+                    <name>Linux</name>
+                    <arch>amd64</arch>
+                </os>
+            </activation>
+            <modules>
+                <module>ghosttyfx-linux-x86_64</module>
+            </modules>
+        </profile>
+        <profile>
+            <id>linux-x86_64</id>
+            <activation>
+                <os>
+                    <family>unix</family>
+                    <name>Linux</name>
+                    <arch>x86_64</arch>
+                </os>
+            </activation>
+            <modules>
+                <module>ghosttyfx-linux-x86_64</module>
+            </modules>
+        </profile>
+        <profile>
+            <id>macos-aarch64</id>
+            <activation>
+                <os>
+                    <family>mac</family>
+                    <name>Mac OS X</name>
+                    <arch>aarch64</arch>
+                </os>
+            </activation>
+            <modules>
+                <module>ghosttyfx-macos-aarch64</module>
+            </modules>
+        </profile>
+        <profile>
+            <id>macos-arm64</id>
+            <activation>
+                <os>
+                    <family>mac</family>
+                    <name>Mac OS X</name>
+                    <arch>arm64</arch>
+                </os>
+            </activation>
+            <modules>
+                <module>ghosttyfx-macos-aarch64</module>
+            </modules>
+        </profile>
+        <profile>
+            <id>macos-amd64</id>
+            <activation>
+                <os>
+                    <family>mac</family>
+                    <name>Mac OS X</name>
+                    <arch>amd64</arch>
+                </os>
+            </activation>
+            <modules>
+                <module>ghosttyfx-macos-x86_64</module>
+            </modules>
+        </profile>
+        <profile>
+            <id>macos-x86_64</id>
+            <activation>
+                <os>
+                    <family>mac</family>
+                    <name>Mac OS X</name>
+                    <arch>x86_64</arch>
+                </os>
+            </activation>
+            <modules>
+                <module>ghosttyfx-macos-x86_64</module>
+            </modules>
+        </profile>
+        <profile>
+            <id>windows-amd64</id>
+            <activation>
+                <os>
+                    <family>windows</family>
+                    <arch>amd64</arch>
+                </os>
+            </activation>
+            <modules>
+                <module>ghosttyfx-windows-x86_64</module>
+            </modules>
+        </profile>
+        <profile>
+            <id>windows-x86_64</id>
+            <activation>
+                <os>
+                    <family>windows</family>
+                    <arch>x86_64</arch>
+                </os>
+            </activation>
+            <modules>
+                <module>ghosttyfx-windows-x86_64</module>
+            </modules>
+        </profile>
+    </profiles>
 
     <build>
         <pluginManagement>
@@ -62,6 +156,11 @@
                     <groupId>org.codehaus.mojo</groupId>
                     <artifactId>build-helper-maven-plugin</artifactId>
                     <version>3.6.1</version>
+                </plugin>
+                <plugin>
+                    <groupId>org.codehaus.mojo</groupId>
+                    <artifactId>exec-maven-plugin</artifactId>
+                    <version>3.6.2</version>
                 </plugin>
                 <plugin>
                     <groupId>org.apache.maven.plugins</groupId>

@@ -1,0 +1,125 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>io.github.vlaaad</groupId>
+        <artifactId>ghosttyfx-parent</artifactId>
+        <version>1.0.0-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>ghosttyfx-windows-x86_64</artifactId>
+
+    <name>GhosttyFX Windows x86_64</name>
+    <description>Generated GhosttyFX bindings for Windows x86_64</description>
+
+    <properties>
+        <ghosttyfx.platform.id>windows-x86_64</ghosttyfx.platform.id>
+        <ghosttyfx.generated.sources.dir>${project.build.directory}/generated-sources/jextract</ghosttyfx.generated.sources.dir>
+        <ghosttyfx.generated.resources.dir>${project.build.directory}/generated-resources/ghosttyfx</ghosttyfx.generated.resources.dir>
+        <ghosttyfx.artifact.dir>${project.build.directory}/ghosttyfx-artifact</ghosttyfx.artifact.dir>
+        <ghosttyfx.script>${project.parent.basedir}/scripts/GhosttyBuild.java</ghosttyfx.script>
+        <ghosttyfx.native.pattern>*.dll</ghosttyfx.native.pattern>
+    </properties>
+
+    <dependencies>
+        <dependency>
+            <groupId>io.github.vlaaad</groupId>
+            <artifactId>ghosttyfx</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>exec-maven-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>generate-platform-bindings</id>
+                        <phase>generate-sources</phase>
+                        <goals>
+                            <goal>exec</goal>
+                        </goals>
+                        <configuration>
+                            <workingDirectory>${project.parent.basedir}</workingDirectory>
+                            <executable>java</executable>
+                            <arguments>
+                                <argument>--source</argument>
+                                <argument>${maven.compiler.source}</argument>
+                                <argument>${ghosttyfx.script}</argument>
+                                <argument>generate-platform</argument>
+                                <argument>${ghosttyfx.platform.id}</argument>
+                                <argument>${project.artifactId}</argument>
+                                <argument>${project.build.directory}</argument>
+                            </arguments>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>build-helper-maven-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>add-generated-sources</id>
+                        <phase>generate-sources</phase>
+                        <goals>
+                            <goal>add-source</goal>
+                        </goals>
+                        <configuration>
+                            <sources>
+                                <source>${ghosttyfx.generated.sources.dir}</source>
+                            </sources>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-resources-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>copy-native-library</id>
+                        <phase>process-resources</phase>
+                        <goals>
+                            <goal>copy-resources</goal>
+                        </goals>
+                        <configuration>
+                            <outputDirectory>${project.build.outputDirectory}/native/${ghosttyfx.platform.id}</outputDirectory>
+                            <resources>
+                                <resource>
+                                    <directory>${ghosttyfx.generated.resources.dir}/native/${ghosttyfx.platform.id}</directory>
+                                    <includes>
+                                        <include>${ghosttyfx.native.pattern}</include>
+                                    </includes>
+                                </resource>
+                            </resources>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <id>copy-platform-metadata</id>
+                        <phase>process-resources</phase>
+                        <goals>
+                            <goal>copy-resources</goal>
+                        </goals>
+                        <configuration>
+                            <outputDirectory>${project.build.outputDirectory}</outputDirectory>
+                            <resources>
+                                <resource>
+                                    <directory>${ghosttyfx.generated.resources.dir}</directory>
+                                    <includes>
+                                        <include>metadata.properties</include>
+                                    </includes>
+                                </resource>
+                            </resources>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+</project>

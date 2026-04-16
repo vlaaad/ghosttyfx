@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Download libghostty-vt artifacts from GitHub Actions workflow."""
+"""Download GhosttyFX workflow artifacts from GitHub Actions."""
 
 import json
 import re
@@ -11,10 +11,10 @@ from pathlib import Path
 REPO = "vlaaad/ghosttyfx"
 WORKFLOW_FILE = "build-lib.yml"
 ARTIFACTS = [
-    "libghostty-vt-linux-x86_64",
-    "libghostty-vt-macos-aarch64",
-    "libghostty-vt-macos-x86_64",
-    "libghostty-vt-windows-x86_64",
+    "ghosttyfx-linux-x86_64",
+    "ghosttyfx-macos-aarch64",
+    "ghosttyfx-macos-x86_64",
+    "ghosttyfx-windows-x86_64",
 ]
 
 
@@ -32,7 +32,6 @@ def ensure_synced_with_main(repo_dir: Path) -> None:
     ).stdout.splitlines()
 
     dirty_entries = [line for line in status if line and not line.startswith("#")]
-
     if dirty_entries:
         raise RuntimeError(
             "Refusing to trigger CI because the working tree is not clean. "
@@ -74,7 +73,7 @@ def workflow_status(run_id: str) -> dict:
     return json.loads(result.stdout)
 
 
-def main():
+def main() -> int:
     repo_dir = Path(__file__).parent.parent
     ensure_synced_with_main(repo_dir)
 
@@ -82,9 +81,7 @@ def main():
     platforms_dir = dist_dir / "platforms"
 
     print("Triggering workflow...")
-    result = run(
-        ["gh", "workflow", "run", WORKFLOW_FILE, "--repo", REPO], capture_output=True
-    )
+    result = run(["gh", "workflow", "run", WORKFLOW_FILE, "--repo", REPO], capture_output=True)
     output = result.stdout + result.stderr
     match = re.search(r"https://github\.com/[^/]+/[^/]+/actions/runs/(\d+)", output)
     if not match:
@@ -104,7 +101,6 @@ def main():
             for job in jobs
             if job.get("conclusion") in {"failure", "cancelled", "timed_out", "startup_failure"}
         ]
-
         if failed_jobs:
             print(f"Workflow failed early: {', '.join(failed_jobs)}")
             print(f"Run URL: {data['url']}")
@@ -123,9 +119,6 @@ def main():
 
     if dist_dir.exists():
         shutil.rmtree(dist_dir)
-    dist_dir.mkdir(parents=True)
-    if platforms_dir.exists():
-        shutil.rmtree(platforms_dir)
     platforms_dir.mkdir(parents=True)
 
     print("Downloading artifacts...")
@@ -150,9 +143,10 @@ def main():
         )
 
     print(f"\nArtifacts downloaded to {dist_dir}/")
-    for d in sorted(platforms_dir.iterdir()):
-        if d.is_dir():
-            print(f"  platform: {d.name} ({sum(1 for p in d.rglob('*') if p.is_file())} files)")
+    for directory in sorted(platforms_dir.iterdir()):
+        if directory.is_dir():
+            files = sum(1 for path in directory.rglob("*") if path.is_file())
+            print(f"  platform: {directory.name} ({files} files)")
 
     return 0
 
