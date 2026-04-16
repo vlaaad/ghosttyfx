@@ -17,6 +17,7 @@
         <maven.compiler.source>25</maven.compiler.source>
         <maven.compiler.target>25</maven.compiler.target>
         <junit.version>5.12.2</junit.version>
+        <ghosttyfx.script>${project.basedir}/scripts/GhosttyBuild.java</ghosttyfx.script>
     </properties>
 
     <modules>
@@ -136,6 +137,35 @@
             <modules>
                 <module>ghosttyfx-windows-x86_64</module>
             </modules>
+        </profile>
+        <profile>
+            <id>download-cross-platform-artifacts</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.codehaus.mojo</groupId>
+                        <artifactId>exec-maven-plugin</artifactId>
+                        <executions>
+                            <execution>
+                                <id>download-cross-platform-artifacts</id>
+                                <goals>
+                                    <goal>exec</goal>
+                                </goals>
+                                <configuration>
+                                    <workingDirectory>${project.basedir}</workingDirectory>
+                                    <executable>java</executable>
+                                    <arguments>
+                                        <argument>--source</argument>
+                                        <argument>${maven.compiler.source}</argument>
+                                        <argument>${ghosttyfx.script}</argument>
+                                        <argument>download-artifacts</argument>
+                                    </arguments>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
         </profile>
     </profiles>
 

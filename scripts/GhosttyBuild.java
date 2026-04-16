@@ -17,6 +17,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Properties;
+import java.util.regex.Pattern;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 
@@ -24,6 +25,12 @@ public final class GhosttyBuild {
     private static final String GHOSTTY_SUBMODULE = "ghostty";
     private static final String JEXTRACT_TARGET_PACKAGE = "io.github.vlaaad.ghostty.bindings";
     private static final String JEXTRACT_HEADER_CLASS = "ghostty_vt_h";
+    private static final String WORKFLOW_REPO = "vlaaad/ghosttyfx";
+    private static final String WORKFLOW_FILE = "build-lib.yml";
+    private static final String DOWNLOAD_ARTIFACTS_COMMAND =
+        "mvn -N -Pdownload-cross-platform-artifacts exec:exec@download-cross-platform-artifacts";
+    private static final Pattern RUN_URL_PATTERN =
+        Pattern.compile("https://github\\.com/[^/]+/[^/]+/actions/runs/(\\d+)");
     private static final HttpClient HTTP = HttpClient.newBuilder()
         .followRedirects(HttpClient.Redirect.NORMAL)
         .build();
@@ -129,10 +136,20 @@ public final class GhosttyBuild {
     private GhosttyBuild() {}
 
     public static void main(String[] args) throws Exception {
-        if (args.length != 4 || !"generate-platform".equals(args[0])) {
-            throw new IllegalArgumentException("usage: generate-platform <platform-id> <artifact-id> <build-dir>");
+        if (args.length == 1 && "download-artifacts".equals(args[0])) {
+            downloadArtifacts(Path.of("").toAbsolutePath().normalize());
+            return;
         }
+        if (args.length == 4 && "generate-platform".equals(args[0])) {
+            generatePlatform(args);
+            return;
+        }
+        throw new IllegalArgumentException(
+            "usage: generate-platform <platform-id> <artifact-id> <build-dir> | download-artifacts"
+        );
+    }
 
+    private static void generatePlatform(String[] args) throws Exception {
         var repo = Path.of("").toAbsolutePath().normalize();
         var platform = platform(args[1]);
         var artifactId = args[2];
@@ -150,6 +167,16 @@ public final class GhosttyBuild {
         if (isUpToDate(outputs, platform, artifactId, ghosttyCommit)) {
             System.out.println("ghosttyfx artifact is up to date: " + outputs.artifactDir);
             return;
+        }
+        if (!canBuildLocally()) {
+            if (restoreCachedArtifact(repo, outputs, platform, artifactId, ghosttyCommit)) {
+                System.out.println("restored cached ghosttyfx artifact: " + outputs.artifactDir);
+                return;
+            }
+            throw new IllegalStateException(
+                "No cached artifact found for ghostty commit " + ghosttyCommit + ". "
+                    + "Run `" + DOWNLOAD_ARTIFACTS_COMMAND + "` first."
+            );
         }
 
         var zigHome = ensureTool(repo, platform.zig);
@@ -197,6 +224,136 @@ public final class GhosttyBuild {
         var ghostty = repo.resolve(GHOSTTY_SUBMODULE);
         run(ghostty, Map.of(), "git", "submodule", "sync", "--recursive");
         run(ghostty, Map.of(), "git", "submodule", "update", "--init", "--recursive");
+    }
+
+    private static void downloadArtifacts(Path repo) throws Exception {
+        ensureGhosttySubmodule(repo);
+        ensureSyncedWithMain(repo);
+        var ghosttyCommit = capture(repo.resolve(GHOSTTY_SUBMODULE), "git", "rev-parse", "HEAD").trim();
+        var distDir = distDir(repo, ghosttyCommit);
+        deleteDirectory(distDir);
+        Files.createDirectories(distDir);
+
+        System.out.println("Triggering workflow...");
+        var output = capture(repo, "gh", "workflow", "run", WORKFLOW_FILE, "--repo", WORKFLOW_REPO);
+        var runId = parseRunId(output);
+        System.out.println("Started workflow run: " + runId);
+
+        waitForWorkflow(repo, runId);
+
+        System.out.println("Downloading artifacts...");
+        for (var platform : PLATFORMS.values()) {
+            var artifactId = artifactId(platform.id);
+            var artifactDir = distDir.resolve(artifactId);
+            Files.createDirectories(artifactDir);
+            run(
+                repo,
+                Map.of(),
+                "gh",
+                "run",
+                "download",
+                runId,
+                "--repo",
+                WORKFLOW_REPO,
+                "-n",
+                artifactId,
+                "-D",
+                artifactDir.toString()
+            );
+            if (!isValidArtifactBundle(artifactDir, platform, artifactId, ghosttyCommit)) {
+                throw new IllegalStateException(
+                    "downloaded artifact did not match ghostty commit " + ghosttyCommit + ": " + artifactDir
+                );
+            }
+        }
+
+        System.out.println("Artifacts downloaded to " + distDir);
+    }
+
+    private static void ensureSyncedWithMain(Path repo) throws Exception {
+        run(repo, Map.of(), "git", "fetch", "origin", "main", "--quiet");
+        var status = capture(repo, "git", "status", "--porcelain=v2", "--branch");
+        for (var line : status.split("\\R")) {
+            if (!line.isBlank() && !line.startsWith("#")) {
+                throw new IllegalStateException(
+                    "Refusing to trigger CI because the working tree is not clean. "
+                        + "Commit, stash, or remove local changes so the checkout matches origin/main."
+                );
+            }
+        }
+
+        var head = capture(repo, "git", "rev-parse", "HEAD").trim();
+        var originMain = capture(repo, "git", "rev-parse", "origin/main").trim();
+        if (!head.equals(originMain)) {
+            throw new IllegalStateException(
+                "Refusing to trigger CI because HEAD does not match origin/main. "
+                    + "Push or reset your local branch so the workflow runs against the same commit."
+            );
+        }
+    }
+
+    private static String parseRunId(String output) {
+        var matcher = RUN_URL_PATTERN.matcher(output);
+        if (!matcher.find()) {
+            throw new IllegalStateException("could not determine workflow run id from output: " + output);
+        }
+        return matcher.group(1);
+    }
+
+    private static void waitForWorkflow(Path repo, String runId) throws Exception {
+        System.out.println("Waiting for workflow to complete...");
+        while (true) {
+            var json = capture(repo, "gh", "run", "view", runId, "--repo", WORKFLOW_REPO, "--json", "status,conclusion,url");
+            var status = jsonField(json, "status");
+            var conclusion = jsonField(json, "conclusion");
+            var url = jsonField(json, "url");
+            if ("completed".equals(status)) {
+                if (!"success".equals(conclusion)) {
+                    throw new IllegalStateException("workflow completed with: " + conclusion + "\nRun URL: " + url);
+                }
+                System.out.println("Workflow completed successfully!");
+                return;
+            }
+            System.out.println("Status: " + status + "... waiting 5s");
+            Thread.sleep(5000);
+        }
+    }
+
+    private static String jsonField(String json, String field) {
+        var matcher = Pattern.compile("\"" + Pattern.quote(field) + "\"\\s*:\\s*(null|\"([^\"]*)\")").matcher(json);
+        if (!matcher.find()) {
+            throw new IllegalStateException("missing JSON field '" + field + "' in: " + json);
+        }
+        return "null".equals(matcher.group(1)) ? "" : matcher.group(2);
+    }
+
+    private static boolean restoreCachedArtifact(
+        Path repo,
+        OutputDirs outputs,
+        PlatformSpec platform,
+        String artifactId,
+        String ghosttyCommit
+    ) throws IOException {
+        var cachedArtifact = distDir(repo, ghosttyCommit).resolve(artifactId);
+        if (!isValidArtifactBundle(cachedArtifact, platform, artifactId, ghosttyCommit)) {
+            return false;
+        }
+
+        deleteDirectory(outputs.generatedSourcesDir);
+        deleteDirectory(outputs.generatedResourcesDir);
+        deleteDirectory(outputs.artifactDir);
+        copyDirectory(cachedArtifact.resolve("src"), outputs.generatedSourcesDir);
+        copyDirectory(cachedArtifact.resolve("resources"), outputs.generatedResourcesDir);
+        copyDirectory(cachedArtifact, outputs.artifactDir);
+        return true;
+    }
+
+    private static Path distDir(Path repo, String ghosttyCommit) {
+        return repo.resolve("dist").resolve(ghosttyCommit);
+    }
+
+    private static String artifactId(String platformId) {
+        return "ghosttyfx-" + platformId;
     }
 
     private static Path ensureTool(Path repo, DownloadSpec spec) throws Exception {
@@ -304,6 +461,10 @@ public final class GhosttyBuild {
         return environment;
     }
 
+    private static boolean canBuildLocally() {
+        return !isWindows() || findWindowsToolchainScript().isPresent();
+    }
+
     private static void ensureHostToolchain() {
         if (!isWindows()) {
             return;
@@ -315,7 +476,8 @@ public final class GhosttyBuild {
 
         throw new IllegalStateException(
             "Windows Ghostty builds require Visual Studio Build Tools and the Windows SDK. "
-                + "CI runners provide them, but this local machine does not appear to have them installed."
+                + "CI runners provide them, but this local machine does not appear to have them installed. "
+                + "Run `" + DOWNLOAD_ARTIFACTS_COMMAND + "` to download matching prebuilt artifacts."
         );
     }
 
@@ -532,24 +694,47 @@ public final class GhosttyBuild {
         }
     }
 
+    private static boolean isValidArtifactBundle(
+        Path artifactDir,
+        PlatformSpec platform,
+        String artifactId,
+        String ghosttyCommit
+    ) throws IOException {
+        var metadataFile = artifactDir.resolve("resources").resolve("metadata.properties");
+        var artifactHeader = artifactDir.resolve("src")
+            .resolve(JEXTRACT_TARGET_PACKAGE.replace('.', java.io.File.separatorChar))
+            .resolve(JEXTRACT_HEADER_CLASS + ".java");
+        var artifactLibrary = artifactDir.resolve("resources")
+            .resolve("native")
+            .resolve(platform.id)
+            .resolve(platform.packagedLibraryFileName);
+        if (!Files.isRegularFile(metadataFile) || !Files.isRegularFile(artifactHeader) || !Files.isRegularFile(artifactLibrary)) {
+            return false;
+        }
+
+        var metadata = new Properties();
+        try (var input = Files.newInputStream(metadataFile)) {
+            metadata.load(input);
+        }
+        return artifactId.equals(metadata.getProperty("artifactId"))
+            && platform.id.equals(metadata.getProperty("platform"))
+            && ghosttyCommit.equals(metadata.getProperty("ghostty.commit"))
+            && JEXTRACT_TARGET_PACKAGE.equals(metadata.getProperty("jextract.package"))
+            && JEXTRACT_HEADER_CLASS.equals(metadata.getProperty("jextract.headerClass"))
+            && platform.jextract.rootDirName.equals(metadata.getProperty("jextract.version"))
+            && platform.zig.rootDirName.equals(metadata.getProperty("zig.version"));
+    }
+
     private static boolean isUpToDate(OutputDirs outputs, PlatformSpec platform, String artifactId, String ghosttyCommit) throws IOException {
         var metadataFile = outputs.generatedResourcesDir.resolve("metadata.properties");
         var generatedHeader = outputs.generatedSourcesDir
             .resolve(JEXTRACT_TARGET_PACKAGE.replace('.', java.io.File.separatorChar))
             .resolve(JEXTRACT_HEADER_CLASS + ".java");
         var nativeLibrary = outputs.generatedResourcesDir.resolve("native").resolve(platform.id).resolve(platform.packagedLibraryFileName);
-        var artifactLibrary = outputs.artifactDir.resolve("resources")
-            .resolve("native")
-            .resolve(platform.id)
-            .resolve(platform.packagedLibraryFileName);
-        var artifactHeader = outputs.artifactDir.resolve("src")
-            .resolve(JEXTRACT_TARGET_PACKAGE.replace('.', java.io.File.separatorChar))
-            .resolve(JEXTRACT_HEADER_CLASS + ".java");
-        var artifactMetadata = outputs.artifactDir.resolve("resources").resolve("metadata.properties");
         if (!Files.isRegularFile(metadataFile) || !Files.isRegularFile(generatedHeader) || !Files.isRegularFile(nativeLibrary)) {
             return false;
         }
-        if (!Files.isRegularFile(artifactLibrary) || !Files.isRegularFile(artifactHeader) || !Files.isRegularFile(artifactMetadata)) {
+        if (!isValidArtifactBundle(outputs.artifactDir, platform, artifactId, ghosttyCommit)) {
             return false;
         }
 
