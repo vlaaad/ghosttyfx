@@ -15,6 +15,7 @@ import java.util.HexFormat;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Properties;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
@@ -280,9 +281,13 @@ public final class GhosttyBuild {
         }
     }
 
-    private static Map<String, String> buildEnvironment(Path repo, Path zigHome) throws IOException {
+    private static Map<String, String> buildEnvironment(Path repo, Path zigHome) throws Exception {
         var environment = new java.util.LinkedHashMap<String, String>();
-        environment.put("PATH", zigHome + java.io.File.pathSeparator + System.getenv().getOrDefault("PATH", ""));
+        if (isWindows()) {
+            environment.putAll(windowsToolchainEnvironment());
+        }
+        var basePath = environment.getOrDefault("PATH", System.getenv().getOrDefault("PATH", ""));
+        environment.put("PATH", zigHome + java.io.File.pathSeparator + basePath);
         var localCache = repo.resolve(".zig-local-cache");
         var globalCache = repo.resolve(".zig-global-cache");
         var tmpDir = repo.resolve(".tmp");
@@ -301,10 +306,7 @@ public final class GhosttyBuild {
             return;
         }
 
-        var vsWhere = Path.of("C:/Program Files (x86)/Microsoft Visual Studio/Installer/vswhere.exe");
-        if (Files.exists(vsWhere)
-            || hasWindowsToolchain(Path.of("C:/Program Files/Microsoft Visual Studio"))
-            || hasWindowsToolchain(Path.of("C:/Program Files (x86)/Microsoft Visual Studio"))) {
+        if (findWindowsToolchainScript().isPresent()) {
             return;
         }
 
@@ -314,23 +316,116 @@ public final class GhosttyBuild {
         );
     }
 
-    private static boolean hasWindowsToolchain(Path root) {
+    private static Map<String, String> windowsToolchainEnvironment() throws Exception {
+        var script = findWindowsToolchainScript().orElseThrow(() -> new IllegalStateException(
+            "Windows Ghostty builds require Visual Studio Build Tools and the Windows SDK. "
+                + "CI runners provide them, but this local machine does not appear to have them installed."
+        ));
+        var output = capture(
+            Path.of("").toAbsolutePath().normalize(),
+            "cmd.exe",
+            "/d",
+            "/s",
+            "/c",
+            toolchainSetupCommand(script)
+        );
+        var environment = new java.util.LinkedHashMap<String, String>();
+        for (var line : output.split("\\R")) {
+            if (line.isBlank() || line.startsWith("=")) {
+                continue;
+            }
+            var separator = line.indexOf('=');
+            if (separator <= 0) {
+                continue;
+            }
+            environment.put(line.substring(0, separator), line.substring(separator + 1));
+        }
+        if (!environment.containsKey("PATH")) {
+            throw new IllegalStateException("failed to capture Windows toolchain environment from " + script);
+        }
+        return environment;
+    }
+
+    private static Optional<Path> findWindowsToolchainScript() {
+        var vsWhere = Path.of("C:/Program Files (x86)/Microsoft Visual Studio/Installer/vswhere.exe");
+        if (Files.isRegularFile(vsWhere)) {
+            try {
+                var installationPath = capture(
+                    Path.of("").toAbsolutePath().normalize(),
+                    vsWhere.toString(),
+                    "-latest",
+                    "-products",
+                    "*",
+                    "-requires",
+                    "Microsoft.VisualStudio.Component.VC.Tools.x86.x64",
+                    "-property",
+                    "installationPath"
+                ).strip();
+                if (!installationPath.isEmpty()) {
+                    var installation = Path.of(installationPath);
+                    var vcvars = installation.resolve("VC").resolve("Auxiliary").resolve("Build").resolve("vcvars64.bat");
+                    if (Files.isRegularFile(vcvars)) {
+                        return Optional.of(vcvars);
+                    }
+                    var vsDevCmd = installation.resolve("Common7").resolve("Tools").resolve("VsDevCmd.bat");
+                    if (Files.isRegularFile(vsDevCmd)) {
+                        return Optional.of(vsDevCmd);
+                    }
+                }
+            } catch (Exception ignored) {
+                // Fall back to scanning the standard installation roots.
+            }
+        }
+
+        for (var root : java.util.List.of(
+            Path.of("C:/Program Files/Microsoft Visual Studio"),
+            Path.of("C:/Program Files (x86)/Microsoft Visual Studio")
+        )) {
+            var toolchain = findWindowsToolchainScript(root);
+            if (toolchain.isPresent()) {
+                return toolchain;
+            }
+        }
+        return Optional.empty();
+    }
+
+    private static Optional<Path> findWindowsToolchainScript(Path root) {
         if (!Files.isDirectory(root)) {
-            return false;
+            return Optional.empty();
         }
 
         try (var paths = Files.walk(root, 6)) {
-            return paths.anyMatch(path -> {
-                var name = path.getFileName();
-                if (name == null) {
-                    return false;
-                }
-                return "vcvars64.bat".equalsIgnoreCase(name.toString())
-                    || "VsDevCmd.bat".equalsIgnoreCase(name.toString());
-            });
+            return paths
+                .filter(Files::isRegularFile)
+                .filter(path -> {
+                    var name = path.getFileName();
+                    if (name == null) {
+                        return false;
+                    }
+                    return "vcvars64.bat".equalsIgnoreCase(name.toString())
+                        || "VsDevCmd.bat".equalsIgnoreCase(name.toString());
+                })
+                .sorted(java.util.Comparator.comparingInt(GhosttyBuild::toolchainScriptPriority))
+                .findFirst();
         } catch (IOException exception) {
             throw new IllegalStateException("failed to inspect Windows toolchain under " + root, exception);
         }
+    }
+
+    private static int toolchainScriptPriority(Path path) {
+        var name = path.getFileName();
+        if (name == null) {
+            return Integer.MAX_VALUE;
+        }
+        return "vcvars64.bat".equalsIgnoreCase(name.toString()) ? 0 : 1;
+    }
+
+    private static String toolchainSetupCommand(Path script) {
+        var quoted = "\"" + script + "\"";
+        if ("VsDevCmd.bat".equalsIgnoreCase(String.valueOf(script.getFileName()))) {
+            return "call " + quoted + " -arch=amd64 -host_arch=amd64 >nul && set";
+        }
+        return "call " + quoted + " >nul && set";
     }
 
     private static Path zigExecutable(Path zigHome) {
