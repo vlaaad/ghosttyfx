@@ -48,6 +48,9 @@
             <modules>
                 <module>ghosttyfx-linux-x86_64</module>
             </modules>
+            <properties>
+                <ghosttyfx.bindings.artifactId>ghosttyfx-linux-x86_64</ghosttyfx.bindings.artifactId>
+            </properties>
         </profile>
         <profile>
             <id>linux-x86_64</id>
@@ -61,6 +64,9 @@
             <modules>
                 <module>ghosttyfx-linux-x86_64</module>
             </modules>
+            <properties>
+                <ghosttyfx.bindings.artifactId>ghosttyfx-linux-x86_64</ghosttyfx.bindings.artifactId>
+            </properties>
         </profile>
         <profile>
             <id>macos-aarch64</id>
@@ -74,6 +80,9 @@
             <modules>
                 <module>ghosttyfx-macos-aarch64</module>
             </modules>
+            <properties>
+                <ghosttyfx.bindings.artifactId>ghosttyfx-macos-aarch64</ghosttyfx.bindings.artifactId>
+            </properties>
         </profile>
         <profile>
             <id>macos-arm64</id>
@@ -87,6 +96,9 @@
             <modules>
                 <module>ghosttyfx-macos-aarch64</module>
             </modules>
+            <properties>
+                <ghosttyfx.bindings.artifactId>ghosttyfx-macos-aarch64</ghosttyfx.bindings.artifactId>
+            </properties>
         </profile>
         <profile>
             <id>macos-amd64</id>
@@ -100,6 +112,9 @@
             <modules>
                 <module>ghosttyfx-macos-x86_64</module>
             </modules>
+            <properties>
+                <ghosttyfx.bindings.artifactId>ghosttyfx-macos-x86_64</ghosttyfx.bindings.artifactId>
+            </properties>
         </profile>
         <profile>
             <id>macos-x86_64</id>
@@ -113,6 +128,9 @@
             <modules>
                 <module>ghosttyfx-macos-x86_64</module>
             </modules>
+            <properties>
+                <ghosttyfx.bindings.artifactId>ghosttyfx-macos-x86_64</ghosttyfx.bindings.artifactId>
+            </properties>
         </profile>
         <profile>
             <id>windows-amd64</id>
@@ -125,6 +143,9 @@
             <modules>
                 <module>ghosttyfx-windows-x86_64</module>
             </modules>
+            <properties>
+                <ghosttyfx.bindings.artifactId>ghosttyfx-windows-x86_64</ghosttyfx.bindings.artifactId>
+            </properties>
         </profile>
         <profile>
             <id>windows-x86_64</id>
@@ -137,6 +158,9 @@
             <modules>
                 <module>ghosttyfx-windows-x86_64</module>
             </modules>
+            <properties>
+                <ghosttyfx.bindings.artifactId>ghosttyfx-windows-x86_64</ghosttyfx.bindings.artifactId>
+            </properties>
         </profile>
         <profile>
             <id>download-cross-platform-artifacts</id>

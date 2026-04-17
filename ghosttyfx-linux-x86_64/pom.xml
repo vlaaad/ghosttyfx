@@ -24,14 +24,6 @@
         <ghosttyfx.native.pattern>*.so</ghosttyfx.native.pattern>
     </properties>
 
-    <dependencies>
-        <dependency>
-            <groupId>io.github.vlaaad</groupId>
-            <artifactId>ghosttyfx</artifactId>
-            <version>${project.version}</version>
-        </dependency>
-    </dependencies>
-
     <build>
         <plugins>
             <plugin>
