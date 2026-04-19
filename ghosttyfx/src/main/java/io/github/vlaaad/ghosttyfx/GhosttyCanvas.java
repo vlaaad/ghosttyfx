@@ -308,5 +308,7 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
         }
     }
 
-    private record CellMetrics(int cellWidthPx, int cellHeightPx, int baselineOffsetPx) {}
+    private record CellMetrics(int cellWidthPx, int cellHeightPx, int baselineOffsetPx) {
+
+    }
 }
