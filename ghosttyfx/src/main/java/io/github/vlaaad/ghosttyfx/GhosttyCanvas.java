@@ -1,28 +1,30 @@
 package io.github.vlaaad.ghosttyfx;
 
-import com.pty4j.PtyProcessBuilder;
-
-import io.github.vlaaad.ghostty.bindings.GhosttyTerminalOptions;
-import io.github.vlaaad.ghostty.bindings.ghostty_vt_h;
-import javafx.scene.canvas.Canvas;
-import javafx.scene.paint.Color;
-
 import java.lang.foreign.Arena;
 import java.lang.foreign.MemorySegment;
 import java.lang.foreign.ValueLayout;
 import java.lang.ref.Cleaner;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 
+import com.pty4j.PtyProcessBuilder;
+
+import io.github.vlaaad.ghostty.bindings.GhosttyTerminalOptions;
+import io.github.vlaaad.ghostty.bindings.ghostty_vt_h;
+import javafx.application.Platform;
+import javafx.scene.canvas.Canvas;
+import javafx.scene.paint.Color;
+
 public final class GhosttyCanvas extends Canvas implements AutoCloseable {
 
     private static final Cleaner CLEANER = Cleaner.create();
-    private static final ExecutorService IO_TASKS = Executors.newVirtualThreadPerTaskExecutor();
+    private static final ExecutorService IO = Executors.newVirtualThreadPerTaskExecutor();
     private static final int GHOSTTY_SUCCESS = 0;
     private static final int INITIAL_COLUMNS = 80;
     private static final int INITIAL_ROWS = 24;
@@ -31,7 +33,6 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
     private static final double DEFAULT_WIDTH = INITIAL_COLUMNS * INITIAL_CELL_WIDTH_PX;
     private static final double DEFAULT_HEIGHT = INITIAL_ROWS * INITIAL_CELL_HEIGHT_PX;
     private static final long INITIAL_MAX_SCROLLBACK = 1_000;
-
     private final MemorySegment terminal;
     private final MemorySegment renderState;
     private final Future<?> ioTask;
@@ -55,7 +56,7 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
         heightProperty().addListener((_, _, _) -> handleCanvasResize());
         redraw();
 
-        ioTask = IO_TASKS.submit(() -> runProcess(command, normalizedCwd, environment));
+        ioTask = IO.submit(() -> runProcess(command, normalizedCwd, environment));
     }
 
     static GhosttyCanvas create(List<String> command, Path cwd, Map<String, String> environment) {
@@ -129,10 +130,33 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
                 .setUseWinConPty(true)
                 .start();
         try {
-            return process.waitFor();
-        } catch (InterruptedException e) {
-            return destroyProcess(process);
+            var outputTask = IO.submit(() -> {
+                try (var input = process.getInputStream()) {
+                    var buffer = new byte[8 * 1024];
+                    while (true) {
+                        var read = input.read(buffer);
+                        if (read < 0) {
+                            return null;
+                        }
+                        var bytes = Arrays.copyOf(buffer, read);
+                        runOnUiThread(() -> applyProcessOutput(bytes));
+                    }
+                }
+            });
+            try {
+                try {
+                    return process.waitFor();
+                } catch (InterruptedException e) {
+                    // exit requested
+                    outputTask.cancel(true);
+                    return destroyProcess(process);
+                }
+            } finally {
+                // outputTask cleanup
+                outputTask.cancel(true);
+            }
         } finally {
+            // process cleanup
             if (process.isAlive()) {
                 destroyProcess(process);
             }
@@ -146,6 +170,15 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
             return process.waitFor();
         }
         return process.exitValue();
+    }
+
+    private void applyProcessOutput(byte[] bytes) {
+        try (var arena = Arena.ofConfined()) {
+            var nativeBytes = arena.allocateFrom(ValueLayout.JAVA_BYTE, bytes);
+            ghostty_vt_h.ghostty_terminal_vt_write(terminal, nativeBytes, bytes.length);
+        }
+        updateGhosttyRenderState(renderState, terminal);
+        redraw();
     }
 
     private void handleCanvasResize() {
@@ -213,6 +246,7 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
                 "ghostty_terminal_resize");
     }
 
+    // TODO: inline into redraw?
     private static void updateGhosttyRenderState(MemorySegment renderState, MemorySegment terminal) {
         requireGhosttySuccess(
                 ghostty_vt_h.ghostty_render_state_update(renderState, terminal),
@@ -229,6 +263,17 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
     private static void requireGhosttySuccess(int result, String operation) {
         if (result != GHOSTTY_SUCCESS) {
             throw new IllegalStateException(operation + " failed with result=" + result);
+        }
+    }
+
+    private static void runOnUiThread(Runnable action) {
+        if (Platform.isFxApplicationThread()) {
+            action.run();
+            return;
+        }
+        try {
+            Platform.runLater(action);
+        } catch (IllegalStateException _) {
         }
     }
 }
