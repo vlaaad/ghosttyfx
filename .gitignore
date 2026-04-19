@@ -14,6 +14,11 @@ __pycache__
 /ghosttyfx/.classpath
 /ghosttyfx/bin
 /ghosttyfx/.project
+/ghosttyfx-manual-app/target
+/ghosttyfx-manual-app/.settings
+/ghosttyfx-manual-app/.classpath
+/ghosttyfx-manual-app/bin
+/ghosttyfx-manual-app/.project
 /ghosttyfx-linux-x86_64/target
 /ghosttyfx-macos-aarch64/target
 /ghosttyfx-macos-x86_64/target

@@ -17,11 +17,14 @@
         <maven.compiler.source>25</maven.compiler.source>
         <maven.compiler.target>25</maven.compiler.target>
         <junit.version>5.12.2</junit.version>
+        <javafx.version>25.0.2</javafx.version>
+        <pty4j.version>0.13.12</pty4j.version>
         <ghosttyfx.script>${project.basedir}/scripts/GhosttyBuild.java</ghosttyfx.script>
     </properties>
 
     <modules>
         <module>ghosttyfx</module>
+        <module>ghosttyfx-manual-app</module>
     </modules>
 
     <dependencyManagement>

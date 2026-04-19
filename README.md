@@ -5,6 +5,7 @@ Generated per-platform `jextract` bindings for `libghostty-vt`.
 ## Layout
 
 - `ghosttyfx`: shared Java module
+- `ghosttyfx-manual-app`: JavaFX launcher for manual testing
 - `ghosttyfx-linux-x86_64`
 - `ghosttyfx-macos-x86_64`
 - `ghosttyfx-macos-aarch64`
@@ -51,6 +52,24 @@ That command:
 - validates that each artifact metadata file matches the current `ghostty` submodule commit
 
 After that, on Windows machines without MSVC Build Tools + Windows SDK, `mvn clean test` can reuse the downloaded artifact for the current host platform.
+
+## Manual App
+
+The repository includes a JavaFX manual app in
+[GhosttyFxManualApp.java](/C:/Users/Vlaaad/Projects/ghosttyfx/ghosttyfx-manual-app/src/main/java/io/github/vlaaad/ghosttyfx/manualapp/GhosttyFxManualApp.java).
+
+From the repository root, launch it with:
+
+`mvn -pl ghosttyfx-manual-app -am -Pmanual-app compile`
+
+The app:
+
+- starts with an empty `TabPane`
+- auto-detects available terminal executables
+- lets you choose a working directory before opening a tab
+- creates each tab with `GhosttyFx.create(command, cwd, System.getenv())`
+
+Close tabs or the window to tear down their PTY processes.
 
 ## CI
 

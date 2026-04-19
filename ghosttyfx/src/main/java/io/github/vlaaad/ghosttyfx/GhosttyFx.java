@@ -9,15 +9,33 @@ import java.lang.foreign.MemorySegment;
 import java.lang.foreign.ValueLayout;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 
 public final class GhosttyFx {
     private static final int GHOSTTY_SUCCESS = 0;
+    private static final Path DEFAULT_CWD = Path.of(System.getProperty("user.dir", "."))
+            .toAbsolutePath()
+            .normalize();
 
     private GhosttyFx() {}
 
+    public static GhosttyCanvas create(List<String> command) {
+        return create(command, DEFAULT_CWD, System.getenv());
+    }
+
+    public static GhosttyCanvas create(List<String> command, Path cwd) {
+        return create(command, cwd, System.getenv());
+    }
+
+    public static GhosttyCanvas create(List<String> command, Path cwd, Map<String, String> environment) {
+        return GhosttyCanvas.create(command, cwd, environment);
+    }
+
     public static String version() {
-        NativeLibraryHolder.PATH.toString();
+        NativeLibraryHolder.ensureLoaded();
         try (var arena = Arena.ofConfined()) {
             var version = GhosttyString.allocate(arena);
             var result = ghostty_vt_h.ghostty_build_info(ghostty_vt_h.GHOSTTY_BUILD_INFO_VERSION_STRING(), version);
@@ -41,12 +59,16 @@ public final class GhosttyFx {
         return new String(bytes, StandardCharsets.UTF_8);
     }
 
-    private static final class NativeLibraryHolder {
-        private static final java.nio.file.Path PATH = load();
+    static final class NativeLibraryHolder {
+        private static final java.nio.file.Path PATH = extractAndLoad();
 
         private NativeLibraryHolder() {}
 
-        private static java.nio.file.Path load() {
+        static void ensureLoaded() {
+            PATH.toString();
+        }
+
+        private static java.nio.file.Path extractAndLoad() {
             var osName = System.getProperty("os.name", "");
             var archName = System.getProperty("os.arch", "");
             var osKey = osName.toLowerCase(Locale.ROOT);
