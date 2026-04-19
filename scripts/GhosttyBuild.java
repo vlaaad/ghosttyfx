@@ -12,6 +12,7 @@ import java.nio.file.StandardCopyOption;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.security.MessageDigest;
 import java.util.HexFormat;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
@@ -23,6 +24,8 @@ import java.util.zip.ZipInputStream;
 
 public final class GhosttyBuild {
     private static final String GHOSTTY_SUBMODULE = "ghostty";
+    private static final String GHOSTLING_SUBMODULE = "ghostling";
+    private static final List<String> REQUIRED_SUBMODULES = List.of(GHOSTTY_SUBMODULE, GHOSTLING_SUBMODULE);
     private static final String JEXTRACT_TARGET_PACKAGE = "io.github.vlaaad.ghostty.bindings";
     private static final String JEXTRACT_HEADER_CLASS = "ghostty_vt_h";
     private static final String WORKFLOW_REPO = "vlaaad/ghosttyfx";
@@ -165,7 +168,7 @@ public final class GhosttyBuild {
             );
         }
 
-        ensureGhosttySubmodule(repo);
+        ensureRequiredSubmodules(repo);
         var ghosttyCommit = capture(repo.resolve(GHOSTTY_SUBMODULE), "git", "rev-parse", "HEAD").trim();
         var outputs = outputs(buildDir);
         if (isUpToDate(outputs, platform, artifactId, ghosttyCommit)) {
@@ -217,21 +220,25 @@ public final class GhosttyBuild {
         throw new IllegalStateException("unsupported host os: " + System.getProperty("os.name"));
     }
 
-    private static void ensureGhosttySubmodule(Path repo) throws Exception {
-        run(repo, Map.of(), "git", "submodule", "sync", "--recursive", GHOSTTY_SUBMODULE);
-        var status = capture(repo, "git", "submodule", "status", "--", GHOSTTY_SUBMODULE).strip();
-        if (status.isEmpty() || status.charAt(0) == '-') {
-            run(repo, Map.of(), "git", "submodule", "update", "--init", "--recursive", GHOSTTY_SUBMODULE);
-            return;
+    private static void ensureRequiredSubmodules(Path repo) throws Exception {
+        for (var submodule : REQUIRED_SUBMODULES) {
+            ensureSubmodule(repo, submodule);
         }
+    }
 
-        var ghostty = repo.resolve(GHOSTTY_SUBMODULE);
-        run(ghostty, Map.of(), "git", "submodule", "sync", "--recursive");
-        run(ghostty, Map.of(), "git", "submodule", "update", "--init", "--recursive");
+    private static void ensureSubmodule(Path repo, String submodule) throws Exception {
+        run(repo, Map.of(), "git", "submodule", "sync", "--recursive", "--", submodule);
+        run(repo, Map.of(), "git", "submodule", "update", "--init", "--recursive", "--", submodule);
+
+        var submoduleRoot = repo.resolve(submodule);
+        if (!Files.isDirectory(submoduleRoot)) {
+            throw new IllegalStateException("required submodule is not checked out: " + submodule);
+        }
+        capture(submoduleRoot, "git", "rev-parse", "HEAD");
     }
 
     private static void downloadArtifacts(Path repo) throws Exception {
-        ensureGhosttySubmodule(repo);
+        ensureRequiredSubmodules(repo);
         ensureSyncedWithMain(repo);
         var ghosttyCommit = capture(repo.resolve(GHOSTTY_SUBMODULE), "git", "rev-parse", "HEAD").trim();
         var distDir = distDir(repo, ghosttyCommit);

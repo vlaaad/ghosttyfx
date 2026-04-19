@@ -1,3 +1,6 @@
 [submodule "ghostty"]
 	path = ghostty
 	url = https://github.com/ghostty-org/ghostty.git
+[submodule "ghostling"]
+	path = ghostling
+	url = https://github.com/ghostty-org/ghostling.git

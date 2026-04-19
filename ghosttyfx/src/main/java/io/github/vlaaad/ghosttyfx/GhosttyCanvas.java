@@ -162,9 +162,6 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
         graphics.fillRect(0, 0, getWidth(), getHeight());
         graphics.setFill(Color.rgb(230, 230, 230));
         graphics.fillText("TODO", 12, 24);
-        graphics.fillText("Ghostty terminal: ready", 12, 44);
-        graphics.fillText("Ghostty render state: ready", 12, 64);
-        graphics.fillText("State: io/view bridge pending", 12, 84);
     }
 
     private static MemorySegment createGhosttyTerminal(int columns, int rows) {

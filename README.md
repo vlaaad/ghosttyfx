@@ -11,6 +11,7 @@ Generated per-platform `jextract` bindings for `libghostty-vt`.
 - `ghosttyfx-macos-aarch64`
 - `ghosttyfx-windows-x86_64`
 - `ghostty`: pinned Git submodule for the upstream Ghostty source tree
+- `ghostling`: pinned Git submodule for the upstream Ghostling reference app
 
 ## Local Build
 
@@ -20,7 +21,7 @@ Run:
 
 The Maven build invokes [scripts/GhosttyBuild.java](/C:/Users/Vlaaad/Projects/ghosttyfx/scripts/GhosttyBuild.java), which:
 
-- ensures the `ghostty` submodule is initialized to the repo-pinned commit
+- ensures the `ghostty` and `ghostling` submodules are initialized to their repo-pinned commits
 - downloads and caches Zig in `.tools/zig`
 - downloads and caches `jextract` in `.tools/jextract`
 - builds `libghostty-vt` for the current host platform
@@ -85,5 +86,5 @@ CI only needs to:
 - Local generation is host-only.
 - Cross-platform artifact sets come from CI running the same build on each target host.
 - Local Windows source builds still require Visual Studio Build Tools plus the Windows SDK.
-- `ghostty-reference` is no longer part of the build path.
+- `ghostling` is for source reference only and is not part of the build path.
 - No extra gitignore entry is needed for generated bindings because they live under `target/`.

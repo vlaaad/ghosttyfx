@@ -7,7 +7,6 @@
 /.zig-local-cache
 /target
 /dist
-/ghostty-reference
 __pycache__
 /ghosttyfx/target
 /ghosttyfx/.settings

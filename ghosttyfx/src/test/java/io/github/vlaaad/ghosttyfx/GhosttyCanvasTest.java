@@ -23,15 +23,11 @@ final class GhosttyCanvasTest {
         var tempDirectory = Files.createTempDirectory("ghosttyfx-canvas-test-");
         var pidFile = tempDirectory.resolve("shell.pid");
         var shell = discoverShell(pidFile);
-        ProcessHandle handle = null;
+        ProcessHandle handle;
 
-        try (var canvas = GhosttyFx.create(shell.command(), tempDirectory, System.getenv())) {
+        try (var _ = GhosttyFx.create(shell.command(), tempDirectory, System.getenv())) {
             handle = await("shell process to start", START_TIMEOUT, () -> readAliveProcess(pidFile));
             assertTrue(handle.isAlive(), "Expected shell process to be alive: " + handle.pid());
-        }
-
-        if (handle == null) {
-            fail("Shell process did not start");
         }
 
         try {
