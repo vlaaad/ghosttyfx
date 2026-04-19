@@ -16,9 +16,7 @@ import java.util.Map;
 
 public final class GhosttyFx {
     private static final int GHOSTTY_SUCCESS = 0;
-    private static final Path DEFAULT_CWD = Path.of(System.getProperty("user.dir", "."))
-            .toAbsolutePath()
-            .normalize();
+    private static final Path DEFAULT_CWD = Path.of(System.getProperty("user.dir", "."));
 
     private GhosttyFx() {}
 
@@ -31,7 +29,11 @@ public final class GhosttyFx {
     }
 
     public static GhosttyCanvas create(List<String> command, Path cwd, Map<String, String> environment) {
-        return GhosttyCanvas.create(command, cwd, environment);
+        var copiedCommand = List.copyOf(command);
+        if (copiedCommand.isEmpty()) {
+            throw new IllegalArgumentException("command must not be empty");
+        }
+        return new GhosttyCanvas(copiedCommand, cwd, Map.copyOf(environment));
     }
 
     public static String version() {

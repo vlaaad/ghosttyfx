@@ -18,8 +18,15 @@ import com.pty4j.PtyProcessBuilder;
 import io.github.vlaaad.ghostty.bindings.GhosttyTerminalOptions;
 import io.github.vlaaad.ghostty.bindings.ghostty_vt_h;
 import javafx.application.Platform;
+import javafx.beans.binding.Bindings;
+import javafx.beans.binding.ObjectBinding;
+import javafx.beans.property.ObjectProperty;
+import javafx.beans.property.SimpleObjectProperty;
 import javafx.scene.canvas.Canvas;
 import javafx.scene.paint.Color;
+import javafx.scene.text.Font;
+import javafx.scene.text.Text;
+import javafx.scene.text.TextBoundsType;
 
 public final class GhosttyCanvas extends Canvas implements AutoCloseable {
 
@@ -28,20 +35,51 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
     private static final int GHOSTTY_SUCCESS = 0;
     private static final int INITIAL_COLUMNS = 80;
     private static final int INITIAL_ROWS = 24;
-    private static final int INITIAL_CELL_WIDTH_PX = 9;
-    private static final int INITIAL_CELL_HEIGHT_PX = 18;
-    private static final double DEFAULT_WIDTH = INITIAL_COLUMNS * INITIAL_CELL_WIDTH_PX;
-    private static final double DEFAULT_HEIGHT = INITIAL_ROWS * INITIAL_CELL_HEIGHT_PX;
+    private static final int MAX_GHOSTTY_DIMENSION = 0xFFFF;
     private static final long INITIAL_MAX_SCROLLBACK = 1_000;
+    private static final Font DEFAULT_FONT = Font.font("Monospaced", 14);
+
     private final MemorySegment terminal;
     private final MemorySegment renderState;
     private final Future<?> ioTask;
 
-    private GhosttyCanvas(List<String> command, Path cwd, Map<String, String> environment) {
-        var normalizedCwd = cwd.toAbsolutePath().normalize();
+    private final ObjectProperty<Font> font = new SimpleObjectProperty<>(this, "font", DEFAULT_FONT) {
+        @Override
+        public void set(Font value) {
+            super.set(java.util.Objects.requireNonNull(value, "font"));
+        }
+    };
+
+    private final ObjectBinding<CellMetrics> cellMetrics = Bindings.createObjectBinding(() -> {
+        var text = new Text();
+        text.setBoundsType(TextBoundsType.LOGICAL);
+        text.setFont(font.get());
+
+        var maxWidth = 0.0;
+        for (var c = 32; c < 127; c++) {
+            text.setText(Character.toString((char) c));
+            maxWidth = Math.max(maxWidth, text.getLayoutBounds().getWidth());
+        }
+
+        text.setText("M_");
+        var bounds = text.getLayoutBounds();
+        var cellWidthPx = Math.max(1, (int) Math.round(maxWidth));
+        var cellHeightPx = Math.max(1, (int) Math.round(bounds.getHeight()));
+        var baselineOffsetPx = (int) Math.round(-bounds.getMinY());
+        baselineOffsetPx = Math.max(0, Math.min(cellHeightPx, baselineOffsetPx));
+        return new CellMetrics(cellWidthPx, cellHeightPx, baselineOffsetPx);
+    }, font);
+
+    GhosttyCanvas(List<String> command, Path cwd, Map<String, String> environment) {
+        var initialCellMetrics = cellMetrics.get();
 
         terminal = createGhosttyTerminal(INITIAL_COLUMNS, INITIAL_ROWS);
-        resizeGhosttyTerminal(terminal, INITIAL_COLUMNS, INITIAL_ROWS, INITIAL_CELL_WIDTH_PX, INITIAL_CELL_HEIGHT_PX);
+        resizeGhosttyTerminal(
+                terminal,
+                INITIAL_COLUMNS,
+                INITIAL_ROWS,
+                initialCellMetrics.cellWidthPx(),
+                initialCellMetrics.cellHeightPx());
         renderState = createGhosttyRenderState();
         updateGhosttyRenderState(renderState, terminal);
         CLEANER.register(this, () -> {
@@ -50,21 +88,14 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
         });
 
         setFocusTraversable(true);
-        setWidth(DEFAULT_WIDTH);
-        setHeight(DEFAULT_HEIGHT);
+        setWidth(prefWidth(-1));
+        setHeight(prefHeight(-1));
+        cellMetrics.addListener((_, _, _) -> handleCanvasResize());
         widthProperty().addListener((_, _, _) -> handleCanvasResize());
         heightProperty().addListener((_, _, _) -> handleCanvasResize());
         redraw();
 
-        ioTask = IO.submit(() -> runProcess(command, normalizedCwd, environment));
-    }
-
-    static GhosttyCanvas create(List<String> command, Path cwd, Map<String, String> environment) {
-        var copiedCommand = List.copyOf(command);
-        if (copiedCommand.isEmpty()) {
-            throw new IllegalArgumentException("command must not be empty");
-        }
-        return new GhosttyCanvas(copiedCommand, cwd, Map.copyOf(environment));
+        ioTask = IO.submit(() -> runProcess(command, cwd, environment));
     }
 
     @Override
@@ -74,7 +105,7 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
 
     @Override
     public double prefWidth(double height) {
-        return DEFAULT_WIDTH;
+        return INITIAL_COLUMNS * cellMetrics.get().cellWidthPx();
     }
 
     @Override
@@ -89,7 +120,7 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
 
     @Override
     public double prefHeight(double width) {
-        return DEFAULT_HEIGHT;
+        return INITIAL_ROWS * cellMetrics.get().cellHeightPx();
     }
 
     @Override
@@ -106,7 +137,10 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
     public void resize(double width, double height) {
         setWidth(width);
         setHeight(height);
-        redraw();
+    }
+
+    public ObjectProperty<Font> fontProperty() {
+        return font;
     }
 
     @Override
@@ -182,30 +216,40 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
     }
 
     private void handleCanvasResize() {
-        var nextColumns = Math.max(1, (int) Math.floor(getWidth() / INITIAL_CELL_WIDTH_PX));
-        var nextRows = Math.max(1, (int) Math.floor(getHeight() / INITIAL_CELL_HEIGHT_PX));
-        resizeGhosttyTerminal(terminal, nextColumns, nextRows, INITIAL_CELL_WIDTH_PX, INITIAL_CELL_HEIGHT_PX);
+        if (getWidth() <= 0 || getHeight() <= 0) {
+            redraw();
+            return;
+        }
+        var cellMetrics = this.cellMetrics.get();
+        var nextColumns = Math.clamp((int) Math.floor(getWidth() / cellMetrics.cellWidthPx()), 1, MAX_GHOSTTY_DIMENSION);
+        var nextRows = Math.clamp((int) Math.floor(getHeight() / cellMetrics.cellHeightPx()), 1, MAX_GHOSTTY_DIMENSION);
+        resizeGhosttyTerminal(
+                terminal,
+                nextColumns,
+                nextRows,
+                cellMetrics.cellWidthPx(),
+                cellMetrics.cellHeightPx());
         updateGhosttyRenderState(renderState, terminal);
         redraw();
     }
 
     private void redraw() {
         var graphics = getGraphicsContext2D();
+        var cellMetrics = this.cellMetrics.get();
         graphics.setFill(Color.rgb(20, 20, 20));
         graphics.fillRect(0, 0, getWidth(), getHeight());
         graphics.setFill(Color.rgb(230, 230, 230));
-        graphics.fillText("TODO", 12, 24);
+        graphics.setFont(font.get());
+        graphics.fillText("TODO", 12, 12 + cellMetrics.baselineOffsetPx());
     }
 
     private static MemorySegment createGhosttyTerminal(int columns, int rows) {
         GhosttyFx.NativeLibraryHolder.ensureLoaded();
-        var cols = toGhosttyDimension(columns, "columns");
-        var rowsValue = toGhosttyDimension(rows, "rows");
         try (var arena = Arena.ofConfined()) {
             var terminal = arena.allocate(ValueLayout.ADDRESS);
             var options = GhosttyTerminalOptions.allocate(arena);
-            GhosttyTerminalOptions.cols(options, cols);
-            GhosttyTerminalOptions.rows(options, rowsValue);
+            GhosttyTerminalOptions.cols(options, (short) columns);
+            GhosttyTerminalOptions.rows(options, (short) rows);
             GhosttyTerminalOptions.max_scrollback(options, INITIAL_MAX_SCROLLBACK);
             requireGhosttySuccess(
                     ghostty_vt_h.ghostty_terminal_new(MemorySegment.NULL, terminal, options),
@@ -230,17 +274,11 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
             int rows,
             int cellWidthPx,
             int cellHeightPx) {
-        if (cellWidthPx <= 0) {
-            throw new IllegalArgumentException("cellWidthPx must be positive");
-        }
-        if (cellHeightPx <= 0) {
-            throw new IllegalArgumentException("cellHeightPx must be positive");
-        }
         requireGhosttySuccess(
                 ghostty_vt_h.ghostty_terminal_resize(
                         terminal,
-                        toGhosttyDimension(columns, "columns"),
-                        toGhosttyDimension(rows, "rows"),
+                        (short) columns,
+                        (short) rows,
                         cellWidthPx,
                         cellHeightPx),
                 "ghostty_terminal_resize");
@@ -251,13 +289,6 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
         requireGhosttySuccess(
                 ghostty_vt_h.ghostty_render_state_update(renderState, terminal),
                 "ghostty_render_state_update");
-    }
-
-    private static short toGhosttyDimension(int value, String name) {
-        if (value <= 0 || value > 0xFFFF) {
-            throw new IllegalArgumentException(name + " must be in range 1..65535");
-        }
-        return (short) value;
     }
 
     private static void requireGhosttySuccess(int result, String operation) {
@@ -276,4 +307,6 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
         } catch (IllegalStateException _) {
         }
     }
+
+    private record CellMetrics(int cellWidthPx, int cellHeightPx, int baselineOffsetPx) {}
 }

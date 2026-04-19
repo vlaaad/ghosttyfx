@@ -1,6 +1,7 @@
 package io.github.vlaaad.ghosttyfx;
 
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.fail;
 
 import java.io.File;
@@ -12,6 +13,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.regex.Pattern;
 import org.junit.jupiter.api.Test;
+import javafx.scene.text.Font;
 
 final class GhosttyCanvasTest {
     private static final Duration START_TIMEOUT = Duration.ofSeconds(15);
@@ -36,6 +38,23 @@ final class GhosttyCanvasTest {
             if (handle.isAlive()) {
                 handle.destroyForcibly();
             }
+        }
+    }
+
+    @Test
+    void updatesPreferredSizeWhenFontChanges() throws Exception {
+        var tempDirectory = Files.createTempDirectory("ghosttyfx-canvas-font-test-");
+        var pidFile = tempDirectory.resolve("shell.pid");
+        var shell = discoverShell(pidFile);
+
+        try (var canvas = GhosttyFx.create(shell.command(), tempDirectory, System.getenv())) {
+            var initialPrefWidth = canvas.prefWidth(-1);
+            var initialPrefHeight = canvas.prefHeight(-1);
+            canvas.fontProperty().set(Font.font("Monospaced", canvas.fontProperty().get().getSize() + 6));
+            assertTrue(
+                    canvas.prefWidth(-1) != initialPrefWidth || canvas.prefHeight(-1) != initialPrefHeight,
+                    "Expected font change to update preferred size");
+            assertThrows(NullPointerException.class, () -> canvas.fontProperty().set(null));
         }
     }
 
