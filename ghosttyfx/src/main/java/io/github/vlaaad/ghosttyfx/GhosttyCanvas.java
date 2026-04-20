@@ -1,6 +1,7 @@
 package io.github.vlaaad.ghosttyfx;
 
 import java.lang.foreign.Arena;
+import java.lang.foreign.MemoryLayout;
 import java.lang.foreign.MemorySegment;
 import java.lang.foreign.ValueLayout;
 import java.lang.ref.Cleaner;
@@ -15,7 +16,11 @@ import java.util.concurrent.Future;
 
 import com.pty4j.PtyProcessBuilder;
 
+import io.github.vlaaad.ghostty.bindings.GhosttyColorRgb;
+import io.github.vlaaad.ghostty.bindings.GhosttyRenderStateColors;
+import io.github.vlaaad.ghostty.bindings.GhosttyStyle;
 import io.github.vlaaad.ghostty.bindings.GhosttyTerminalOptions;
+import io.github.vlaaad.ghostty.bindings.GhosttyTerminalScrollbar;
 import io.github.vlaaad.ghostty.bindings.ghostty_vt_h;
 import javafx.application.Platform;
 import javafx.beans.binding.Bindings;
@@ -36,11 +41,21 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
     private static final int INITIAL_COLUMNS = 80;
     private static final int INITIAL_ROWS = 24;
     private static final int MAX_GHOSTTY_DIMENSION = 0xFFFF;
+    private static final int MAX_GRAPHEME_CODEPOINTS = 16;
     private static final long INITIAL_MAX_SCROLLBACK = 1_000;
+    private static final double SCROLLBAR_WIDTH_PX = 6;
+    private static final double SCROLLBAR_MARGIN_PX = 2;
+    private static final double MIN_SCROLLBAR_HEIGHT_PX = 10;
+    private static final double BLOCK_CURSOR_ALPHA = 0.5;
+    private static final int CURSOR_STYLE_BAR = 0;
+    private static final int CURSOR_STYLE_UNDERLINE = 2;
+    private static final int CURSOR_STYLE_BLOCK_HOLLOW = 3;
     private static final Font DEFAULT_FONT = Font.font("Monospaced", 14);
 
     private final MemorySegment terminal;
     private final MemorySegment renderState;
+    private final MemorySegment rowIterator;
+    private final MemorySegment rowCells;
     private final Future<?> ioTask;
 
     private final ObjectProperty<Font> font = new SimpleObjectProperty<>(this, "font", DEFAULT_FONT) {
@@ -81,8 +96,24 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
                 initialCellMetrics.cellWidthPx(),
                 initialCellMetrics.cellHeightPx());
         renderState = createGhosttyRenderState();
+        try (var arena = Arena.ofConfined()) {
+            var rowIterator = arena.allocate(ValueLayout.ADDRESS);
+            requireGhosttySuccess(
+                    ghostty_vt_h.ghostty_render_state_row_iterator_new(MemorySegment.NULL, rowIterator),
+                    "ghostty_render_state_row_iterator_new");
+            this.rowIterator = rowIterator.get(ValueLayout.ADDRESS, 0);
+        }
+        try (var arena = Arena.ofConfined()) {
+            var rowCells = arena.allocate(ValueLayout.ADDRESS);
+            requireGhosttySuccess(
+                    ghostty_vt_h.ghostty_render_state_row_cells_new(MemorySegment.NULL, rowCells),
+                    "ghostty_render_state_row_cells_new");
+            this.rowCells = rowCells.get(ValueLayout.ADDRESS, 0);
+        }
         updateGhosttyRenderState(renderState, terminal);
         CLEANER.register(this, () -> {
+            ghostty_vt_h.ghostty_render_state_row_cells_free(rowCells);
+            ghostty_vt_h.ghostty_render_state_row_iterator_free(rowIterator);
             ghostty_vt_h.ghostty_render_state_free(renderState);
             ghostty_vt_h.ghostty_terminal_free(terminal);
         });
@@ -235,12 +266,268 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
 
     private void redraw() {
         var graphics = getGraphicsContext2D();
+        var width = getWidth();
+        var height = getHeight();
+        if (width <= 0 || height <= 0) {
+            return;
+        }
+
         var cellMetrics = this.cellMetrics.get();
-        graphics.setFill(Color.rgb(20, 20, 20));
-        graphics.fillRect(0, 0, getWidth(), getHeight());
-        graphics.setFill(Color.rgb(230, 230, 230));
         graphics.setFont(font.get());
-        graphics.fillText("TODO", 12, 12 + cellMetrics.baselineOffsetPx());
+
+        try (var arena = Arena.ofConfined()) {
+            var colors = GhosttyRenderStateColors.allocate(arena);
+            GhosttyRenderStateColors.size(colors, GhosttyRenderStateColors.sizeof());
+            requireGhosttySuccess(
+                    ghostty_vt_h.ghostty_render_state_colors_get(renderState, colors),
+                    "ghostty_render_state_colors_get");
+
+            var defaultBackground = toFxColor(GhosttyRenderStateColors.background(colors));
+            graphics.setFill(defaultBackground);
+            graphics.fillRect(0, 0, width, height);
+
+            var rowIteratorPointer = arena.allocate(ValueLayout.ADDRESS);
+            rowIteratorPointer.set(ValueLayout.ADDRESS, 0, rowIterator);
+            requireGhosttySuccess(
+                    ghostty_vt_h.ghostty_render_state_get(
+                            renderState,
+                            ghostty_vt_h.GHOSTTY_RENDER_STATE_DATA_ROW_ITERATOR(),
+                            rowIteratorPointer),
+                    "ghostty_render_state_get(row_iterator)");
+
+            var rowCellsPointer = arena.allocate(ValueLayout.ADDRESS);
+            rowCellsPointer.set(ValueLayout.ADDRESS, 0, rowCells);
+            var graphemeLength = arena.allocate(ValueLayout.JAVA_INT);
+            var style = GhosttyStyle.allocate(arena);
+            GhosttyStyle.size(style, GhosttyStyle.sizeof());
+            var foreground = GhosttyColorRgb.allocate(arena);
+            var background = GhosttyColorRgb.allocate(arena);
+            var swappedColor = GhosttyColorRgb.allocate(arena);
+            var text = new StringBuilder(MAX_GRAPHEME_CODEPOINTS * 2);
+            var codepointsCapacity = MAX_GRAPHEME_CODEPOINTS;
+            var codepoints = arena.allocate(MemoryLayout.sequenceLayout(codepointsCapacity, ValueLayout.JAVA_INT));
+            var y = 0.0;
+
+            while (ghostty_vt_h.ghostty_render_state_row_iterator_next(rowIterator)) {
+                requireGhosttySuccess(
+                        ghostty_vt_h.ghostty_render_state_row_get(
+                                rowIterator,
+                                ghostty_vt_h.GHOSTTY_RENDER_STATE_ROW_DATA_CELLS(),
+                                rowCellsPointer),
+                        "ghostty_render_state_row_get(cells)");
+
+                var x = 0.0;
+                while (ghostty_vt_h.ghostty_render_state_row_cells_next(rowCells)) {
+                    requireGhosttySuccess(
+                            ghostty_vt_h.ghostty_render_state_row_cells_get(
+                                    rowCells,
+                                    ghostty_vt_h.GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_GRAPHEMES_LEN(),
+                                    graphemeLength),
+                            "ghostty_render_state_row_cells_get(graphemes_len)");
+                    var codePointCount = graphemeLength.get(ValueLayout.JAVA_INT, 0);
+                    if (codePointCount == 0) {
+                        if (ghostty_vt_h.ghostty_render_state_row_cells_get(
+                                rowCells,
+                                ghostty_vt_h.GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_BG_COLOR(),
+                                background) == GHOSTTY_SUCCESS) {
+                            graphics.setFill(toFxColor(background));
+                            graphics.fillRect(x, y, cellMetrics.cellWidthPx(), cellMetrics.cellHeightPx());
+                        }
+                        x += cellMetrics.cellWidthPx();
+                        continue;
+                    }
+
+                    if (codePointCount > codepointsCapacity) {
+                        codepointsCapacity = codePointCount;
+                        codepoints = arena.allocate(MemoryLayout.sequenceLayout(codepointsCapacity, ValueLayout.JAVA_INT));
+                    }
+
+                    requireGhosttySuccess(
+                            ghostty_vt_h.ghostty_render_state_row_cells_get(
+                                    rowCells,
+                                    ghostty_vt_h.GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_GRAPHEMES_BUF(),
+                                    codepoints),
+                            "ghostty_render_state_row_cells_get(graphemes_buf)");
+                    GhosttyStyle.size(style, GhosttyStyle.sizeof());
+                    requireGhosttySuccess(
+                            ghostty_vt_h.ghostty_render_state_row_cells_get(
+                                    rowCells,
+                                    ghostty_vt_h.GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_STYLE(),
+                                    style),
+                            "ghostty_render_state_row_cells_get(style)");
+
+                    MemorySegment.copy(
+                            GhosttyRenderStateColors.foreground(colors),
+                            0,
+                            foreground,
+                            0,
+                            GhosttyColorRgb.sizeof());
+                    ghostty_vt_h.ghostty_render_state_row_cells_get(
+                            rowCells,
+                            ghostty_vt_h.GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_FG_COLOR(),
+                            foreground);
+
+                    var hasBackground = ghostty_vt_h.ghostty_render_state_row_cells_get(
+                            rowCells,
+                            ghostty_vt_h.GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_BG_COLOR(),
+                            background) == GHOSTTY_SUCCESS;
+                    if (!hasBackground) {
+                        MemorySegment.copy(
+                                GhosttyRenderStateColors.background(colors),
+                                0,
+                                background,
+                                0,
+                                GhosttyColorRgb.sizeof());
+                    }
+
+                    if (GhosttyStyle.inverse(style)) {
+                        MemorySegment.copy(background, 0, swappedColor, 0, GhosttyColorRgb.sizeof());
+                        MemorySegment.copy(foreground, 0, background, 0, GhosttyColorRgb.sizeof());
+                        MemorySegment.copy(swappedColor, 0, foreground, 0, GhosttyColorRgb.sizeof());
+                        hasBackground = true;
+                    }
+
+                    if (hasBackground) {
+                        graphics.setFill(toFxColor(background));
+                        graphics.fillRect(x, y, cellMetrics.cellWidthPx(), cellMetrics.cellHeightPx());
+                    }
+
+                    if (!GhosttyStyle.invisible(style)) {
+                        text.setLength(0);
+                        for (var i = 0; i < codePointCount; i++) {
+                            var codePoint = codepoints.get(ValueLayout.JAVA_INT, (long) i * Integer.BYTES);
+                            text.appendCodePoint(Character.isValidCodePoint(codePoint) ? codePoint : 0xFFFD);
+                        }
+                        var renderedText = text.toString();
+                        var baseline = y + cellMetrics.baselineOffsetPx();
+                        var foregroundColor = toFxColor(foreground);
+                        graphics.setFill(foregroundColor);
+
+                        // Text rendering: fake italic with a shear and fake bold with a second pass.
+                        if (GhosttyStyle.italic(style)) {
+                            graphics.save();
+                            graphics.translate(x, y);
+                            graphics.transform(1, 0, 0.2, 1, 0, 0);
+                            graphics.fillText(renderedText, 0, cellMetrics.baselineOffsetPx());
+                            if (GhosttyStyle.bold(style)) {
+                                graphics.fillText(renderedText, 1, cellMetrics.baselineOffsetPx());
+                            }
+                            graphics.restore();
+                        } else {
+                            graphics.fillText(renderedText, x, baseline);
+                            if (GhosttyStyle.bold(style)) {
+                                graphics.fillText(renderedText, x + 1, baseline);
+                            }
+                        }
+                    }
+
+                    x += cellMetrics.cellWidthPx();
+                }
+
+                y += cellMetrics.cellHeightPx();
+            }
+
+            // Cursor rendering.
+            var cursorVisible = arena.allocate(ValueLayout.JAVA_BOOLEAN);
+            requireGhosttySuccess(
+                    ghostty_vt_h.ghostty_render_state_get(
+                            renderState,
+                            ghostty_vt_h.GHOSTTY_RENDER_STATE_DATA_CURSOR_VISIBLE(),
+                            cursorVisible),
+                    "ghostty_render_state_get(cursor_visible)");
+            if (cursorVisible.get(ValueLayout.JAVA_BOOLEAN, 0)) {
+                var cursorInViewport = arena.allocate(ValueLayout.JAVA_BOOLEAN);
+                requireGhosttySuccess(
+                        ghostty_vt_h.ghostty_render_state_get(
+                                renderState,
+                                ghostty_vt_h.GHOSTTY_RENDER_STATE_DATA_CURSOR_VIEWPORT_HAS_VALUE(),
+                                cursorInViewport),
+                        "ghostty_render_state_get(cursor_viewport_has_value)");
+                if (cursorInViewport.get(ValueLayout.JAVA_BOOLEAN, 0)) {
+                    var cursorX = arena.allocate(ValueLayout.JAVA_SHORT);
+                    var cursorY = arena.allocate(ValueLayout.JAVA_SHORT);
+                    var cursorStyle = arena.allocate(ValueLayout.JAVA_INT);
+                    requireGhosttySuccess(
+                            ghostty_vt_h.ghostty_render_state_get(
+                                    renderState,
+                                    ghostty_vt_h.GHOSTTY_RENDER_STATE_DATA_CURSOR_VIEWPORT_X(),
+                                    cursorX),
+                            "ghostty_render_state_get(cursor_viewport_x)");
+                    requireGhosttySuccess(
+                            ghostty_vt_h.ghostty_render_state_get(
+                                    renderState,
+                                    ghostty_vt_h.GHOSTTY_RENDER_STATE_DATA_CURSOR_VIEWPORT_Y(),
+                                    cursorY),
+                            "ghostty_render_state_get(cursor_viewport_y)");
+                    requireGhosttySuccess(
+                            ghostty_vt_h.ghostty_render_state_get(
+                                    renderState,
+                                    ghostty_vt_h.GHOSTTY_RENDER_STATE_DATA_CURSOR_VISUAL_STYLE(),
+                                    cursorStyle),
+                            "ghostty_render_state_get(cursor_visual_style)");
+
+                    var cursorColor = GhosttyRenderStateColors.cursor_has_value(colors)
+                            ? toFxColor(GhosttyRenderStateColors.cursor(colors))
+                            : toFxColor(GhosttyRenderStateColors.foreground(colors));
+                    var cursorCellX = Short.toUnsignedInt(cursorX.get(ValueLayout.JAVA_SHORT, 0));
+                    var cursorCellY = Short.toUnsignedInt(cursorY.get(ValueLayout.JAVA_SHORT, 0));
+                    var cursorPixelX = cursorCellX * (double) cellMetrics.cellWidthPx();
+                    var cursorPixelY = cursorCellY * (double) cellMetrics.cellHeightPx();
+                    var cursorWidth = cellMetrics.cellWidthPx();
+                    var cursorHeight = cellMetrics.cellHeightPx();
+
+                    switch (cursorStyle.get(ValueLayout.JAVA_INT, 0)) {
+                        case CURSOR_STYLE_BAR -> {
+                            graphics.setFill(cursorColor);
+                            graphics.fillRect(cursorPixelX, cursorPixelY, Math.max(1, Math.ceil(cursorWidth / 6.0)), cursorHeight);
+                        }
+                        case CURSOR_STYLE_UNDERLINE -> {
+                            graphics.setFill(cursorColor);
+                            graphics.fillRect(
+                                    cursorPixelX,
+                                    cursorPixelY + cursorHeight - Math.max(1, cursorHeight / 8.0),
+                                    cursorWidth,
+                                    Math.max(1, cursorHeight / 8.0));
+                        }
+                        case CURSOR_STYLE_BLOCK_HOLLOW -> {
+                            graphics.setStroke(cursorColor);
+                            graphics.strokeRect(
+                                    cursorPixelX + 0.5,
+                                    cursorPixelY + 0.5,
+                                    Math.max(0, cursorWidth - 1),
+                                    Math.max(0, cursorHeight - 1));
+                        }
+                        default -> {
+                            graphics.setFill(cursorColor.deriveColor(0, 1, 1, BLOCK_CURSOR_ALPHA));
+                            graphics.fillRect(cursorPixelX, cursorPixelY, cursorWidth, cursorHeight);
+                        }
+                    }
+                }
+            }
+
+            // Scrollbar rendering.
+            var scrollbar = GhosttyTerminalScrollbar.allocate(arena);
+            if (ghostty_vt_h.ghostty_terminal_get(
+                    terminal,
+                    ghostty_vt_h.GHOSTTY_TERMINAL_DATA_SCROLLBAR(),
+                    scrollbar) == GHOSTTY_SUCCESS) {
+                var total = GhosttyTerminalScrollbar.total(scrollbar);
+                var visible = GhosttyTerminalScrollbar.len(scrollbar);
+                if (total > visible && visible > 0) {
+                    var canvasHeight = getHeight();
+                    var thumbHeight = Math.max(MIN_SCROLLBAR_HEIGHT_PX, canvasHeight * ((double) visible / total));
+                    var scrollable = total - visible;
+                    var thumbY = scrollable == 0
+                            ? canvasHeight - thumbHeight
+                            : (canvasHeight - thumbHeight) * ((double) GhosttyTerminalScrollbar.offset(scrollbar) / scrollable);
+                    var thumbX = getWidth() - SCROLLBAR_WIDTH_PX - SCROLLBAR_MARGIN_PX;
+                    if (thumbX >= 0) {
+                        graphics.setFill(Color.rgb(200, 200, 200, 0.5));
+                        graphics.fillRect(thumbX, thumbY, SCROLLBAR_WIDTH_PX, thumbHeight);
+                    }
+                }
+            }
+        }
     }
 
     private static MemorySegment createGhosttyTerminal(int columns, int rows) {
@@ -289,6 +576,13 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
         requireGhosttySuccess(
                 ghostty_vt_h.ghostty_render_state_update(renderState, terminal),
                 "ghostty_render_state_update");
+    }
+
+    private static Color toFxColor(MemorySegment color) {
+        return Color.rgb(
+                Byte.toUnsignedInt(GhosttyColorRgb.r(color)),
+                Byte.toUnsignedInt(GhosttyColorRgb.g(color)),
+                Byte.toUnsignedInt(GhosttyColorRgb.b(color)));
     }
 
     private static void requireGhosttySuccess(int result, String operation) {
