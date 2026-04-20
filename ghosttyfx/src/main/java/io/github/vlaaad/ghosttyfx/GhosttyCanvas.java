@@ -280,8 +280,6 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
 
     private void handleCanvasResize() {
         if (getWidth() <= 0 || getHeight() <= 0) {
-            // todo useless?
-            redraw();
             return;
         }
         var cellMetrics = this.cellMetrics.get();
@@ -321,13 +319,13 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
     }
 
     private void redraw() {
-        var graphics = getGraphicsContext2D();
         var width = getWidth();
         var height = getHeight();
         if (width <= 0 || height <= 0) {
             return;
         }
 
+        var graphics = getGraphicsContext2D();
         var cellMetrics = this.cellMetrics.get();
         graphics.setFont(font.get());
 
