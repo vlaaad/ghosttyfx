@@ -88,22 +88,32 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
     GhosttyCanvas(List<String> command, Path cwd, Map<String, String> environment) {
         var initialCellMetrics = cellMetrics.get();
 
-        terminal = createGhosttyTerminal(INITIAL_COLUMNS, INITIAL_ROWS);
-        resizeGhosttyTerminal(
-                terminal,
-                INITIAL_COLUMNS,
-                INITIAL_ROWS,
-                initialCellMetrics.cellWidthPx(),
-                initialCellMetrics.cellHeightPx());
-        renderState = createGhosttyRenderState();
         try (var arena = Arena.ofConfined()) {
+            GhosttyFx.NativeLibraryHolder.ensureLoaded();
+
+            var terminalPointer = arena.allocate(ValueLayout.ADDRESS);
+            var options = GhosttyTerminalOptions.allocate(arena);
+            GhosttyTerminalOptions.cols(options, (short) INITIAL_COLUMNS);
+            GhosttyTerminalOptions.rows(options, (short) INITIAL_ROWS);
+            GhosttyTerminalOptions.max_scrollback(options, INITIAL_MAX_SCROLLBACK);
+            requireGhosttySuccess(
+                    ghostty_vt_h.ghostty_terminal_new(MemorySegment.NULL, terminalPointer, options),
+                    "ghostty_terminal_new");
+            terminal = terminalPointer.get(ValueLayout.ADDRESS, 0);
+            resizeGhosttyTerminal(terminal, INITIAL_COLUMNS, INITIAL_ROWS, initialCellMetrics.cellWidthPx(), initialCellMetrics.cellHeightPx());
+
+            var renderStatePointer = arena.allocate(ValueLayout.ADDRESS);
+            requireGhosttySuccess(
+                    ghostty_vt_h.ghostty_render_state_new(MemorySegment.NULL, renderStatePointer),
+                    "ghostty_render_state_new");
+            renderState = renderStatePointer.get(ValueLayout.ADDRESS, 0);
+
             var rowIterator = arena.allocate(ValueLayout.ADDRESS);
             requireGhosttySuccess(
                     ghostty_vt_h.ghostty_render_state_row_iterator_new(MemorySegment.NULL, rowIterator),
                     "ghostty_render_state_row_iterator_new");
             this.rowIterator = rowIterator.get(ValueLayout.ADDRESS, 0);
-        }
-        try (var arena = Arena.ofConfined()) {
+
             var rowCells = arena.allocate(ValueLayout.ADDRESS);
             requireGhosttySuccess(
                     ghostty_vt_h.ghostty_render_state_row_cells_new(MemorySegment.NULL, rowCells),
@@ -527,31 +537,6 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
                     }
                 }
             }
-        }
-    }
-
-    private static MemorySegment createGhosttyTerminal(int columns, int rows) {
-        GhosttyFx.NativeLibraryHolder.ensureLoaded();
-        try (var arena = Arena.ofConfined()) {
-            var terminal = arena.allocate(ValueLayout.ADDRESS);
-            var options = GhosttyTerminalOptions.allocate(arena);
-            GhosttyTerminalOptions.cols(options, (short) columns);
-            GhosttyTerminalOptions.rows(options, (short) rows);
-            GhosttyTerminalOptions.max_scrollback(options, INITIAL_MAX_SCROLLBACK);
-            requireGhosttySuccess(
-                    ghostty_vt_h.ghostty_terminal_new(MemorySegment.NULL, terminal, options),
-                    "ghostty_terminal_new");
-            return terminal.get(ValueLayout.ADDRESS, 0);
-        }
-    }
-
-    private static MemorySegment createGhosttyRenderState() {
-        try (var arena = Arena.ofConfined()) {
-            var renderState = arena.allocate(ValueLayout.ADDRESS);
-            requireGhosttySuccess(
-                    ghostty_vt_h.ghostty_render_state_new(MemorySegment.NULL, renderState),
-                    "ghostty_render_state_new");
-            return renderState.get(ValueLayout.ADDRESS, 0);
         }
     }
 
