@@ -10,11 +10,14 @@ import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 
 import com.pty4j.PtyProcessBuilder;
+import com.pty4j.WinSize;
 
 import io.github.vlaaad.ghostty.bindings.GhosttyColorRgb;
 import io.github.vlaaad.ghostty.bindings.GhosttyRenderStateColors;
@@ -57,6 +60,7 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
     private final MemorySegment rowIterator;
     private final MemorySegment rowCells;
     private final Future<?> ioTask;
+    private final BlockingQueue<ProcCommand> procCommands = new ArrayBlockingQueue<>(16_384);
 
     private final ObjectProperty<Font> font = new SimpleObjectProperty<>(this, "font", DEFAULT_FONT) {
         @Override
@@ -134,6 +138,7 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
         cellMetrics.addListener((_, _, _) -> handleCanvasResize());
         widthProperty().addListener((_, _, _) -> handleCanvasResize());
         heightProperty().addListener((_, _, _) -> handleCanvasResize());
+        focusedProperty().addListener((_, _, focused) -> handleFocusChange(focused));
         redraw();
 
         ioTask = IO.submit(() -> runProcess(command, cwd, environment));
@@ -219,6 +224,23 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
                 }
             });
             try {
+                // input task, no cleanup since we want to consume the proc commands even after the process exits
+                IO.submit(() -> {
+                    try (var output = process.getOutputStream()) {
+                        while (true) {
+                            switch (procCommands.take()) {
+                                case WriteInput(var bytes) ->
+                                    output.write(bytes);
+                                case ResizePty(var columns, var rows) ->
+                                    process.setWinSize(new WinSize(columns, rows));
+                            }
+                        }
+                    } catch (Exception _) {
+                        while (true) {
+                            procCommands.take();
+                        }
+                    }
+                });
                 try {
                     return process.waitFor();
                 } catch (InterruptedException e) {
@@ -258,20 +280,44 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
 
     private void handleCanvasResize() {
         if (getWidth() <= 0 || getHeight() <= 0) {
+            // todo useless?
             redraw();
             return;
         }
         var cellMetrics = this.cellMetrics.get();
         var nextColumns = Math.clamp((int) Math.floor(getWidth() / cellMetrics.cellWidthPx()), 1, MAX_GHOSTTY_DIMENSION);
         var nextRows = Math.clamp((int) Math.floor(getHeight() / cellMetrics.cellHeightPx()), 1, MAX_GHOSTTY_DIMENSION);
-        resizeGhosttyTerminal(
-                terminal,
-                nextColumns,
-                nextRows,
-                cellMetrics.cellWidthPx(),
-                cellMetrics.cellHeightPx());
+        resizeGhosttyTerminal(terminal, nextColumns, nextRows, cellMetrics.cellWidthPx(), cellMetrics.cellHeightPx());
+        writeCommand(new ResizePty(nextColumns, nextRows));
         updateGhosttyRenderState(renderState, terminal);
         redraw();
+    }
+
+    private void handleFocusChange(boolean focused) {
+        try (var arena = Arena.ofConfined()) {
+            var focusMode = arena.allocate(ValueLayout.JAVA_BOOLEAN);
+            if (ghostty_vt_h.ghostty_terminal_mode_get(
+                    terminal,
+                    (short) 1004,
+                    focusMode) != GHOSTTY_SUCCESS
+                    || !focusMode.get(ValueLayout.JAVA_BOOLEAN, 0)) {
+                return;
+            }
+
+            var buffer = arena.allocate(8);
+            var written = arena.allocate(ValueLayout.JAVA_LONG);
+            requireGhosttySuccess(
+                    ghostty_vt_h.ghostty_focus_encode(
+                            focused ? ghostty_vt_h.GHOSTTY_FOCUS_GAINED() : ghostty_vt_h.GHOSTTY_FOCUS_LOST(),
+                            buffer,
+                            buffer.byteSize(),
+                            written),
+                    "ghostty_focus_encode");
+            var length = Math.toIntExact(written.get(ValueLayout.JAVA_LONG, 0));
+            if (length > 0) {
+                writeCommand(new WriteInput(buffer.asSlice(0, length).toArray(ValueLayout.JAVA_BYTE)));
+            }
+        }
     }
 
     private void redraw() {
@@ -585,6 +631,26 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
             Platform.runLater(action);
         } catch (IllegalStateException _) {
         }
+    }
+
+    private void writeCommand(ProcCommand command) {
+        try {
+            procCommands.put(command);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
+    private sealed interface ProcCommand permits WriteInput, ResizePty {
+
+    }
+
+    private record WriteInput(byte[] bytes) implements ProcCommand {
+
+    }
+
+    private record ResizePty(int columns, int rows) implements ProcCommand {
+
     }
 
     private record CellMetrics(int cellWidthPx, int cellHeightPx, int baselineOffsetPx) {
