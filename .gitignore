@@ -24,3 +24,6 @@ __pycache__
 /ghosttyfx-macos-x86_64/target
 /ghosttyfx-windows-x86_64/target
 hs_err_pid*.log
+/ghosttyfx/.tmp
+/ghosttyfx-perf-app/.tmp
+/ghosttyfx-windows-x86_64/.tmp

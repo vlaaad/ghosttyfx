@@ -480,7 +480,9 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
         if (copy != null && copy.match(event) && !inputState.selection().isEmpty()) {
             var content = new ClipboardContent();
             content.putString(selectedText());
-            Clipboard.getSystemClipboard().setContent(content);
+            if (Clipboard.getSystemClipboard().setContent(content)) {
+                clearSelection();
+            }
             return true;
         }
         var paste = getPasteShortcut();
@@ -506,12 +508,16 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
         }
 
         writeCommand(new WriteInput(encodePaste(text)));
+        clearSelection();
+        return true;
+    }
+
+    private void clearSelection() {
         var nextInputState = GhosttyInputModel.clearSelection(inputState);
         if (!nextInputState.equals(inputState)) {
             inputState = nextInputState;
             redraw();
         }
-        return true;
     }
 
     private boolean applyTransition(GhosttyInputModel.Transition transition) {
