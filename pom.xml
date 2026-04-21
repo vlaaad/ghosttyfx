@@ -25,6 +25,7 @@
     <modules>
         <module>ghosttyfx</module>
         <module>ghosttyfx-manual-app</module>
+        <module>ghosttyfx-perf-app</module>
     </modules>
 
     <dependencyManagement>

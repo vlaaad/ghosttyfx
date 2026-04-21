@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>io.github.vlaaad</groupId>
+        <artifactId>ghosttyfx-parent</artifactId>
+        <version>1.0.0-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>ghosttyfx-perf-app</artifactId>
+
+    <name>GhosttyFX Perf App</name>
+    <description>Repeat-input performance harness for GhosttyFX</description>
+
+    <dependencies>
+        <dependency>
+            <groupId>io.github.vlaaad</groupId>
+            <artifactId>ghosttyfx</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.openjfx</groupId>
+            <artifactId>javafx-controls</artifactId>
+            <version>${javafx.version}</version>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+            </plugin>
+        </plugins>
+    </build>
+
+    <profiles>
+        <profile>
+            <id>perf-app</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.codehaus.mojo</groupId>
+                        <artifactId>exec-maven-plugin</artifactId>
+                        <executions>
+                            <execution>
+                                <id>perf-app</id>
+                                <phase>compile</phase>
+                                <goals>
+                                    <goal>java</goal>
+                                </goals>
+                                <configuration>
+                                    <mainClass>io.github.vlaaad.ghosttyfx.perfapp.GhosttyFxPerfApp</mainClass>
+                                    <cleanupDaemonThreads>false</cleanupDaemonThreads>
+                                    <systemProperties>
+                                        <systemProperty>
+                                            <key>ghosttyfx.perf.outputDir</key>
+                                            <value>${project.build.directory}/perf-results</value>
+                                        </systemProperty>
+                                        <systemProperty>
+                                            <key>ghosttyfx.perf.cwd</key>
+                                            <value>${project.parent.basedir}</value>
+                                        </systemProperty>
+                                    </systemProperties>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
+</project>
