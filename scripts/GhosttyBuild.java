@@ -175,11 +175,11 @@ public final class GhosttyBuild {
             System.out.println("ghosttyfx artifact is up to date: " + outputs.artifactDir);
             return;
         }
+        if (restoreCachedArtifact(repo, outputs, platform, artifactId, ghosttyCommit)) {
+            System.out.println("restored cached ghosttyfx artifact: " + outputs.artifactDir);
+            return;
+        }
         if (!canBuildLocally()) {
-            if (restoreCachedArtifact(repo, outputs, platform, artifactId, ghosttyCommit)) {
-                System.out.println("restored cached ghosttyfx artifact: " + outputs.artifactDir);
-                return;
-            }
             throw new IllegalStateException(
                 "No cached artifact found for ghostty commit " + ghosttyCommit + ". "
                     + "Run `" + DOWNLOAD_ARTIFACTS_COMMAND + "` first."
