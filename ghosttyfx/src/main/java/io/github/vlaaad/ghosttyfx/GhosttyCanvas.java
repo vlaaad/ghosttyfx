@@ -210,11 +210,31 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
             try {
                 Platform.runLater(processOutputDrain::start);
             } catch (IllegalStateException _) {
+                // fixme: this is triggered in tests since they don't have a running platform...
             }
         }
 
         ioTask = IO.submit(() -> runProcess(command, cwd, environment));
-        CLEANER.register(this, new Cleanup(ioTask, processOutputDrain, terminal, renderState, rowIterator, rowCells, keyEncoder, keyEvent));
+        CLEANER.register(this, () -> {
+            ioTask.cancel(true);
+
+            // fixme wrong: we should consume until we get a signal that the process finished producing output. for that reason, timer should not use a weak reference!
+            if (Platform.isFxApplicationThread()) {
+                processOutputDrain.stop();
+            } else {
+                try {
+                    Platform.runLater(processOutputDrain::stop);
+                } catch (IllegalStateException _) {
+                    // fixme: this is triggered in tests since they don't have a running platform...
+                }
+            }
+            ghostty_vt_h.ghostty_key_event_free(keyEvent);
+            ghostty_vt_h.ghostty_key_encoder_free(keyEncoder);
+            ghostty_vt_h.ghostty_render_state_row_cells_free(rowCells);
+            ghostty_vt_h.ghostty_render_state_row_iterator_free(rowIterator);
+            ghostty_vt_h.ghostty_render_state_free(renderState);
+            ghostty_vt_h.ghostty_terminal_free(terminal);
+        });
     }
 
     @Override
@@ -256,6 +276,14 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
     public void resize(double width, double height) {
         setWidth(width);
         setHeight(height);
+    }
+
+    public Font getFont() {
+        return font.get();
+    }
+
+    public void setFont(Font value) {
+        font.set(value);
     }
 
     public ObjectProperty<Font> fontProperty() {
@@ -465,19 +493,19 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
     }
 
     private boolean handleShortcut(KeyEvent event) {
-        var copyShortcut = getCopyShortcut();
-        if (copyShortcut != null && copyShortcut.match(event) && !inputState.selection().isEmpty()) {
+        var copy = getCopyShortcut();
+        if (copy != null && copy.match(event) && !inputState.selection().isEmpty()) {
             var content = new ClipboardContent();
             content.putString(selectedText());
             Clipboard.getSystemClipboard().setContent(content);
             return true;
         }
-        var pasteShortcut = getPasteShortcut();
-        if (pasteShortcut != null && pasteShortcut.match(event)) {
+        var paste = getPasteShortcut();
+        if (paste != null && paste.match(event)) {
             return pasteClipboard();
         }
-        var selectAllShortcut = getSelectAllShortcut();
-        if (selectAllShortcut != null && selectAllShortcut.match(event)) {
+        var selectAll = getSelectAllShortcut();
+        if (selectAll != null && selectAll.match(event)) {
             var nextInputState = GhosttyInputModel.select(inputState, selectAllSelection());
             if (!nextInputState.equals(inputState)) {
                 inputState = nextInputState;
@@ -1126,56 +1154,8 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
         }
     }
 
-    private static final class Cleanup implements Runnable {
-        private final Future<?> ioTask;
-        private final AnimationTimer processOutputDrain;
-        private final MemorySegment terminal;
-        private final MemorySegment renderState;
-        private final MemorySegment rowIterator;
-        private final MemorySegment rowCells;
-        private final MemorySegment keyEncoder;
-        private final MemorySegment keyEvent;
-
-        private Cleanup(
-                Future<?> ioTask,
-                AnimationTimer processOutputDrain,
-                MemorySegment terminal,
-                MemorySegment renderState,
-                MemorySegment rowIterator,
-                MemorySegment rowCells,
-                MemorySegment keyEncoder,
-                MemorySegment keyEvent) {
-            this.ioTask = ioTask;
-            this.processOutputDrain = processOutputDrain;
-            this.terminal = terminal;
-            this.renderState = renderState;
-            this.rowIterator = rowIterator;
-            this.rowCells = rowCells;
-            this.keyEncoder = keyEncoder;
-            this.keyEvent = keyEvent;
-        }
-
-        @Override
-        public void run() {
-            ioTask.cancel(true);
-            if (Platform.isFxApplicationThread()) {
-                processOutputDrain.stop();
-            } else {
-                try {
-                    Platform.runLater(processOutputDrain::stop);
-                } catch (IllegalStateException _) {
-                }
-            }
-            ghostty_vt_h.ghostty_key_event_free(keyEvent);
-            ghostty_vt_h.ghostty_key_encoder_free(keyEncoder);
-            ghostty_vt_h.ghostty_render_state_row_cells_free(rowCells);
-            ghostty_vt_h.ghostty_render_state_row_iterator_free(rowIterator);
-            ghostty_vt_h.ghostty_render_state_free(renderState);
-            ghostty_vt_h.ghostty_terminal_free(terminal);
-        }
-    }
-
     private static final class ProcessOutputDrain extends AnimationTimer {
+
         private final WeakReference<GhosttyCanvas> canvasRef;
 
         private ProcessOutputDrain(GhosttyCanvas canvas) {
@@ -1229,6 +1209,7 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
     }
 
     private final class CanvasInputMethodRequests implements InputMethodRequests {
+
         @Override
         public Point2D getTextLocation(int offset) {
             var cursorLocation = currentCursorLocation();
@@ -1274,15 +1255,19 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
     }
 
     private record WriteInput(byte[] bytes) implements ProcCommand {
+
     }
 
     private record ResizePty(int columns, int rows) implements ProcCommand {
+
     }
 
     private record CellMetrics(int cellWidthPx, int cellHeightPx, int baselineOffsetPx) {
+
     }
 
     private record CursorLocation(int cellX, int cellY, double pixelX, double pixelY) {
+
     }
 
     private GhosttyInputModel.Selection selectAllSelection() {
