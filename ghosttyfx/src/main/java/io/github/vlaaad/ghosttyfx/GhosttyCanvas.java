@@ -32,7 +32,6 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import javafx.animation.AnimationTimer;
-import javafx.application.Platform;
 import javafx.beans.binding.Bindings;
 import javafx.beans.binding.ObjectBinding;
 import javafx.beans.property.BooleanProperty;
@@ -75,6 +74,7 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
     private static final int CURSOR_STYLE_BAR = 0;
     private static final int CURSOR_STYLE_UNDERLINE = 2;
     private static final int CURSOR_STYLE_BLOCK_HOLLOW = 3;
+    private static final byte[] PROCESS_OUTPUT_COMPLETE = new byte[0];
     private static final Color SELECTION_COLOR = Color.rgb(74, 144, 226, 0.25);
     private static final Color PREEDIT_FILL = Color.rgb(255, 255, 255, 0.95);
     private static final Color PREEDIT_BACKGROUND = Color.rgb(74, 144, 226, 0.18);
@@ -204,30 +204,11 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
         setOnInputMethodTextChanged(this::handleInputMethodTextChanged);
         setInputMethodRequests(new CanvasInputMethodRequests());
         redraw();
-        if (Platform.isFxApplicationThread()) {
-            processOutputDrain.start();
-        } else {
-            try {
-                Platform.runLater(processOutputDrain::start);
-            } catch (IllegalStateException _) {
-                // fixme: this is triggered in tests since they don't have a running platform...
-            }
-        }
+        processOutputDrain.start();
 
         ioTask = IO.submit(() -> runProcess(command, cwd, environment));
         CLEANER.register(this, () -> {
             ioTask.cancel(true);
-
-            // fixme wrong: we should consume until we get a signal that the process finished producing output. for that reason, timer should not use a weak reference!
-            if (Platform.isFxApplicationThread()) {
-                processOutputDrain.stop();
-            } else {
-                try {
-                    Platform.runLater(processOutputDrain::stop);
-                } catch (IllegalStateException _) {
-                    // fixme: this is triggered in tests since they don't have a running platform...
-                }
-            }
             ghostty_vt_h.ghostty_key_event_free(keyEvent);
             ghostty_vt_h.ghostty_key_encoder_free(keyEncoder);
             ghostty_vt_h.ghostty_render_state_row_cells_free(rowCells);
@@ -369,6 +350,8 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
                         }
                         processOutputChunks.put(Arrays.copyOf(buffer, read));
                     }
+                } finally {
+                    processOutputChunks.put(PROCESS_OUTPUT_COMPLETE);
                 }
             });
             try {
@@ -1157,46 +1140,48 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
     private static final class ProcessOutputDrain extends AnimationTimer {
 
         private final WeakReference<GhosttyCanvas> canvasRef;
+        private final BlockingQueue<byte[]> processOutputChunks;
 
         private ProcessOutputDrain(GhosttyCanvas canvas) {
             canvasRef = new WeakReference<>(canvas);
+            processOutputChunks = canvas.processOutputChunks;
         }
 
         @Override
         public void handle(long now) {
-            var canvas = canvasRef.get();
-            if (canvas == null) {
-                stop();
-                return;
-            }
-
-            var firstChunk = canvas.processOutputChunks.poll();
+            var firstChunk = processOutputChunks.poll();
             if (firstChunk == null) {
                 return;
             }
 
-            var chunks = new ArrayList<byte[]>(1 + canvas.processOutputChunks.size());
+            var chunks = new ArrayList<byte[]>(1 + processOutputChunks.size());
             chunks.add(firstChunk);
-            canvas.processOutputChunks.drainTo(chunks);
+            processOutputChunks.drainTo(chunks);
 
-            var totalBytes = 0;
-            for (var chunk : chunks) {
-                totalBytes += chunk.length;
-            }
+            var canvas = canvasRef.get();
+            if (canvas != null) {
+                var totalBytes = 0;
+                for (var chunk : chunks) {
+                    totalBytes += chunk.length;
+                }
 
-            var bytes = new byte[totalBytes];
-            var offset = 0;
-            for (var chunk : chunks) {
-                System.arraycopy(chunk, 0, bytes, offset, chunk.length);
-                offset += chunk.length;
-            }
+                var bytes = new byte[totalBytes];
+                var offset = 0;
+                for (var chunk : chunks) {
+                    System.arraycopy(chunk, 0, bytes, offset, chunk.length);
+                    offset += chunk.length;
+                }
 
-            try (var arena = Arena.ofConfined()) {
-                var nativeBytes = arena.allocateFrom(ValueLayout.JAVA_BYTE, bytes);
-                ghostty_vt_h.ghostty_terminal_vt_write(canvas.terminal, nativeBytes, bytes.length);
+                try (var arena = Arena.ofConfined()) {
+                    var nativeBytes = arena.allocateFrom(ValueLayout.JAVA_BYTE, bytes);
+                    ghostty_vt_h.ghostty_terminal_vt_write(canvas.terminal, nativeBytes, bytes.length);
+                }
+                updateGhosttyRenderState(canvas.renderState, canvas.terminal);
+                canvas.redraw();
             }
-            updateGhosttyRenderState(canvas.renderState, canvas.terminal);
-            canvas.redraw();
+            if (chunks.get(chunks.size() - 1) == PROCESS_OUTPUT_COMPLETE) {
+                stop();
+            }
         }
     }
 

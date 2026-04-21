@@ -9,16 +9,34 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.List;
 import java.util.Optional;
 import java.util.regex.Pattern;
+import javafx.application.Platform;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.BeforeAll;
 import javafx.scene.text.Font;
 
 final class GhosttyCanvasTest {
     private static final Duration START_TIMEOUT = Duration.ofSeconds(15);
     private static final Duration STOP_TIMEOUT = Duration.ofSeconds(15);
     private static final Duration POLL_INTERVAL = Duration.ofMillis(100);
+
+    @BeforeAll
+    static void initializeJavaFxRuntime() throws InterruptedException {
+        var started = new CountDownLatch(1);
+        try {
+            Platform.startup(() -> {
+                Platform.setImplicitExit(false);
+                started.countDown();
+            });
+        } catch (IllegalStateException _) {
+            Platform.runLater(started::countDown);
+        }
+        assertTrue(started.await(15, TimeUnit.SECONDS), "Timed out waiting for JavaFX runtime startup");
+    }
 
     @Test
     void startsProcessAndStopsItOnClose() throws Exception {
