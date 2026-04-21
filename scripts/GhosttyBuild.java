@@ -30,6 +30,7 @@ public final class GhosttyBuild {
     private static final String JEXTRACT_HEADER_CLASS = "ghostty_vt_h";
     private static final String WORKFLOW_REPO = "vlaaad/ghosttyfx";
     private static final String WORKFLOW_FILE = "build-lib.yml";
+    private static final String GHOSTTY_OPTIMIZE = "ReleaseFast";
     private static final String DOWNLOAD_ARTIFACTS_COMMAND =
         "mvn -N -Pdownload-cross-platform-artifacts exec:exec@download-cross-platform-artifacts";
     private static final Pattern RUN_URL_PATTERN =
@@ -447,6 +448,7 @@ public final class GhosttyBuild {
             zigExecutable(zigHome).toString(),
             "build",
             "-Dtarget=" + platform.zigTarget,
+            "-Doptimize=" + GHOSTTY_OPTIMIZE,
             "-Dapp-runtime=none",
             "-Demit-lib-vt=true"
         );
@@ -703,6 +705,7 @@ public final class GhosttyBuild {
         metadata.setProperty("artifactId", artifactId);
         metadata.setProperty("platform", platform.id);
         metadata.setProperty("ghostty.commit", ghosttyCommit);
+        metadata.setProperty("ghostty.optimize", GHOSTTY_OPTIMIZE);
         metadata.setProperty("jextract.package", JEXTRACT_TARGET_PACKAGE);
         metadata.setProperty("jextract.headerClass", JEXTRACT_HEADER_CLASS);
         metadata.setProperty("jextract.version", platform.jextract.rootDirName);
@@ -739,6 +742,7 @@ public final class GhosttyBuild {
         return artifactId.equals(metadata.getProperty("artifactId"))
             && platform.id.equals(metadata.getProperty("platform"))
             && ghosttyCommit.equals(metadata.getProperty("ghostty.commit"))
+            && GHOSTTY_OPTIMIZE.equals(metadata.getProperty("ghostty.optimize"))
             && JEXTRACT_TARGET_PACKAGE.equals(metadata.getProperty("jextract.package"))
             && JEXTRACT_HEADER_CLASS.equals(metadata.getProperty("jextract.headerClass"))
             && platform.jextract.rootDirName.equals(metadata.getProperty("jextract.version"))
@@ -766,6 +770,7 @@ public final class GhosttyBuild {
         return artifactId.equals(metadata.getProperty("artifactId"))
             && platform.id.equals(metadata.getProperty("platform"))
             && ghosttyCommit.equals(metadata.getProperty("ghostty.commit"))
+            && GHOSTTY_OPTIMIZE.equals(metadata.getProperty("ghostty.optimize"))
             && JEXTRACT_TARGET_PACKAGE.equals(metadata.getProperty("jextract.package"))
             && JEXTRACT_HEADER_CLASS.equals(metadata.getProperty("jextract.headerClass"))
             && platform.jextract.rootDirName.equals(metadata.getProperty("jextract.version"))
