@@ -21,7 +21,6 @@ import java.lang.foreign.MemorySegment;
 import java.lang.foreign.ValueLayout;
 import java.nio.charset.StandardCharsets;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.function.Consumer;
 import javafx.scene.canvas.GraphicsContext;
 import javafx.scene.paint.Color;
 import javafx.scene.text.Font;
@@ -344,7 +343,7 @@ final class TerminalSession implements AutoCloseable {
         }
     }
 
-    boolean encodeAndWrite(InputModel.EncodeOutput output, boolean macOptionAsAlt, Consumer<byte[]> sink) {
+    byte[] encode(InputModel.EncodeOutput output, boolean macOptionAsAlt) {
         refreshKeyEncoder(macOptionAsAlt);
         try (var arena = Arena.ofConfined()) {
             ghostty_vt_h.ghostty_key_event_set_action(keyEvent, output.action());
@@ -389,10 +388,9 @@ final class TerminalSession implements AutoCloseable {
 
             var length = Math.toIntExact(written.get(ValueLayout.JAVA_LONG, 0));
             if (length == 0) {
-                return false;
+                return new byte[0];
             }
-            sink.accept(buffer.asSlice(0, length).toArray(ValueLayout.JAVA_BYTE));
-            return true;
+            return buffer.asSlice(0, length).toArray(ValueLayout.JAVA_BYTE);
         }
     }
 

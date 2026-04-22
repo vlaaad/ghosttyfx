@@ -366,10 +366,7 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
             return;
         }
 
-        var bytes = terminalSession.encodeFocus(focused);
-        if (bytes.length > 0) {
-            writeCommand(new WriteInput(bytes));
-        }
+        writeBytes(terminalSession.encodeFocus(focused));
     }
 
     private void handleKeyPressed(KeyEvent event) {
@@ -679,7 +676,7 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
                 return false;
             }
 
-            writeCommand(new WriteInput(terminalSession.encodePaste(text, terminalSession.readMode(BRACKETED_PASTE_MODE))));
+            writeBytes(terminalSession.encodePaste(text, terminalSession.readMode(BRACKETED_PASTE_MODE)));
             clearSelection();
             return true;
         }
@@ -711,7 +708,7 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
         for (var output : transition.outputs()) {
             switch (output) {
                 case InputModel.EncodeOutput encodeOutput -> {
-                    var producedBytes = terminalSession.encodeAndWrite(encodeOutput, isMacOptionAsAlt(), this::writeBytes);
+                    var producedBytes = writeBytes(terminalSession.encode(encodeOutput, isMacOptionAsAlt()));
                     inputState = InputModel.acknowledgeEncode(
                             inputState,
                             encodeOutput.code(),
@@ -721,8 +718,7 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
                 }
                 case InputModel.RawTextOutput(var text) -> {
                     if (text != null && !text.isEmpty()) {
-                        writeCommand(new WriteInput(text.getBytes(StandardCharsets.UTF_8)));
-                        wroteToPty = true;
+                        wroteToPty |= writeBytes(text.getBytes(StandardCharsets.UTF_8));
                     }
                 }
             }
