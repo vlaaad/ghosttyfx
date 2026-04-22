@@ -9,8 +9,8 @@ import java.util.Set;
 import javafx.scene.input.KeyCode;
 import javafx.scene.input.KeyEvent;
 
-final class GhosttyInputModel {
-    private GhosttyInputModel() {}
+final class InputModel {
+    private InputModel() {}
 
     static InputState initialState() {
         return new InputState(Set.of(), Set.of(), List.of(), false, Preedit.empty(), Selection.empty(), MouseState.initial());
