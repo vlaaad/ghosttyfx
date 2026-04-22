@@ -358,15 +358,15 @@ final class InputModel {
                     DEAD_IOTA, DEAD_VOICED_SOUND, DEAD_SEMIVOICED_SOUND, AMPERSAND, ASTERISK, QUOTEDBL, LESS,
                     GREATER, BRACELEFT, BRACERIGHT, AT, COLON, CIRCUMFLEX, DOLLAR, EURO_SIGN, EXCLAMATION_MARK,
                     INVERTED_EXCLAMATION_MARK, LEFT_PARENTHESIS, NUMBER_SIGN, PLUS, RIGHT_PARENTHESIS, UNDERSCORE,
-                    COMPOSE -> semanticText();
-            case STAR, POUND -> unsupportedText();
+                    COMPOSE -> new KeyClassification(Bucket.SEMANTIC, ghostty_vt_h.GHOSTTY_KEY_UNIDENTIFIED(), 0, TextKind.COMMIT_ONLY, false, false);
+            case STAR, POUND -> new KeyClassification(Bucket.UNSUPPORTED, ghostty_vt_h.GHOSTTY_KEY_UNIDENTIFIED(), 0, TextKind.COMMIT_ONLY, false, false);
             case ALT_GRAPH, SHORTCUT, CANCEL, FINAL, ACCEPT, MODECHANGE, KANJI, ALPHANUMERIC, KATAKANA, HIRAGANA,
                     FULL_WIDTH, HALF_WIDTH, ROMAN_CHARACTERS, ALL_CANDIDATES, PREVIOUS_CANDIDATE, CODE_INPUT,
                     JAPANESE_KATAKANA, JAPANESE_HIRAGANA, JAPANESE_ROMAN, KANA_LOCK, INPUT_METHOD_ON_OFF,
                     UNDEFINED, UNDO, AGAIN, FIND, PROPS, SOFTKEY_0, SOFTKEY_1, SOFTKEY_2, SOFTKEY_3, SOFTKEY_4,
                     SOFTKEY_5, SOFTKEY_6, SOFTKEY_7, SOFTKEY_8, SOFTKEY_9, GAME_A, GAME_B, GAME_C, GAME_D,
                     INFO, COLORED_KEY_0, COLORED_KEY_1, COLORED_KEY_2, COLORED_KEY_3, RECORD, FAST_FWD, REWIND,
-                    CHANNEL_UP, CHANNEL_DOWN -> semanticNonText();
+                    CHANNEL_UP, CHANNEL_DOWN -> new KeyClassification(Bucket.SEMANTIC, ghostty_vt_h.GHOSTTY_KEY_UNIDENTIFIED(), 0, TextKind.NONE, false, false);
         };
     }
 
@@ -712,15 +712,4 @@ final class InputModel {
         return directNonText(ghosttyKey, true, false);
     }
 
-    private static KeyClassification semanticText() {
-        return new KeyClassification(Bucket.SEMANTIC, ghostty_vt_h.GHOSTTY_KEY_UNIDENTIFIED(), 0, TextKind.COMMIT_ONLY, false, false);
-    }
-
-    private static KeyClassification semanticNonText() {
-        return new KeyClassification(Bucket.SEMANTIC, ghostty_vt_h.GHOSTTY_KEY_UNIDENTIFIED(), 0, TextKind.NONE, false, false);
-    }
-
-    private static KeyClassification unsupportedText() {
-        return new KeyClassification(Bucket.UNSUPPORTED, ghostty_vt_h.GHOSTTY_KEY_UNIDENTIFIED(), 0, TextKind.COMMIT_ONLY, false, false);
-    }
 }

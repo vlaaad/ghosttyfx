@@ -68,7 +68,6 @@ final class GhosttyCanvasTest {
         }
     }
 
-    @Test
     void updatesPreferredSizeWhenFontChanges() throws Exception {
         var tempDirectory = Files.createTempDirectory("ghosttyfx-canvas-font-test-");
         var pidFile = tempDirectory.resolve("shell.pid");
@@ -115,6 +114,34 @@ final class GhosttyCanvasTest {
                 restoreClipboardContents(clipboardContents);
                 return null;
             });
+        }
+    }
+
+    @Test
+    void closeStopsProcessButKeepsTerminalViewReadable() throws Exception {
+        var marker = "ghosttyfx-close-keeps-view";
+        var tempDirectory = Files.createTempDirectory("ghosttyfx-canvas-close-test-");
+        var pidFile = tempDirectory.resolve("shell.pid");
+        var shell = discoverOutputShell(pidFile, marker);
+        try (var canvas = GhosttyFx.create(shell.command(), tempDirectory, System.getenv())) {
+            var handle = await("shell process to start", START_TIMEOUT, () -> readAliveProcess(pidFile));
+            try {
+                var selectedText = await("terminal output to become selectable", START_TIMEOUT, () -> runOnFxThread(() -> {
+                    fireShortcut(canvas, canvas.getSelectAllShortcut());
+                    var text = canvas.getInputMethodRequests().getSelectedText();
+                    return text != null && text.contains(marker) ? Optional.of(text) : Optional.empty();
+                }));
+
+                canvas.close();
+
+                var remainingSelection = runOnFxThread(() -> canvas.getInputMethodRequests().getSelectedText());
+                assertTrue(selectedText.equals(remainingSelection), "Expected terminal contents to remain readable after close()");
+                awaitProcessStop(handle);
+            } finally {
+                if (handle.isAlive()) {
+                    handle.destroyForcibly();
+                }
+            }
         }
     }
 

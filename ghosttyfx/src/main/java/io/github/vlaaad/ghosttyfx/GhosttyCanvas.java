@@ -2,25 +2,9 @@ package io.github.vlaaad.ghosttyfx;
 
 import com.pty4j.PtyProcessBuilder;
 import com.pty4j.WinSize;
-import io.github.vlaaad.ghostty.bindings.GhosttyColorRgb;
-import io.github.vlaaad.ghostty.bindings.GhosttyFormatterTerminalOptions;
-import io.github.vlaaad.ghostty.bindings.GhosttyMouseEncoderSize;
-import io.github.vlaaad.ghostty.bindings.GhosttyMousePosition;
-import io.github.vlaaad.ghostty.bindings.GhosttyPoint;
-import io.github.vlaaad.ghostty.bindings.GhosttyPointCoordinate;
-import io.github.vlaaad.ghostty.bindings.GhosttyPointValue;
-import io.github.vlaaad.ghostty.bindings.GhosttyRenderStateColors;
-import io.github.vlaaad.ghostty.bindings.GhosttySelection;
-import io.github.vlaaad.ghostty.bindings.GhosttyStyle;
-import io.github.vlaaad.ghostty.bindings.GhosttyTerminalOptions;
-import io.github.vlaaad.ghostty.bindings.GhosttyTerminalScrollbar;
-import io.github.vlaaad.ghostty.bindings.GhosttyTerminalScrollViewport;
-import io.github.vlaaad.ghostty.bindings.GhosttyTerminalScrollViewportValue;
+
 import io.github.vlaaad.ghostty.bindings.ghostty_vt_h;
-import java.lang.foreign.Arena;
-import java.lang.foreign.MemoryLayout;
-import java.lang.foreign.MemorySegment;
-import java.lang.foreign.ValueLayout;
+
 import java.lang.ref.Cleaner;
 import java.lang.ref.WeakReference;
 import java.nio.charset.StandardCharsets;
@@ -35,6 +19,7 @@ import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+
 import javafx.animation.AnimationTimer;
 import javafx.beans.binding.Bindings;
 import javafx.beans.binding.ObjectBinding;
@@ -66,24 +51,15 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
 
     private static final Cleaner CLEANER = Cleaner.create();
     private static final ExecutorService IO = Executors.newVirtualThreadPerTaskExecutor();
-    private static final int GHOSTTY_SUCCESS = 0;
     private static final int INITIAL_COLUMNS = 80;
     private static final int INITIAL_ROWS = 24;
-    private static final int MAX_GHOSTTY_DIMENSION = 0xFFFF;
-    private static final int MAX_GRAPHEME_CODEPOINTS = 16;
-    private static final int KEY_BUFFER_SIZE = 256;
     private static final short FOCUS_EVENT_MODE = 1004;
     private static final short BRACKETED_PASTE_MODE = 2004;
-    private static final long INITIAL_MAX_SCROLLBACK = 1_000;
     private static final double DEFAULT_SCROLL_MULTIPLIER_Y = 40;
     private static final double SCROLLBAR_WIDTH_PX = 6;
     private static final double SCROLLBAR_MARGIN_PX = 2;
     private static final double MIN_SCROLLBAR_HEIGHT_PX = 10;
     private static final double SCROLL_TOTAL_DELTA_EPSILON = 1e-6;
-    private static final double BLOCK_CURSOR_ALPHA = 0.5;
-    private static final int CURSOR_STYLE_BAR = 0;
-    private static final int CURSOR_STYLE_UNDERLINE = 2;
-    private static final int CURSOR_STYLE_BLOCK_HOLLOW = 3;
     private static final byte[] PROCESS_OUTPUT_COMPLETE = new byte[0];
     private static final Color SELECTION_COLOR = Color.rgb(74, 144, 226, 0.25);
     private static final Color PREEDIT_FILL = Color.rgb(255, 255, 255, 0.95);
@@ -91,14 +67,7 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
     private static final Color PREEDIT_STROKE = Color.rgb(74, 144, 226, 0.9);
     private static final Font DEFAULT_FONT = Font.font("Monospaced", 14);
 
-    private final MemorySegment terminal;
-    private final MemorySegment renderState;
-    private final MemorySegment rowIterator;
-    private final MemorySegment rowCells;
-    private final MemorySegment keyEncoder;
-    private final MemorySegment keyEvent;
-    private final MemorySegment mouseEncoder;
-    private final MemorySegment mouseEvent;
+    private final TerminalSession terminalSession;
     private final Future<?> ioTask;
     private final BlockingQueue<ProcCommand> procCommands = new ArrayBlockingQueue<>(16_384);
     private final BlockingQueue<byte[]> processOutputChunks = new ArrayBlockingQueue<>(256);
@@ -156,65 +125,7 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
     GhosttyCanvas(List<String> command, Path cwd, Map<String, String> environment) {
         processOutputDrain = new ProcessOutputDrain(this);
         var initialCellMetrics = cellMetrics.get();
-
-        try (var arena = Arena.ofConfined()) {
-            GhosttyFx.NativeLibraryHolder.ensureLoaded();
-
-            var terminalPointer = arena.allocate(ValueLayout.ADDRESS);
-            var options = GhosttyTerminalOptions.allocate(arena);
-            GhosttyTerminalOptions.cols(options, (short) INITIAL_COLUMNS);
-            GhosttyTerminalOptions.rows(options, (short) INITIAL_ROWS);
-            GhosttyTerminalOptions.max_scrollback(options, INITIAL_MAX_SCROLLBACK);
-            requireGhosttySuccess(
-                    ghostty_vt_h.ghostty_terminal_new(MemorySegment.NULL, terminalPointer, options),
-                    "ghostty_terminal_new");
-            terminal = terminalPointer.get(ValueLayout.ADDRESS, 0);
-            resizeGhosttyTerminal(terminal, INITIAL_COLUMNS, INITIAL_ROWS, initialCellMetrics.cellWidthPx(), initialCellMetrics.cellHeightPx());
-
-            var renderStatePointer = arena.allocate(ValueLayout.ADDRESS);
-            requireGhosttySuccess(
-                    ghostty_vt_h.ghostty_render_state_new(MemorySegment.NULL, renderStatePointer),
-                    "ghostty_render_state_new");
-            renderState = renderStatePointer.get(ValueLayout.ADDRESS, 0);
-
-            var rowIteratorPointer = arena.allocate(ValueLayout.ADDRESS);
-            requireGhosttySuccess(
-                    ghostty_vt_h.ghostty_render_state_row_iterator_new(MemorySegment.NULL, rowIteratorPointer),
-                    "ghostty_render_state_row_iterator_new");
-            rowIterator = rowIteratorPointer.get(ValueLayout.ADDRESS, 0);
-
-            var rowCellsPointer = arena.allocate(ValueLayout.ADDRESS);
-            requireGhosttySuccess(
-                    ghostty_vt_h.ghostty_render_state_row_cells_new(MemorySegment.NULL, rowCellsPointer),
-                    "ghostty_render_state_row_cells_new");
-            rowCells = rowCellsPointer.get(ValueLayout.ADDRESS, 0);
-
-            var keyEncoderPointer = arena.allocate(ValueLayout.ADDRESS);
-            requireGhosttySuccess(
-                    ghostty_vt_h.ghostty_key_encoder_new(MemorySegment.NULL, keyEncoderPointer),
-                    "ghostty_key_encoder_new");
-            keyEncoder = keyEncoderPointer.get(ValueLayout.ADDRESS, 0);
-
-            var keyEventPointer = arena.allocate(ValueLayout.ADDRESS);
-            requireGhosttySuccess(
-                    ghostty_vt_h.ghostty_key_event_new(MemorySegment.NULL, keyEventPointer),
-                    "ghostty_key_event_new");
-            keyEvent = keyEventPointer.get(ValueLayout.ADDRESS, 0);
-
-            var mouseEncoderPointer = arena.allocate(ValueLayout.ADDRESS);
-            requireGhosttySuccess(
-                    ghostty_vt_h.ghostty_mouse_encoder_new(MemorySegment.NULL, mouseEncoderPointer),
-                    "ghostty_mouse_encoder_new");
-            mouseEncoder = mouseEncoderPointer.get(ValueLayout.ADDRESS, 0);
-
-            var mouseEventPointer = arena.allocate(ValueLayout.ADDRESS);
-            requireGhosttySuccess(
-                    ghostty_vt_h.ghostty_mouse_event_new(MemorySegment.NULL, mouseEventPointer),
-                    "ghostty_mouse_event_new");
-            mouseEvent = mouseEventPointer.get(ValueLayout.ADDRESS, 0);
-
-        }
-        updateGhosttyRenderState(renderState, terminal);
+        terminalSession = new TerminalSession(INITIAL_COLUMNS, INITIAL_ROWS, initialCellMetrics);
 
         setFocusTraversable(true);
         setWidth(prefWidth(-1));
@@ -239,16 +150,12 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
         processOutputDrain.start();
 
         ioTask = IO.submit(() -> runProcess(command, cwd, environment));
-        CLEANER.register(this, () -> {
-            ioTask.cancel(true);
-            ghostty_vt_h.ghostty_mouse_event_free(mouseEvent);
-            ghostty_vt_h.ghostty_mouse_encoder_free(mouseEncoder);
-            ghostty_vt_h.ghostty_key_event_free(keyEvent);
-            ghostty_vt_h.ghostty_key_encoder_free(keyEncoder);
-            ghostty_vt_h.ghostty_render_state_row_cells_free(rowCells);
-            ghostty_vt_h.ghostty_render_state_row_iterator_free(rowIterator);
-            ghostty_vt_h.ghostty_render_state_free(renderState);
-            ghostty_vt_h.ghostty_terminal_free(terminal);
+        // The canvas only owns the process lifecycle directly. Native terminal resources stay alive as long as the
+        // terminal session is reachable so an already-rendered view can still be queried or shown after close().
+        CLEANER.register(terminalSession, () -> {
+            try (terminalSession) {
+                ioTask.cancel(true);
+            }
         });
     }
 
@@ -355,6 +262,8 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
 
     @Override
     public void close() {
+        // Closing the canvas is a process-lifecycle operation only. Native terminal state stays available until the
+        // canvas itself becomes unreachable so the last rendered view can still be queried or shown.
         ioTask.cancel(true);
     }
 
@@ -435,15 +344,13 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
     }
 
     private void handleCanvasResize() {
-        if (getWidth() <= 0 || getHeight() <= 0) {
+        var metrics = cellMetrics.get();
+        var size = terminalSession.resize(getWidth(), getHeight(), metrics, scrollbarReservedWidthPx());
+        if (size == null) {
             return;
         }
-        var metrics = cellMetrics.get();
-        var nextColumns = Math.clamp((int) Math.floor(contentWidthPx() / metrics.cellWidthPx()), 1, MAX_GHOSTTY_DIMENSION);
-        var nextRows = Math.clamp((int) Math.floor(getHeight() / metrics.cellHeightPx()), 1, MAX_GHOSTTY_DIMENSION);
-        resizeGhosttyTerminal(terminal, nextColumns, nextRows, metrics.cellWidthPx(), metrics.cellHeightPx());
-        writeCommand(new ResizePty(nextColumns, nextRows));
-        updateGhosttyRenderState(renderState, terminal);
+
+        writeCommand(new ResizePty(size.columns(), size.rows()));
         redraw();
     }
 
@@ -456,24 +363,13 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
             }
         }
 
-        if (!readMode(FOCUS_EVENT_MODE)) {
+        if (!terminalSession.readMode(FOCUS_EVENT_MODE)) {
             return;
         }
 
-        try (var arena = Arena.ofConfined()) {
-            var buffer = arena.allocate(8);
-            var written = arena.allocate(ValueLayout.JAVA_LONG);
-            requireGhosttySuccess(
-                    ghostty_vt_h.ghostty_focus_encode(
-                            focused ? ghostty_vt_h.GHOSTTY_FOCUS_GAINED() : ghostty_vt_h.GHOSTTY_FOCUS_LOST(),
-                            buffer,
-                            buffer.byteSize(),
-                            written),
-                    "ghostty_focus_encode");
-            var length = Math.toIntExact(written.get(ValueLayout.JAVA_LONG, 0));
-            if (length > 0) {
-                writeCommand(new WriteInput(buffer.asSlice(0, length).toArray(ValueLayout.JAVA_BYTE)));
-            }
+        var bytes = terminalSession.encodeFocus(focused);
+        if (bytes.length > 0) {
+            writeCommand(new WriteInput(bytes));
         }
     }
 
@@ -504,9 +400,13 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
     }
 
     private void handleInputMethodTextChanged(InputMethodEvent event) {
+        var composedText = new StringBuilder();
+        for (var run : event.getComposed()) {
+            composedText.append(run.getText());
+        }
         if (applyTransition(InputModel.onInputMethodTextChanged(
                 inputState,
-                composedText(event),
+                composedText.toString(),
                 event.getCaretPosition(),
                 event.getCommitted()))) {
             event.consume();
@@ -582,10 +482,18 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
                 return;
             }
 
-            var mouseTrackingEnabled = overContent && mouseTrackingEnabled();
+            var mouseTrackingEnabled = overContent && terminalSession.mouseTrackingEnabled();
             var wroteToApplication = false;
             if (mouseTrackingEnabled) {
-                wroteToApplication = encodeAndWriteMouseScroll(event.getX(), event.getY(), wholeTicks, eventModifiers(event));
+                wroteToApplication = writeBytes(terminalSession.encodeMouseScroll(
+                        event.getX(),
+                        event.getY(),
+                        wholeTicks,
+                        eventModifiers(event),
+                        getWidth(),
+                        getHeight(),
+                        cellMetrics.get(),
+                        scrollbarReservedWidthPx()));
             }
             if (!wroteToApplication) {
                 scrollViewportBy(-wholeTicks);
@@ -605,10 +513,18 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
             return;
         }
 
-        var mouseTrackingEnabled = overContent && mouseTrackingEnabled();
+        var mouseTrackingEnabled = overContent && terminalSession.mouseTrackingEnabled();
         var wroteToApplication = false;
         if (mouseTrackingEnabled) {
-            wroteToApplication = encodeAndWriteMouseScroll(event.getX(), event.getY(), wholeRows, eventModifiers(event));
+            wroteToApplication = writeBytes(terminalSession.encodeMouseScroll(
+                    event.getX(),
+                    event.getY(),
+                    wholeRows,
+                    eventModifiers(event),
+                    getWidth(),
+                    getHeight(),
+                    cellMetrics.get(),
+                    scrollbarReservedWidthPx()));
         }
         if (!wroteToApplication) {
             scrollViewportBy(-wholeRows);
@@ -645,7 +561,7 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
         return true;
     }
 
-    private void scrollViewportTo(long targetOffset, ScrollbarInfo scrollbar) {
+    private void scrollViewportTo(long targetOffset, TerminalSession.ScrollbarInfo scrollbar) {
         var clampedOffset = Math.clamp(targetOffset, 0, scrollbar.scrollableRows());
         scrollViewportBy(clampedOffset - scrollbar.offset());
     }
@@ -655,128 +571,8 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
             return;
         }
 
-        try (var arena = Arena.ofConfined()) {
-            var behavior = GhosttyTerminalScrollViewport.allocate(arena);
-            GhosttyTerminalScrollViewport.tag(behavior, ghostty_vt_h.GHOSTTY_SCROLL_VIEWPORT_DELTA());
-            GhosttyTerminalScrollViewportValue.delta(GhosttyTerminalScrollViewport.value(behavior), deltaRows);
-            ghostty_vt_h.ghostty_terminal_scroll_viewport(terminal, behavior);
-        }
-        updateGhosttyRenderState(renderState, terminal);
+        terminalSession.scrollViewportBy(deltaRows);
         redraw();
-    }
-
-    private boolean mouseTrackingEnabled() {
-        try (var arena = Arena.ofConfined()) {
-            var mouseTracking = arena.allocate(ValueLayout.JAVA_BOOLEAN);
-            return ghostty_vt_h.ghostty_terminal_get(
-                    terminal,
-                    ghostty_vt_h.GHOSTTY_TERMINAL_DATA_MOUSE_TRACKING(),
-                    mouseTracking) == GHOSTTY_SUCCESS && mouseTracking.get(ValueLayout.JAVA_BOOLEAN, 0);
-        }
-    }
-
-    private boolean encodeAndWriteMouseScroll(double x, double y, int lineDelta, short mods) {
-        var button = lineDelta > 0
-                ? ghostty_vt_h.GHOSTTY_MOUSE_BUTTON_FOUR()
-                : ghostty_vt_h.GHOSTTY_MOUSE_BUTTON_FIVE();
-        var count = Math.abs(lineDelta);
-        var wrote = false;
-        refreshMouseEncoder(mouseEncoder, false);
-        for (var i = 0; i < count; i++) {
-            wrote |= encodeAndWriteMouseButton(
-                    mouseEncoder,
-                    mouseEvent,
-                    ghostty_vt_h.GHOSTTY_MOUSE_ACTION_PRESS(),
-                    button,
-                    x,
-                    y,
-                    mods);
-            wrote |= encodeAndWriteMouseButton(
-                    mouseEncoder,
-                    mouseEvent,
-                    ghostty_vt_h.GHOSTTY_MOUSE_ACTION_RELEASE(),
-                    button,
-                    x,
-                    y,
-                    mods);
-        }
-        return wrote;
-    }
-
-    private boolean encodeAndWriteMouseButton(
-            MemorySegment mouseEncoder,
-            MemorySegment mouseEvent,
-            int action,
-            int button,
-            double x,
-            double y,
-            short mods) {
-        try (var arena = Arena.ofConfined()) {
-            ghostty_vt_h.ghostty_mouse_event_set_action(mouseEvent, action);
-            ghostty_vt_h.ghostty_mouse_event_set_button(mouseEvent, button);
-            ghostty_vt_h.ghostty_mouse_event_set_mods(mouseEvent, mods);
-            var position = GhosttyMousePosition.allocate(arena);
-            GhosttyMousePosition.x(position, (float) x);
-            GhosttyMousePosition.y(position, (float) y);
-            ghostty_vt_h.ghostty_mouse_event_set_position(mouseEvent, position);
-
-            var written = arena.allocate(ValueLayout.JAVA_LONG);
-            var buffer = arena.allocate(KEY_BUFFER_SIZE);
-            var result = ghostty_vt_h.ghostty_mouse_encoder_encode(
-                    mouseEncoder,
-                    mouseEvent,
-                    buffer,
-                    buffer.byteSize(),
-                    written);
-            if (result == ghostty_vt_h.GHOSTTY_OUT_OF_SPACE()) {
-                var required = written.get(ValueLayout.JAVA_LONG, 0);
-                buffer = arena.allocate(required);
-                requireGhosttySuccess(
-                        ghostty_vt_h.ghostty_mouse_encoder_encode(
-                                mouseEncoder,
-                                mouseEvent,
-                                buffer,
-                                buffer.byteSize(),
-                                written),
-                        "ghostty_mouse_encoder_encode");
-            } else {
-                requireGhosttySuccess(result, "ghostty_mouse_encoder_encode");
-            }
-
-            var length = Math.toIntExact(written.get(ValueLayout.JAVA_LONG, 0));
-            if (length == 0) {
-                return false;
-            }
-            writeCommand(new WriteInput(buffer.asSlice(0, length).toArray(ValueLayout.JAVA_BYTE)));
-            return true;
-        }
-    }
-
-    private void refreshMouseEncoder(MemorySegment mouseEncoder, boolean anyButtonPressed) {
-        ghostty_vt_h.ghostty_mouse_encoder_setopt_from_terminal(mouseEncoder, terminal);
-        try (var arena = Arena.ofConfined()) {
-            var size = GhosttyMouseEncoderSize.allocate(arena);
-            GhosttyMouseEncoderSize.size(size, GhosttyMouseEncoderSize.sizeof());
-            GhosttyMouseEncoderSize.screen_width(size, Math.max(1, (int) Math.ceil(getWidth())));
-            GhosttyMouseEncoderSize.screen_height(size, Math.max(1, (int) Math.ceil(getHeight())));
-            GhosttyMouseEncoderSize.cell_width(size, cellMetrics.get().cellWidthPx());
-            GhosttyMouseEncoderSize.cell_height(size, cellMetrics.get().cellHeightPx());
-            GhosttyMouseEncoderSize.padding_top(size, 0);
-            GhosttyMouseEncoderSize.padding_bottom(size, 0);
-            GhosttyMouseEncoderSize.padding_right(size, (int) Math.ceil(scrollbarReservedWidthPx()));
-            GhosttyMouseEncoderSize.padding_left(size, 0);
-            ghostty_vt_h.ghostty_mouse_encoder_setopt(
-                    mouseEncoder,
-                    ghostty_vt_h.GHOSTTY_MOUSE_ENCODER_OPT_SIZE(),
-                    size);
-
-            var anyPressed = arena.allocate(ValueLayout.JAVA_BOOLEAN);
-            anyPressed.set(ValueLayout.JAVA_BOOLEAN, 0, anyButtonPressed);
-            ghostty_vt_h.ghostty_mouse_encoder_setopt(
-                    mouseEncoder,
-                    ghostty_vt_h.GHOSTTY_MOUSE_ENCODER_OPT_ANY_BUTTON_PRESSED(),
-                    anyPressed);
-        }
     }
 
     private static boolean isDiscreteWheelScroll(boolean scrollGestureActive, ScrollEvent event) {
@@ -851,65 +647,20 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
         return (short) mods;
     }
 
-    private double contentWidthPx() {
-        return Math.max(0, getWidth() - scrollbarReservedWidthPx());
-    }
-
     private boolean isInScrollbar(double x) {
-        return x >= contentWidthPx();
+        return x >= Math.max(0, getWidth() - scrollbarReservedWidthPx());
     }
 
     private static double scrollbarReservedWidthPx() {
         return SCROLLBAR_WIDTH_PX + 2 * SCROLLBAR_MARGIN_PX;
     }
 
-    private ScrollbarInfo scrollbarInfo() {
-        try (var arena = Arena.ofConfined()) {
-            var scrollbar = GhosttyTerminalScrollbar.allocate(arena);
-            if (ghostty_vt_h.ghostty_terminal_get(
-                    terminal,
-                    ghostty_vt_h.GHOSTTY_TERMINAL_DATA_SCROLLBAR(),
-                    scrollbar) != GHOSTTY_SUCCESS) {
-                return null;
-            }
-
-            var total = GhosttyTerminalScrollbar.total(scrollbar);
-            var visible = GhosttyTerminalScrollbar.len(scrollbar);
-            if (visible <= 0) {
-                return null;
-            }
-
-            var height = Math.max(0, getHeight());
-            var scrollableRows = Math.max(0, total - visible);
-            var thumbHeight = scrollableRows == 0
-                    ? 0
-                    : Math.max(MIN_SCROLLBAR_HEIGHT_PX, height * ((double) visible / total));
-            var thumbY = scrollableRows == 0
-                    ? 0
-                    : (height - thumbHeight) * ((double) GhosttyTerminalScrollbar.offset(scrollbar) / scrollableRows);
-            var left = contentWidthPx();
-            return new ScrollbarInfo(
-                    total,
-                    visible,
-                    GhosttyTerminalScrollbar.offset(scrollbar),
-                    left + SCROLLBAR_MARGIN_PX,
-                    height,
-                    thumbY,
-                    thumbHeight);
-        }
+    private TerminalSession.ScrollbarInfo scrollbarInfo() {
+        return terminalSession.scrollbarInfo(getWidth(), getHeight(), scrollbarReservedWidthPx(), MIN_SCROLLBAR_HEIGHT_PX);
     }
 
     private int viewportRowCount() {
-        try (var arena = Arena.ofConfined()) {
-            var rows = arena.allocate(ValueLayout.JAVA_SHORT);
-            if (ghostty_vt_h.ghostty_terminal_get(
-                    terminal,
-                    ghostty_vt_h.GHOSTTY_TERMINAL_DATA_ROWS(),
-                    rows) != GHOSTTY_SUCCESS) {
-                return Math.max(1, (int) Math.floor(getHeight() / cellMetrics.get().cellHeightPx()));
-            }
-            return Math.max(1, Short.toUnsignedInt(rows.get(ValueLayout.JAVA_SHORT, 0)));
-        }
+        return terminalSession.viewportRowCount(0, cellMetrics.get().cellHeightPx(), getHeight());
     }
 
     private boolean handleShortcut(KeyEvent event) {
@@ -924,11 +675,18 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
         }
         var paste = getPasteShortcut();
         if (paste != null && paste.match(event)) {
-            return pasteClipboard();
+            var text = Clipboard.getSystemClipboard().getString();
+            if (text == null || text.isEmpty()) {
+                return false;
+            }
+
+            writeCommand(new WriteInput(terminalSession.encodePaste(text, terminalSession.readMode(BRACKETED_PASTE_MODE))));
+            clearSelection();
+            return true;
         }
         var selectAll = getSelectAllShortcut();
         if (selectAll != null && selectAll.match(event)) {
-            var nextInputState = InputModel.select(inputState, selectAllSelection());
+            var nextInputState = InputModel.select(inputState, terminalSession.selectAllSelection());
             if (!nextInputState.equals(inputState)) {
                 inputState = nextInputState;
                 redraw();
@@ -936,17 +694,6 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
             return true;
         }
         return false;
-    }
-
-    private boolean pasteClipboard() {
-        var text = Clipboard.getSystemClipboard().getString();
-        if (text == null || text.isEmpty()) {
-            return false;
-        }
-
-        writeCommand(new WriteInput(encodePaste(text)));
-        clearSelection();
-        return true;
     }
 
     private void clearSelection() {
@@ -961,16 +708,11 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
         var previousInputState = inputState;
         inputState = transition.state();
 
-        var encoderReady = false;
         var wroteToPty = false;
         for (var output : transition.outputs()) {
             switch (output) {
                 case InputModel.EncodeOutput encodeOutput -> {
-                    if (!encoderReady) {
-                        refreshKeyEncoder();
-                        encoderReady = true;
-                    }
-                    var producedBytes = encodeAndWrite(encodeOutput);
+                    var producedBytes = terminalSession.encodeAndWrite(encodeOutput, isMacOptionAsAlt(), this::writeBytes);
                     inputState = InputModel.acknowledgeEncode(
                             inputState,
                             encodeOutput.code(),
@@ -996,178 +738,12 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
         return wroteToPty || redraw || !previousInputState.equals(inputState);
     }
 
-    private void refreshKeyEncoder() {
-        ghostty_vt_h.ghostty_key_encoder_setopt_from_terminal(keyEncoder, terminal);
-        try (var arena = Arena.ofConfined()) {
-            var option = arena.allocate(ValueLayout.JAVA_INT);
-            option.set(
-                    ValueLayout.JAVA_INT,
-                    0,
-                    isMacOptionAsAlt()
-                            ? ghostty_vt_h.GHOSTTY_OPTION_AS_ALT_TRUE()
-                            : ghostty_vt_h.GHOSTTY_OPTION_AS_ALT_FALSE());
-            ghostty_vt_h.ghostty_key_encoder_setopt(
-                    keyEncoder,
-                    ghostty_vt_h.GHOSTTY_KEY_ENCODER_OPT_MACOS_OPTION_AS_ALT(),
-                    option);
-        }
-    }
-
-    private boolean encodeAndWrite(InputModel.EncodeOutput output) {
-        try (var arena = Arena.ofConfined()) {
-            ghostty_vt_h.ghostty_key_event_set_action(keyEvent, output.action());
-            ghostty_vt_h.ghostty_key_event_set_key(keyEvent, output.ghosttyKey());
-            ghostty_vt_h.ghostty_key_event_set_mods(keyEvent, output.mods());
-            ghostty_vt_h.ghostty_key_event_set_consumed_mods(keyEvent, output.consumedMods());
-            ghostty_vt_h.ghostty_key_event_set_unshifted_codepoint(keyEvent, output.unshiftedCodepoint());
-            ghostty_vt_h.ghostty_key_event_set_composing(keyEvent, output.composing());
-
-            if (output.utf8().isEmpty()) {
-                ghostty_vt_h.ghostty_key_event_set_utf8(keyEvent, MemorySegment.NULL, 0);
-            } else {
-                var utf8 = output.utf8().getBytes(StandardCharsets.UTF_8);
-                ghostty_vt_h.ghostty_key_event_set_utf8(
-                        keyEvent,
-                        arena.allocateFrom(ValueLayout.JAVA_BYTE, utf8),
-                        utf8.length);
-            }
-
-            var written = arena.allocate(ValueLayout.JAVA_LONG);
-            var buffer = arena.allocate(KEY_BUFFER_SIZE);
-            var result = ghostty_vt_h.ghostty_key_encoder_encode(
-                    keyEncoder,
-                    keyEvent,
-                    buffer,
-                    buffer.byteSize(),
-                    written);
-            if (result == ghostty_vt_h.GHOSTTY_OUT_OF_SPACE()) {
-                var required = written.get(ValueLayout.JAVA_LONG, 0);
-                buffer = arena.allocate(required);
-                requireGhosttySuccess(
-                        ghostty_vt_h.ghostty_key_encoder_encode(
-                                keyEncoder,
-                                keyEvent,
-                                buffer,
-                                buffer.byteSize(),
-                                written),
-                        "ghostty_key_encoder_encode");
-            } else {
-                requireGhosttySuccess(result, "ghostty_key_encoder_encode");
-            }
-
-            var length = Math.toIntExact(written.get(ValueLayout.JAVA_LONG, 0));
-            if (length == 0) {
-                return false;
-            }
-            writeCommand(new WriteInput(buffer.asSlice(0, length).toArray(ValueLayout.JAVA_BYTE)));
-            return true;
-        }
-    }
-
-    private byte[] encodePaste(String text) {
-        var input = text.getBytes(StandardCharsets.UTF_8);
-        try (var arena = Arena.ofConfined()) {
-            var data = arena.allocateFrom(ValueLayout.JAVA_BYTE, input);
-            var written = arena.allocate(ValueLayout.JAVA_LONG);
-            var bracketed = readMode(BRACKETED_PASTE_MODE);
-            var result = ghostty_vt_h.ghostty_paste_encode(
-                    data,
-                    input.length,
-                    bracketed,
-                    MemorySegment.NULL,
-                    0,
-                    written);
-            if (result != GHOSTTY_SUCCESS && result != ghostty_vt_h.GHOSTTY_OUT_OF_SPACE()) {
-                requireGhosttySuccess(result, "ghostty_paste_encode");
-            }
-
-            var buffer = arena.allocate(Math.max(1, written.get(ValueLayout.JAVA_LONG, 0)));
-            requireGhosttySuccess(
-                    ghostty_vt_h.ghostty_paste_encode(
-                            data,
-                            input.length,
-                            bracketed,
-                            buffer,
-                            buffer.byteSize(),
-                            written),
-                    "ghostty_paste_encode");
-            var length = Math.toIntExact(written.get(ValueLayout.JAVA_LONG, 0));
-            return buffer.asSlice(0, length).toArray(ValueLayout.JAVA_BYTE);
-        }
-    }
-
-    private boolean readMode(short mode) {
-        try (var arena = Arena.ofConfined()) {
-            var value = arena.allocate(ValueLayout.JAVA_BOOLEAN);
-            return ghostty_vt_h.ghostty_terminal_mode_get(terminal, mode, value) == GHOSTTY_SUCCESS
-                    && value.get(ValueLayout.JAVA_BOOLEAN, 0);
-        }
-    }
-
     private String selectedText() {
-        var selection = inputState.selection();
-        if (selection.isEmpty()) {
-            return "";
-        }
-        return formatTerminalText(selection);
-    }
-
-    private String formatTerminalText(InputModel.Selection selection) {
-        try (var arena = Arena.ofConfined()) {
-            var formatterSelection = formatterSelection(arena, selection);
-            if (formatterSelection.address() == 0) {
-                return "";
-            }
-
-            var options = GhosttyFormatterTerminalOptions.allocate(arena);
-            GhosttyFormatterTerminalOptions.size(options, GhosttyFormatterTerminalOptions.sizeof());
-            GhosttyFormatterTerminalOptions.emit(options, ghostty_vt_h.GHOSTTY_FORMATTER_FORMAT_PLAIN());
-            GhosttyFormatterTerminalOptions.unwrap(options, true);
-            GhosttyFormatterTerminalOptions.trim(options, true);
-            GhosttyFormatterTerminalOptions.selection(options, formatterSelection);
-
-            var formatterPointer = arena.allocate(ValueLayout.ADDRESS);
-            requireGhosttySuccess(
-                    ghostty_vt_h.ghostty_formatter_terminal_new(MemorySegment.NULL, formatterPointer, terminal, options),
-                    "ghostty_formatter_terminal_new");
-            var formatter = formatterPointer.get(ValueLayout.ADDRESS, 0);
-            try {
-                var outputPointer = arena.allocate(ValueLayout.ADDRESS);
-                var outputLength = arena.allocate(ValueLayout.JAVA_LONG);
-                requireGhosttySuccess(
-                        ghostty_vt_h.ghostty_formatter_format_alloc(
-                                formatter,
-                                MemorySegment.NULL,
-                                outputPointer,
-                                outputLength),
-                        "ghostty_formatter_format_alloc");
-                var length = outputLength.get(ValueLayout.JAVA_LONG, 0);
-                if (length == 0) {
-                    return "";
-                }
-
-                var output = outputPointer.get(ValueLayout.ADDRESS, 0);
-                try {
-                    return new String(output.reinterpret(length).toArray(ValueLayout.JAVA_BYTE), StandardCharsets.UTF_8);
-                } finally {
-                    ghostty_vt_h.ghostty_free(MemorySegment.NULL, output, length);
-                }
-            } finally {
-                ghostty_vt_h.ghostty_formatter_free(formatter);
-            }
-        }
+        return terminalSession.selectedText(inputState.selection());
     }
 
     private InputModel.KeySnapshot snapshot(KeyEvent event) {
         return new InputModel.KeySnapshot(event.getCode(), event.isShiftDown(), event.isControlDown(), event.isAltDown(), event.isMetaDown());
-    }
-
-    private static String composedText(InputMethodEvent event) {
-        var builder = new StringBuilder();
-        for (InputMethodTextRun run : event.getComposed()) {
-            builder.append(run.getText());
-        }
-        return builder.toString();
     }
 
     private void redraw() {
@@ -1177,391 +753,22 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
             return;
         }
 
-        var graphics = getGraphicsContext2D();
-        var metrics = cellMetrics.get();
-        graphics.setFont(font.get());
-
-        try (var arena = Arena.ofConfined()) {
-            var colors = GhosttyRenderStateColors.allocate(arena);
-            GhosttyRenderStateColors.size(colors, GhosttyRenderStateColors.sizeof());
-            requireGhosttySuccess(
-                    ghostty_vt_h.ghostty_render_state_colors_get(renderState, colors),
-                    "ghostty_render_state_colors_get");
-
-            var defaultBackground = toFxColor(GhosttyRenderStateColors.background(colors));
-            graphics.setFill(defaultBackground);
-            graphics.fillRect(0, 0, width, height);
-
-            var rowIteratorPointer = arena.allocate(ValueLayout.ADDRESS);
-            rowIteratorPointer.set(ValueLayout.ADDRESS, 0, rowIterator);
-            requireGhosttySuccess(
-                    ghostty_vt_h.ghostty_render_state_get(
-                            renderState,
-                            ghostty_vt_h.GHOSTTY_RENDER_STATE_DATA_ROW_ITERATOR(),
-                            rowIteratorPointer),
-                    "ghostty_render_state_get(row_iterator)");
-
-            var rowCellsPointer = arena.allocate(ValueLayout.ADDRESS);
-            rowCellsPointer.set(ValueLayout.ADDRESS, 0, rowCells);
-            var graphemeLength = arena.allocate(ValueLayout.JAVA_INT);
-            var style = GhosttyStyle.allocate(arena);
-            GhosttyStyle.size(style, GhosttyStyle.sizeof());
-            var foreground = GhosttyColorRgb.allocate(arena);
-            var background = GhosttyColorRgb.allocate(arena);
-            var swappedColor = GhosttyColorRgb.allocate(arena);
-            var text = new StringBuilder(MAX_GRAPHEME_CODEPOINTS * 2);
-            var codepointsCapacity = MAX_GRAPHEME_CODEPOINTS;
-            var codepoints = arena.allocate(MemoryLayout.sequenceLayout(codepointsCapacity, ValueLayout.JAVA_INT));
-            var y = 0.0;
-
-            while (ghostty_vt_h.ghostty_render_state_row_iterator_next(rowIterator)) {
-                requireGhosttySuccess(
-                        ghostty_vt_h.ghostty_render_state_row_get(
-                                rowIterator,
-                                ghostty_vt_h.GHOSTTY_RENDER_STATE_ROW_DATA_CELLS(),
-                                rowCellsPointer),
-                        "ghostty_render_state_row_get(cells)");
-
-                var x = 0.0;
-                while (ghostty_vt_h.ghostty_render_state_row_cells_next(rowCells)) {
-                    requireGhosttySuccess(
-                            ghostty_vt_h.ghostty_render_state_row_cells_get(
-                                    rowCells,
-                                    ghostty_vt_h.GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_GRAPHEMES_LEN(),
-                                    graphemeLength),
-                            "ghostty_render_state_row_cells_get(graphemes_len)");
-                    var codePointCount = graphemeLength.get(ValueLayout.JAVA_INT, 0);
-                    if (codePointCount == 0) {
-                        if (ghostty_vt_h.ghostty_render_state_row_cells_get(
-                                rowCells,
-                                ghostty_vt_h.GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_BG_COLOR(),
-                                background) == GHOSTTY_SUCCESS) {
-                            graphics.setFill(toFxColor(background));
-                            graphics.fillRect(x, y, metrics.cellWidthPx(), metrics.cellHeightPx());
-                        }
-                        x += metrics.cellWidthPx();
-                        continue;
-                    }
-
-                    if (codePointCount > codepointsCapacity) {
-                        codepointsCapacity = codePointCount;
-                        codepoints = arena.allocate(MemoryLayout.sequenceLayout(codepointsCapacity, ValueLayout.JAVA_INT));
-                    }
-
-                    requireGhosttySuccess(
-                            ghostty_vt_h.ghostty_render_state_row_cells_get(
-                                    rowCells,
-                                    ghostty_vt_h.GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_GRAPHEMES_BUF(),
-                                    codepoints),
-                            "ghostty_render_state_row_cells_get(graphemes_buf)");
-                    GhosttyStyle.size(style, GhosttyStyle.sizeof());
-                    requireGhosttySuccess(
-                            ghostty_vt_h.ghostty_render_state_row_cells_get(
-                                    rowCells,
-                                    ghostty_vt_h.GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_STYLE(),
-                                    style),
-                            "ghostty_render_state_row_cells_get(style)");
-
-                    MemorySegment.copy(
-                            GhosttyRenderStateColors.foreground(colors),
-                            0,
-                            foreground,
-                            0,
-                            GhosttyColorRgb.sizeof());
-                    ghostty_vt_h.ghostty_render_state_row_cells_get(
-                            rowCells,
-                            ghostty_vt_h.GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_FG_COLOR(),
-                            foreground);
-
-                    var hasBackground = ghostty_vt_h.ghostty_render_state_row_cells_get(
-                            rowCells,
-                            ghostty_vt_h.GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_BG_COLOR(),
-                            background) == GHOSTTY_SUCCESS;
-                    if (!hasBackground) {
-                        MemorySegment.copy(
-                                GhosttyRenderStateColors.background(colors),
-                                0,
-                                background,
-                                0,
-                                GhosttyColorRgb.sizeof());
-                    }
-
-                    if (GhosttyStyle.inverse(style)) {
-                        MemorySegment.copy(background, 0, swappedColor, 0, GhosttyColorRgb.sizeof());
-                        MemorySegment.copy(foreground, 0, background, 0, GhosttyColorRgb.sizeof());
-                        MemorySegment.copy(swappedColor, 0, foreground, 0, GhosttyColorRgb.sizeof());
-                        hasBackground = true;
-                    }
-
-                    if (hasBackground) {
-                        graphics.setFill(toFxColor(background));
-                        graphics.fillRect(x, y, metrics.cellWidthPx(), metrics.cellHeightPx());
-                    }
-
-                    if (!GhosttyStyle.invisible(style)) {
-                        text.setLength(0);
-                        for (var i = 0; i < codePointCount; i++) {
-                            var codePoint = codepoints.get(ValueLayout.JAVA_INT, (long) i * Integer.BYTES);
-                            text.appendCodePoint(Character.isValidCodePoint(codePoint) ? codePoint : 0xFFFD);
-                        }
-                        var renderedText = text.toString();
-                        var baseline = y + metrics.baselineOffsetPx();
-                        graphics.setFill(toFxColor(foreground));
-
-                        // Text rendering: fake italic with a shear and fake bold with a second pass.
-                        if (GhosttyStyle.italic(style)) {
-                            graphics.save();
-                            graphics.translate(x, y);
-                            graphics.transform(1, 0, 0.2, 1, 0, 0);
-                            graphics.fillText(renderedText, 0, metrics.baselineOffsetPx());
-                            if (GhosttyStyle.bold(style)) {
-                                graphics.fillText(renderedText, 1, metrics.baselineOffsetPx());
-                            }
-                            graphics.restore();
-                        } else {
-                            graphics.fillText(renderedText, x, baseline);
-                            if (GhosttyStyle.bold(style)) {
-                                graphics.fillText(renderedText, x + 1, baseline);
-                            }
-                        }
-                    }
-
-                    x += metrics.cellWidthPx();
-                }
-
-                y += metrics.cellHeightPx();
-            }
-
-            renderSelectionOverlay(graphics, metrics);
-
-            // Cursor rendering.
-            var cursorVisible = arena.allocate(ValueLayout.JAVA_BOOLEAN);
-            requireGhosttySuccess(
-                    ghostty_vt_h.ghostty_render_state_get(
-                            renderState,
-                            ghostty_vt_h.GHOSTTY_RENDER_STATE_DATA_CURSOR_VISIBLE(),
-                            cursorVisible),
-                    "ghostty_render_state_get(cursor_visible)");
-            if (cursorVisible.get(ValueLayout.JAVA_BOOLEAN, 0)) {
-                var cursorInViewport = arena.allocate(ValueLayout.JAVA_BOOLEAN);
-                requireGhosttySuccess(
-                        ghostty_vt_h.ghostty_render_state_get(
-                                renderState,
-                                ghostty_vt_h.GHOSTTY_RENDER_STATE_DATA_CURSOR_VIEWPORT_HAS_VALUE(),
-                                cursorInViewport),
-                        "ghostty_render_state_get(cursor_viewport_has_value)");
-                if (cursorInViewport.get(ValueLayout.JAVA_BOOLEAN, 0)) {
-                    var cursorX = arena.allocate(ValueLayout.JAVA_SHORT);
-                    var cursorY = arena.allocate(ValueLayout.JAVA_SHORT);
-                    var cursorStyle = arena.allocate(ValueLayout.JAVA_INT);
-                    requireGhosttySuccess(
-                            ghostty_vt_h.ghostty_render_state_get(
-                                    renderState,
-                                    ghostty_vt_h.GHOSTTY_RENDER_STATE_DATA_CURSOR_VIEWPORT_X(),
-                                    cursorX),
-                            "ghostty_render_state_get(cursor_viewport_x)");
-                    requireGhosttySuccess(
-                            ghostty_vt_h.ghostty_render_state_get(
-                                    renderState,
-                                    ghostty_vt_h.GHOSTTY_RENDER_STATE_DATA_CURSOR_VIEWPORT_Y(),
-                                    cursorY),
-                            "ghostty_render_state_get(cursor_viewport_y)");
-                    requireGhosttySuccess(
-                            ghostty_vt_h.ghostty_render_state_get(
-                                    renderState,
-                                    ghostty_vt_h.GHOSTTY_RENDER_STATE_DATA_CURSOR_VISUAL_STYLE(),
-                                    cursorStyle),
-                            "ghostty_render_state_get(cursor_visual_style)");
-
-                    var cursorColor = GhosttyRenderStateColors.cursor_has_value(colors)
-                            ? toFxColor(GhosttyRenderStateColors.cursor(colors))
-                            : toFxColor(GhosttyRenderStateColors.foreground(colors));
-                    var cursorCellX = Short.toUnsignedInt(cursorX.get(ValueLayout.JAVA_SHORT, 0));
-                    var cursorCellY = Short.toUnsignedInt(cursorY.get(ValueLayout.JAVA_SHORT, 0));
-                    var cursorPixelX = cursorCellX * (double) metrics.cellWidthPx();
-                    var cursorPixelY = cursorCellY * (double) metrics.cellHeightPx();
-                    var cursorWidth = metrics.cellWidthPx();
-                    var cursorHeight = metrics.cellHeightPx();
-
-                    switch (cursorStyle.get(ValueLayout.JAVA_INT, 0)) {
-                        case CURSOR_STYLE_BAR -> {
-                            graphics.setFill(cursorColor);
-                            graphics.fillRect(cursorPixelX, cursorPixelY, Math.max(1, Math.ceil(cursorWidth / 6.0)), cursorHeight);
-                        }
-                        case CURSOR_STYLE_UNDERLINE -> {
-                            graphics.setFill(cursorColor);
-                            graphics.fillRect(
-                                    cursorPixelX,
-                                    cursorPixelY + cursorHeight - Math.max(1, cursorHeight / 8.0),
-                                    cursorWidth,
-                                    Math.max(1, cursorHeight / 8.0));
-                        }
-                        case CURSOR_STYLE_BLOCK_HOLLOW -> {
-                            graphics.setStroke(cursorColor);
-                            graphics.strokeRect(
-                                    cursorPixelX + 0.5,
-                                    cursorPixelY + 0.5,
-                                    Math.max(0, cursorWidth - 1),
-                                    Math.max(0, cursorHeight - 1));
-                        }
-                        default -> {
-                            graphics.setFill(cursorColor.deriveColor(0, 1, 1, BLOCK_CURSOR_ALPHA));
-                            graphics.fillRect(cursorPixelX, cursorPixelY, cursorWidth, cursorHeight);
-                        }
-                    }
-
-                    var preedit = inputState.preedit();
-                    if (!preedit.text().isEmpty()) {
-                        var codePointCount = preedit.text().codePointCount(0, preedit.text().length());
-                        var caret = Math.clamp(preedit.caretPosition(), 0, codePointCount);
-                        var preeditWidth = Math.max(metrics.cellWidthPx(), codePointCount * (double) metrics.cellWidthPx());
-                        graphics.setFill(PREEDIT_BACKGROUND);
-                        graphics.fillRect(cursorPixelX, cursorPixelY, preeditWidth, metrics.cellHeightPx());
-                        graphics.setFill(PREEDIT_FILL);
-                        graphics.fillText(preedit.text(), cursorPixelX, cursorPixelY + metrics.baselineOffsetPx());
-                        graphics.setStroke(PREEDIT_STROKE);
-                        graphics.strokeLine(
-                                cursorPixelX,
-                                cursorPixelY + metrics.cellHeightPx() - 1,
-                                cursorPixelX + preeditWidth,
-                                cursorPixelY + metrics.cellHeightPx() - 1);
-                        var caretX = cursorPixelX + caret * (double) metrics.cellWidthPx();
-                        graphics.strokeLine(caretX, cursorPixelY + 2, caretX, cursorPixelY + metrics.cellHeightPx() - 2);
-                    }
-                }
-            }
-
-            var scrollbar = scrollbarInfo();
-            if (scrollbar != null && scrollbar.scrollable()) {
-                graphics.setFill(Color.rgb(200, 200, 200, 0.5));
-                graphics.fillRect(scrollbar.thumbX(), scrollbar.thumbY(), SCROLLBAR_WIDTH_PX, scrollbar.thumbHeight());
-            }
-        }
-    }
-
-    private void renderSelectionOverlay(javafx.scene.canvas.GraphicsContext graphics, CellMetrics metrics) {
-        var selection = inputState.selection().normalized();
-        if (selection.isEmpty()) {
-            return;
-        }
-
-        try (var arena = Arena.ofConfined()) {
-            var cols = arena.allocate(ValueLayout.JAVA_SHORT);
-            var rows = arena.allocate(ValueLayout.JAVA_SHORT);
-            var scrollbar = GhosttyTerminalScrollbar.allocate(arena);
-            if (ghostty_vt_h.ghostty_terminal_get(terminal, ghostty_vt_h.GHOSTTY_TERMINAL_DATA_COLS(), cols) != GHOSTTY_SUCCESS
-                    || ghostty_vt_h.ghostty_terminal_get(terminal, ghostty_vt_h.GHOSTTY_TERMINAL_DATA_ROWS(), rows) != GHOSTTY_SUCCESS
-                    || ghostty_vt_h.ghostty_terminal_get(terminal, ghostty_vt_h.GHOSTTY_TERMINAL_DATA_SCROLLBAR(), scrollbar) != GHOSTTY_SUCCESS) {
-                return;
-            }
-
-            var columnCount = Short.toUnsignedInt(cols.get(ValueLayout.JAVA_SHORT, 0));
-            var rowCount = Short.toUnsignedInt(rows.get(ValueLayout.JAVA_SHORT, 0));
-            var viewportTop = Math.toIntExact(GhosttyTerminalScrollbar.offset(scrollbar));
-            var viewportBottom = viewportTop + rowCount - 1;
-            var from = selection.from();
-            var to = selection.to();
-            graphics.setFill(SELECTION_COLOR);
-            for (var screenRow = Math.max(from.y(), viewportTop); screenRow <= Math.min(to.y(), viewportBottom); screenRow++) {
-                var startColumn = selection.rectangle() || screenRow != from.y() ? 0 : from.x();
-                var endColumn = selection.rectangle() || screenRow != to.y() ? columnCount - 1 : to.x();
-                if (selection.rectangle()) {
-                    startColumn = Math.min(from.x(), to.x());
-                    endColumn = Math.max(from.x(), to.x());
-                }
-                startColumn = Math.max(0, Math.min(startColumn, columnCount - 1));
-                endColumn = Math.max(0, Math.min(endColumn, columnCount - 1));
-                if (startColumn > endColumn) {
-                    continue;
-                }
-
-                graphics.fillRect(
-                        startColumn * (double) metrics.cellWidthPx(),
-                        (screenRow - viewportTop) * (double) metrics.cellHeightPx(),
-                        (endColumn - startColumn + 1) * (double) metrics.cellWidthPx(),
-                        metrics.cellHeightPx());
-            }
-        }
+        terminalSession.render(
+                getGraphicsContext2D(),
+                width,
+                height,
+                font.get(),
+                cellMetrics.get(),
+                inputState,
+                scrollbarReservedWidthPx(),
+                SELECTION_COLOR,
+                PREEDIT_FILL,
+                PREEDIT_BACKGROUND,
+                PREEDIT_STROKE);
     }
 
     private CursorLocation currentCursorLocation() {
-        try (var arena = Arena.ofConfined()) {
-            var cursorVisible = arena.allocate(ValueLayout.JAVA_BOOLEAN);
-            if (ghostty_vt_h.ghostty_render_state_get(
-                    renderState,
-                    ghostty_vt_h.GHOSTTY_RENDER_STATE_DATA_CURSOR_VISIBLE(),
-                    cursorVisible) != GHOSTTY_SUCCESS
-                    || !cursorVisible.get(ValueLayout.JAVA_BOOLEAN, 0)) {
-                return null;
-            }
-
-            var cursorInViewport = arena.allocate(ValueLayout.JAVA_BOOLEAN);
-            if (ghostty_vt_h.ghostty_render_state_get(
-                    renderState,
-                    ghostty_vt_h.GHOSTTY_RENDER_STATE_DATA_CURSOR_VIEWPORT_HAS_VALUE(),
-                    cursorInViewport) != GHOSTTY_SUCCESS
-                    || !cursorInViewport.get(ValueLayout.JAVA_BOOLEAN, 0)) {
-                return null;
-            }
-
-            var cursorX = arena.allocate(ValueLayout.JAVA_SHORT);
-            var cursorY = arena.allocate(ValueLayout.JAVA_SHORT);
-            if (ghostty_vt_h.ghostty_render_state_get(
-                    renderState,
-                    ghostty_vt_h.GHOSTTY_RENDER_STATE_DATA_CURSOR_VIEWPORT_X(),
-                    cursorX) != GHOSTTY_SUCCESS
-                    || ghostty_vt_h.ghostty_render_state_get(
-                            renderState,
-                            ghostty_vt_h.GHOSTTY_RENDER_STATE_DATA_CURSOR_VIEWPORT_Y(),
-                            cursorY) != GHOSTTY_SUCCESS) {
-                return null;
-            }
-
-            var metrics = cellMetrics.get();
-            var cellX = Short.toUnsignedInt(cursorX.get(ValueLayout.JAVA_SHORT, 0));
-            var cellY = Short.toUnsignedInt(cursorY.get(ValueLayout.JAVA_SHORT, 0));
-            return new CursorLocation(
-                    cellX,
-                    cellY,
-                    cellX * (double) metrics.cellWidthPx(),
-                    cellY * (double) metrics.cellHeightPx());
-        }
-    }
-
-    private static void resizeGhosttyTerminal(
-            MemorySegment terminal,
-            int columns,
-            int rows,
-            int cellWidthPx,
-            int cellHeightPx) {
-        requireGhosttySuccess(
-                ghostty_vt_h.ghostty_terminal_resize(
-                        terminal,
-                        (short) columns,
-                        (short) rows,
-                        cellWidthPx,
-                        cellHeightPx),
-                "ghostty_terminal_resize");
-    }
-
-    // TODO: inline into redraw?
-    private static void updateGhosttyRenderState(MemorySegment renderState, MemorySegment terminal) {
-        requireGhosttySuccess(
-                ghostty_vt_h.ghostty_render_state_update(renderState, terminal),
-                "ghostty_render_state_update");
-    }
-
-    private static Color toFxColor(MemorySegment color) {
-        return Color.rgb(
-                Byte.toUnsignedInt(GhosttyColorRgb.r(color)),
-                Byte.toUnsignedInt(GhosttyColorRgb.g(color)),
-                Byte.toUnsignedInt(GhosttyColorRgb.b(color)));
-    }
-
-    private static void requireGhosttySuccess(int result, String operation) {
-        if (result != GHOSTTY_SUCCESS) {
-            throw new IllegalStateException(operation + " failed with result=" + result);
-        }
+        return terminalSession.currentCursorLocation(cellMetrics.get());
     }
 
     private static final class ProcessOutputDrain extends AnimationTimer {
@@ -1599,11 +806,7 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
                     offset += chunk.length;
                 }
 
-                try (var arena = Arena.ofConfined()) {
-                    var nativeBytes = arena.allocateFrom(ValueLayout.JAVA_BYTE, bytes);
-                    ghostty_vt_h.ghostty_terminal_vt_write(canvas.terminal, nativeBytes, bytes.length);
-                }
-                updateGhosttyRenderState(canvas.renderState, canvas.terminal);
+                canvas.terminalSession.writeToTerminal(bytes);
                 canvas.redraw();
             }
             if (chunks.get(chunks.size() - 1) == PROCESS_OUTPUT_COMPLETE) {
@@ -1674,118 +877,20 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
 
     }
 
-    private record CellMetrics(int cellWidthPx, int cellHeightPx, int baselineOffsetPx) {
+    static record CellMetrics(int cellWidthPx, int cellHeightPx, int baselineOffsetPx) {
 
     }
 
-    private record CursorLocation(int cellX, int cellY, double pixelX, double pixelY) {
+    static record CursorLocation(int cellX, int cellY, double pixelX, double pixelY) {
 
     }
 
-    private record ScrollbarInfo(
-            long total,
-            long visible,
-            long offset,
-            double thumbX,
-            double height,
-            double thumbY,
-            double thumbHeight) {
-
-        boolean scrollable() {
-            return total > visible && visible > 0 && height > 0;
+    private boolean writeBytes(byte[] bytes) {
+        if (bytes.length == 0) {
+            return false;
         }
-
-        long scrollableRows() {
-            return Math.max(0, total - visible);
-        }
-
-        double movableHeight() {
-            return Math.max(0, height - thumbHeight);
-        }
-
-        boolean containsThumb(double y) {
-            return thumbHeight > 0 && y >= thumbY && y <= thumbY + thumbHeight;
-        }
-
-        double thumbGrabRatio(double y) {
-            if (thumbHeight <= 0) {
-                return 0;
-            }
-            return Math.clamp((y - thumbY) / thumbHeight, 0.0, 1.0);
-        }
-
-        long targetOffsetForTrackPress(double y) {
-            if (!scrollable()) {
-                return offset;
-            }
-
-            var movableHeight = movableHeight();
-            if (movableHeight == 0) {
-                return 0;
-            }
-
-            var thumbTop = Math.clamp(y - thumbHeight / 2.0, 0.0, movableHeight);
-            return (long) ((thumbTop / movableHeight) * scrollableRows());
-        }
-
-        long targetOffsetForDrag(double y, double thumbGrabRatio) {
-            if (!scrollable()) {
-                return offset;
-            }
-
-            var movableHeight = movableHeight();
-            if (movableHeight == 0) {
-                return 0;
-            }
-
-            var grabOffset = Math.clamp(thumbGrabRatio, 0.0, 1.0) * thumbHeight;
-            var thumbTop = Math.clamp(y - grabOffset, 0.0, movableHeight);
-            return (long) ((thumbTop / movableHeight) * scrollableRows());
-        }
-    }
-
-    private InputModel.Selection selectAllSelection() {
-        try (var arena = Arena.ofConfined()) {
-            var cols = arena.allocate(ValueLayout.JAVA_SHORT);
-            var totalRows = arena.allocate(ValueLayout.JAVA_LONG);
-            if (ghostty_vt_h.ghostty_terminal_get(terminal, ghostty_vt_h.GHOSTTY_TERMINAL_DATA_COLS(), cols) != GHOSTTY_SUCCESS
-                    || ghostty_vt_h.ghostty_terminal_get(terminal, ghostty_vt_h.GHOSTTY_TERMINAL_DATA_TOTAL_ROWS(), totalRows) != GHOSTTY_SUCCESS) {
-                return InputModel.Selection.empty();
-            }
-
-            var columnCount = Short.toUnsignedInt(cols.get(ValueLayout.JAVA_SHORT, 0));
-            var rowCount = Math.toIntExact(totalRows.get(ValueLayout.JAVA_LONG, 0));
-            return columnCount == 0 || rowCount == 0
-                    ? InputModel.Selection.empty()
-                    : InputModel.Selection.linear(
-                            new InputModel.ScreenPoint(0, 0),
-                            new InputModel.ScreenPoint(columnCount - 1, rowCount - 1));
-        }
-    }
-
-    private MemorySegment formatterSelection(Arena arena, InputModel.Selection selection) {
-        var normalized = selection.normalized();
-        if (normalized.isEmpty()) {
-            return MemorySegment.NULL;
-        }
-
-        var ghosttySelection = GhosttySelection.allocate(arena);
-        GhosttySelection.size(ghosttySelection, GhosttySelection.sizeof());
-        GhosttySelection.rectangle(ghosttySelection, normalized.rectangle());
-        return writeGridRef(arena, normalized.from(), GhosttySelection.start(ghosttySelection))
-                && writeGridRef(arena, normalized.to(), GhosttySelection.end(ghosttySelection))
-                ? ghosttySelection
-                : MemorySegment.NULL;
-    }
-
-    private boolean writeGridRef(Arena arena, InputModel.ScreenPoint point, MemorySegment outGridRef) {
-        var coordinate = GhosttyPointCoordinate.allocate(arena);
-        GhosttyPointCoordinate.x(coordinate, (short) point.x());
-        GhosttyPointCoordinate.y(coordinate, point.y());
-        var ghosttyPoint = GhosttyPoint.allocate(arena);
-        GhosttyPoint.tag(ghosttyPoint, ghostty_vt_h.GHOSTTY_POINT_TAG_SCREEN());
-        GhosttyPointValue.coordinate(GhosttyPoint.value(ghosttyPoint), coordinate);
-        return ghostty_vt_h.ghostty_terminal_grid_ref(terminal, ghosttyPoint, outGridRef) == GHOSTTY_SUCCESS;
+        writeCommand(new WriteInput(bytes));
+        return true;
     }
 
 }
