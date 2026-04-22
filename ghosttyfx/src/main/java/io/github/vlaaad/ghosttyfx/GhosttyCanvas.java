@@ -494,7 +494,11 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
     }
 
     private void handleKeyTyped(KeyEvent event) {
-        if (applyTransition(GhosttyInputModel.onKeyTyped(inputState, event.getCharacter()))) {
+        if (applyTransition(GhosttyInputModel.onKeyTyped(
+                inputState,
+                inputPlatform,
+                event.isMetaDown(),
+                event.getCharacter()))) {
             event.consume();
         }
     }

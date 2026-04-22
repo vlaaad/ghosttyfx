@@ -24,7 +24,7 @@ final class GhosttyInputModelTest {
         assertTrue(pressed.outputs().isEmpty());
         assertEquals(1, pressed.state().deferredPresses().size());
 
-        var typed = GhosttyInputModel.onKeyTyped(pressed.state(), "a");
+        var typed = GhosttyInputModel.onKeyTyped(pressed.state(), GhosttyInputModel.Platform.LINUX, false, "a");
         assertEquals(1, typed.outputs().size());
         assertEquals(
                 new GhosttyInputModel.EncodeOutput(
@@ -48,7 +48,7 @@ final class GhosttyInputModelTest {
                 false,
                 snapshot(KeyCode.A, true, false, false, false));
 
-        var typed = GhosttyInputModel.onKeyTyped(pressed.state(), "A");
+        var typed = GhosttyInputModel.onKeyTyped(pressed.state(), GhosttyInputModel.Platform.LINUX, false, "A");
         assertEquals(
                 new GhosttyInputModel.EncodeOutput(
                         KeyCode.A,
@@ -99,7 +99,7 @@ final class GhosttyInputModelTest {
                 snapshot(KeyCode.Q, false, true, true, false));
         assertTrue(pressed.outputs().isEmpty());
 
-        var typed = GhosttyInputModel.onKeyTyped(pressed.state(), "@");
+        var typed = GhosttyInputModel.onKeyTyped(pressed.state(), GhosttyInputModel.Platform.LINUX, false, "@");
         assertEquals(
                 new GhosttyInputModel.EncodeOutput(
                         KeyCode.Q,
@@ -122,7 +122,7 @@ final class GhosttyInputModelTest {
                 snapshot(KeyCode.E, false, false, true, false));
         assertTrue(pressed.outputs().isEmpty());
 
-        var typed = GhosttyInputModel.onKeyTyped(pressed.state(), "€");
+        var typed = GhosttyInputModel.onKeyTyped(pressed.state(), GhosttyInputModel.Platform.MACOS, false, "€");
         assertEquals(
                 new GhosttyInputModel.EncodeOutput(
                         KeyCode.E,
@@ -173,7 +173,7 @@ final class GhosttyInputModelTest {
                         snapshot(KeyCode.NUMPAD6, false, false, true, false))
                 .state();
 
-        var typed = GhosttyInputModel.onKeyTyped(state, "A");
+        var typed = GhosttyInputModel.onKeyTyped(state, GhosttyInputModel.Platform.WINDOWS, false, "A");
         assertEquals(1, typed.outputs().size());
         assertEquals(new GhosttyInputModel.RawTextOutput("A"), typed.outputs().getFirst());
         assertTrue(typed.state().deferredPresses().isEmpty());
@@ -195,7 +195,7 @@ final class GhosttyInputModelTest {
                         snapshot(KeyCode.A))
                 .state();
 
-        var typed = GhosttyInputModel.onKeyTyped(state, "á");
+        var typed = GhosttyInputModel.onKeyTyped(state, GhosttyInputModel.Platform.LINUX, false, "á");
         assertEquals(new GhosttyInputModel.RawTextOutput("á"), typed.outputs().getFirst());
         assertTrue(typed.state().deferredPresses().isEmpty());
     }
@@ -238,7 +238,7 @@ final class GhosttyInputModelTest {
         var released = GhosttyInputModel.onKeyReleased(pressed.state(), snapshot(KeyCode.A));
         assertTrue(released.outputs().isEmpty());
 
-        var typed = GhosttyInputModel.onKeyTyped(released.state(), "a");
+        var typed = GhosttyInputModel.onKeyTyped(released.state(), GhosttyInputModel.Platform.LINUX, false, "a");
         assertEquals(2, typed.outputs().size());
         assertEquals(
                 new GhosttyInputModel.EncodeOutput(
@@ -262,6 +262,18 @@ final class GhosttyInputModelTest {
                         "",
                         false),
                 typed.outputs().get(1));
+    }
+
+    @Test
+    void ignoresMacCommandTypedText() {
+        var typed = GhosttyInputModel.onKeyTyped(
+                GhosttyInputModel.initialState(),
+                GhosttyInputModel.Platform.MACOS,
+                true,
+                "a");
+
+        assertTrue(typed.outputs().isEmpty());
+        assertEquals(GhosttyInputModel.initialState(), typed.state());
     }
 
     @Test

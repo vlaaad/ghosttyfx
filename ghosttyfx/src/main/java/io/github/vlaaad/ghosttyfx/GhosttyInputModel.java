@@ -132,7 +132,11 @@ final class GhosttyInputModel {
                 false);
     }
 
-    static Transition onKeyTyped(InputState state, String text) {
+    static Transition onKeyTyped(InputState state, Platform platform, boolean metaDown, String text) {
+        if (platform == Platform.MACOS && metaDown) {
+            return new Transition(state, List.of(), false);
+        }
+
         if (shouldIgnoreTypedText(text)) {
             return new Transition(state, List.of(), false);
         }
