@@ -761,6 +761,7 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
                 cellMetrics.get(),
                 inputState,
                 scrollbarReservedWidthPx(),
+                MIN_SCROLLBAR_HEIGHT_PX,
                 SELECTION_COLOR,
                 PREEDIT_FILL,
                 PREEDIT_BACKGROUND,

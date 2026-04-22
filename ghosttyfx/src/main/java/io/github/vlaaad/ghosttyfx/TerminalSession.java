@@ -435,6 +435,7 @@ final class TerminalSession implements AutoCloseable {
             GhosttyCanvas.CellMetrics metrics,
             InputModel.InputState inputState,
             double scrollbarWidthPx,
+            double minScrollbarHeightPx,
             Color selectionColor,
             Color preeditFill,
             Color preeditBackground,
@@ -594,10 +595,10 @@ final class TerminalSession implements AutoCloseable {
             renderSelectionOverlay(graphics, metrics, inputState.selection(), selectionColor);
             renderCursor(graphics, metrics, inputState.preedit(), colors, preeditFill, preeditBackground, preeditStroke);
 
-            var scrollbar = scrollbarInfo(width, height, scrollbarWidthPx, 10);
+            var scrollbar = scrollbarInfo(width, height, scrollbarWidthPx, minScrollbarHeightPx);
             if (scrollbar != null && scrollbar.scrollable()) {
                 graphics.setFill(Color.rgb(200, 200, 200, 0.5));
-                graphics.fillRect(scrollbar.thumbX(), scrollbar.thumbY(), 6, scrollbar.thumbHeight());
+                graphics.fillRect(scrollbar.thumbX(), scrollbar.thumbY(), scrollbarWidthPx, scrollbar.thumbHeight());
             }
         }
     }
