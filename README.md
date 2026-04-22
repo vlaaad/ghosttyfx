@@ -13,6 +13,10 @@ Generated per-platform `jextract` bindings for `libghostty-vt`.
 - `ghostty`: pinned Git submodule for the upstream Ghostty source tree
 - `ghostling`: pinned Git submodule for the upstream Ghostling reference app
 
+## Next steps
+1. mouse handling: hyperlinks, terminal, selection
+2. refactor: GhosttyCanvas is too big. Split into, e.g. PtySession for process, TerminalSession for all memory and native calls, Viewport for view math... maybe input?
+
 ## Local Build
 
 Run:
