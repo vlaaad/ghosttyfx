@@ -4,6 +4,8 @@ import com.pty4j.PtyProcessBuilder;
 import com.pty4j.WinSize;
 import io.github.vlaaad.ghostty.bindings.GhosttyColorRgb;
 import io.github.vlaaad.ghostty.bindings.GhosttyFormatterTerminalOptions;
+import io.github.vlaaad.ghostty.bindings.GhosttyMouseEncoderSize;
+import io.github.vlaaad.ghostty.bindings.GhosttyMousePosition;
 import io.github.vlaaad.ghostty.bindings.GhosttyPoint;
 import io.github.vlaaad.ghostty.bindings.GhosttyPointCoordinate;
 import io.github.vlaaad.ghostty.bindings.GhosttyPointValue;
@@ -12,6 +14,8 @@ import io.github.vlaaad.ghostty.bindings.GhosttySelection;
 import io.github.vlaaad.ghostty.bindings.GhosttyStyle;
 import io.github.vlaaad.ghostty.bindings.GhosttyTerminalOptions;
 import io.github.vlaaad.ghostty.bindings.GhosttyTerminalScrollbar;
+import io.github.vlaaad.ghostty.bindings.GhosttyTerminalScrollViewport;
+import io.github.vlaaad.ghostty.bindings.GhosttyTerminalScrollViewportValue;
 import io.github.vlaaad.ghostty.bindings.ghostty_vt_h;
 import java.lang.foreign.Arena;
 import java.lang.foreign.MemoryLayout;
@@ -49,6 +53,10 @@ import javafx.scene.input.KeyCode;
 import javafx.scene.input.KeyCodeCombination;
 import javafx.scene.input.KeyCombination;
 import javafx.scene.input.KeyEvent;
+import javafx.scene.input.MouseButton;
+import javafx.scene.input.MouseEvent;
+import javafx.scene.input.ScrollEvent;
+import javafx.scene.input.ScrollEvent.VerticalTextScrollUnits;
 import javafx.scene.paint.Color;
 import javafx.scene.text.Font;
 import javafx.scene.text.Text;
@@ -67,6 +75,7 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
     private static final short FOCUS_EVENT_MODE = 1004;
     private static final short BRACKETED_PASTE_MODE = 2004;
     private static final long INITIAL_MAX_SCROLLBACK = 1_000;
+    private static final double DEFAULT_SCROLL_MULTIPLIER_Y = 40;
     private static final double SCROLLBAR_WIDTH_PX = 6;
     private static final double SCROLLBAR_MARGIN_PX = 2;
     private static final double MIN_SCROLLBAR_HEIGHT_PX = 10;
@@ -87,6 +96,8 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
     private final MemorySegment rowCells;
     private final MemorySegment keyEncoder;
     private final MemorySegment keyEvent;
+    private final MemorySegment mouseEncoder;
+    private final MemorySegment mouseEvent;
     private final Future<?> ioTask;
     private final BlockingQueue<ProcCommand> procCommands = new ArrayBlockingQueue<>(16_384);
     private final BlockingQueue<byte[]> processOutputChunks = new ArrayBlockingQueue<>(256);
@@ -188,6 +199,19 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
                     ghostty_vt_h.ghostty_key_event_new(MemorySegment.NULL, keyEventPointer),
                     "ghostty_key_event_new");
             keyEvent = keyEventPointer.get(ValueLayout.ADDRESS, 0);
+
+            var mouseEncoderPointer = arena.allocate(ValueLayout.ADDRESS);
+            requireGhosttySuccess(
+                    ghostty_vt_h.ghostty_mouse_encoder_new(MemorySegment.NULL, mouseEncoderPointer),
+                    "ghostty_mouse_encoder_new");
+            mouseEncoder = mouseEncoderPointer.get(ValueLayout.ADDRESS, 0);
+
+            var mouseEventPointer = arena.allocate(ValueLayout.ADDRESS);
+            requireGhosttySuccess(
+                    ghostty_vt_h.ghostty_mouse_event_new(MemorySegment.NULL, mouseEventPointer),
+                    "ghostty_mouse_event_new");
+            mouseEvent = mouseEventPointer.get(ValueLayout.ADDRESS, 0);
+
         }
         updateGhosttyRenderState(renderState, terminal);
 
@@ -198,6 +222,11 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
         widthProperty().addListener((_, _, _) -> handleCanvasResize());
         heightProperty().addListener((_, _, _) -> handleCanvasResize());
         focusedProperty().addListener((_, _, focused) -> handleFocusChange(focused));
+        setOnMousePressed(this::handleMousePressed);
+        setOnMouseDragged(this::handleMouseDragged);
+        setOnMouseReleased(this::handleMouseReleased);
+        setOnMouseClicked(this::handleMouseClicked);
+        setOnScroll(this::handleScroll);
         setOnKeyPressed(this::handleKeyPressed);
         setOnKeyReleased(this::handleKeyReleased);
         setOnKeyTyped(this::handleKeyTyped);
@@ -209,6 +238,8 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
         ioTask = IO.submit(() -> runProcess(command, cwd, environment));
         CLEANER.register(this, () -> {
             ioTask.cancel(true);
+            ghostty_vt_h.ghostty_mouse_event_free(mouseEvent);
+            ghostty_vt_h.ghostty_mouse_encoder_free(mouseEncoder);
             ghostty_vt_h.ghostty_key_event_free(keyEvent);
             ghostty_vt_h.ghostty_key_encoder_free(keyEncoder);
             ghostty_vt_h.ghostty_render_state_row_cells_free(rowCells);
@@ -225,7 +256,7 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
 
     @Override
     public double prefWidth(double height) {
-        return INITIAL_COLUMNS * cellMetrics.get().cellWidthPx();
+        return INITIAL_COLUMNS * cellMetrics.get().cellWidthPx() + scrollbarReservedWidthPx();
     }
 
     @Override
@@ -405,7 +436,7 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
             return;
         }
         var metrics = cellMetrics.get();
-        var nextColumns = Math.clamp((int) Math.floor(getWidth() / metrics.cellWidthPx()), 1, MAX_GHOSTTY_DIMENSION);
+        var nextColumns = Math.clamp((int) Math.floor(contentWidthPx() / metrics.cellWidthPx()), 1, MAX_GHOSTTY_DIMENSION);
         var nextRows = Math.clamp((int) Math.floor(getHeight() / metrics.cellHeightPx()), 1, MAX_GHOSTTY_DIMENSION);
         resizeGhosttyTerminal(terminal, nextColumns, nextRows, metrics.cellWidthPx(), metrics.cellHeightPx());
         writeCommand(new ResizePty(nextColumns, nextRows));
@@ -472,6 +503,380 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
                 event.getCaretPosition(),
                 event.getCommitted()))) {
             event.consume();
+        }
+    }
+
+    private void handleMousePressed(MouseEvent event) {
+        requestFocus();
+        event.consume();
+        if (event.getButton() != MouseButton.PRIMARY) {
+            return;
+        }
+
+        if (isInScrollbar(event.getX())) {
+            handleScrollbarPress(event.getY());
+        }
+    }
+
+    private void handleMouseDragged(MouseEvent event) {
+        event.consume();
+        if (!inputState.mouseState().scrollbarDragging()) {
+            return;
+        }
+
+        if (!event.isPrimaryButtonDown()) {
+            inputState = GhosttyInputModel.stopScrollbarDrag(inputState);
+            return;
+        }
+
+        dragScrollbarTo(event.getY());
+    }
+
+    private void handleMouseReleased(MouseEvent event) {
+        event.consume();
+        if (event.getButton() != MouseButton.PRIMARY) {
+            return;
+        }
+
+        var nextInputState = GhosttyInputModel.stopScrollbarDrag(inputState);
+        if (!nextInputState.equals(inputState)) {
+            inputState = nextInputState;
+        }
+    }
+
+    private void handleMouseClicked(MouseEvent event) {
+        event.consume();
+    }
+
+    private void handleScroll(ScrollEvent event) {
+        event.consume();
+        var overContent = !isInScrollbar(event.getX());
+        if (isDiscreteWheelScroll(event)) {
+            var tickDelta = discreteScrollDeltaTicks(event);
+            if (tickDelta == 0) {
+                return;
+            }
+
+            var scrollUpdate = GhosttyInputModel.accumulateDiscreteScroll(inputState, tickDelta);
+            inputState = scrollUpdate.state();
+            var wholeTicks = scrollUpdate.lineDelta();
+            if (wholeTicks == 0) {
+                return;
+            }
+
+            var wroteToApplication = false;
+            if (overContent && mouseTrackingEnabled()) {
+                wroteToApplication = encodeAndWriteMouseScroll(event.getX(), event.getY(), wholeTicks, eventModifiers(event));
+            }
+            if (!wroteToApplication) {
+                scrollViewportBy(-3L * wholeTicks);
+            }
+            return;
+        }
+
+        var deltaRows = smoothScrollDeltaRows(event);
+        if (deltaRows == 0) {
+            return;
+        }
+
+        var scrollUpdate = GhosttyInputModel.accumulateSmoothScroll(inputState, deltaRows);
+        inputState = scrollUpdate.state();
+        var wholeRows = scrollUpdate.lineDelta();
+        if (wholeRows == 0) {
+            return;
+        }
+
+        var wroteToApplication = false;
+        if (overContent && mouseTrackingEnabled()) {
+            wroteToApplication = encodeAndWriteMouseScroll(event.getX(), event.getY(), wholeRows, eventModifiers(event));
+        }
+        if (!wroteToApplication) {
+            scrollViewportBy(-wholeRows);
+        }
+    }
+
+    private boolean handleScrollbarPress(double y) {
+        var scrollbar = scrollbarInfo();
+        if (scrollbar == null || !scrollbar.scrollable()) {
+            return false;
+        }
+
+        if (scrollbar.containsThumb(y)) {
+            inputState = GhosttyInputModel.startScrollbarDrag(inputState, scrollbar.thumbGrabRatio(y));
+            return true;
+        }
+
+        scrollViewportTo(scrollbar.targetOffsetForTrackPress(y), scrollbar);
+        var updatedScrollbar = scrollbarInfo();
+        if (updatedScrollbar != null && updatedScrollbar.scrollable()) {
+            inputState = GhosttyInputModel.startScrollbarDrag(inputState, updatedScrollbar.thumbGrabRatio(y));
+        }
+        return true;
+    }
+
+    private boolean dragScrollbarTo(double y) {
+        var scrollbar = scrollbarInfo();
+        if (scrollbar == null || !scrollbar.scrollable()) {
+            inputState = GhosttyInputModel.stopScrollbarDrag(inputState);
+            return false;
+        }
+
+        scrollViewportTo(scrollbar.targetOffsetForDrag(y, inputState.mouseState().scrollbarThumbGrabRatio()), scrollbar);
+        return true;
+    }
+
+    private void scrollViewportTo(long targetOffset, ScrollbarInfo scrollbar) {
+        var clampedOffset = Math.clamp(targetOffset, 0, scrollbar.scrollableRows());
+        scrollViewportBy(clampedOffset - scrollbar.offset());
+    }
+
+    private void scrollViewportBy(long deltaRows) {
+        if (deltaRows == 0) {
+            return;
+        }
+
+        try (var arena = Arena.ofConfined()) {
+            var behavior = GhosttyTerminalScrollViewport.allocate(arena);
+            GhosttyTerminalScrollViewport.tag(behavior, ghostty_vt_h.GHOSTTY_SCROLL_VIEWPORT_DELTA());
+            GhosttyTerminalScrollViewportValue.delta(GhosttyTerminalScrollViewport.value(behavior), deltaRows);
+            ghostty_vt_h.ghostty_terminal_scroll_viewport(terminal, behavior);
+        }
+        updateGhosttyRenderState(renderState, terminal);
+        redraw();
+    }
+
+    private boolean mouseTrackingEnabled() {
+        try (var arena = Arena.ofConfined()) {
+            var mouseTracking = arena.allocate(ValueLayout.JAVA_BOOLEAN);
+            return ghostty_vt_h.ghostty_terminal_get(
+                    terminal,
+                    ghostty_vt_h.GHOSTTY_TERMINAL_DATA_MOUSE_TRACKING(),
+                    mouseTracking) == GHOSTTY_SUCCESS && mouseTracking.get(ValueLayout.JAVA_BOOLEAN, 0);
+        }
+    }
+
+    private boolean encodeAndWriteMouseScroll(double x, double y, int lineDelta, short mods) {
+        var button = lineDelta > 0
+                ? ghostty_vt_h.GHOSTTY_MOUSE_BUTTON_FOUR()
+                : ghostty_vt_h.GHOSTTY_MOUSE_BUTTON_FIVE();
+        var count = Math.abs(lineDelta);
+        var wrote = false;
+        refreshMouseEncoder(mouseEncoder, false);
+        for (var i = 0; i < count; i++) {
+            wrote |= encodeAndWriteMouseButton(
+                    mouseEncoder,
+                    mouseEvent,
+                    ghostty_vt_h.GHOSTTY_MOUSE_ACTION_PRESS(),
+                    button,
+                    x,
+                    y,
+                    mods);
+            wrote |= encodeAndWriteMouseButton(
+                    mouseEncoder,
+                    mouseEvent,
+                    ghostty_vt_h.GHOSTTY_MOUSE_ACTION_RELEASE(),
+                    button,
+                    x,
+                    y,
+                    mods);
+        }
+        return wrote;
+    }
+
+    private boolean encodeAndWriteMouseButton(
+            MemorySegment mouseEncoder,
+            MemorySegment mouseEvent,
+            int action,
+            int button,
+            double x,
+            double y,
+            short mods) {
+        try (var arena = Arena.ofConfined()) {
+            ghostty_vt_h.ghostty_mouse_event_set_action(mouseEvent, action);
+            ghostty_vt_h.ghostty_mouse_event_set_button(mouseEvent, button);
+            ghostty_vt_h.ghostty_mouse_event_set_mods(mouseEvent, mods);
+            var position = GhosttyMousePosition.allocate(arena);
+            GhosttyMousePosition.x(position, (float) x);
+            GhosttyMousePosition.y(position, (float) y);
+            ghostty_vt_h.ghostty_mouse_event_set_position(mouseEvent, position);
+
+            var written = arena.allocate(ValueLayout.JAVA_LONG);
+            var buffer = arena.allocate(KEY_BUFFER_SIZE);
+            var result = ghostty_vt_h.ghostty_mouse_encoder_encode(
+                    mouseEncoder,
+                    mouseEvent,
+                    buffer,
+                    buffer.byteSize(),
+                    written);
+            if (result == ghostty_vt_h.GHOSTTY_OUT_OF_SPACE()) {
+                var required = written.get(ValueLayout.JAVA_LONG, 0);
+                buffer = arena.allocate(required);
+                requireGhosttySuccess(
+                        ghostty_vt_h.ghostty_mouse_encoder_encode(
+                                mouseEncoder,
+                                mouseEvent,
+                                buffer,
+                                buffer.byteSize(),
+                                written),
+                        "ghostty_mouse_encoder_encode");
+            } else {
+                requireGhosttySuccess(result, "ghostty_mouse_encoder_encode");
+            }
+
+            var length = Math.toIntExact(written.get(ValueLayout.JAVA_LONG, 0));
+            if (length == 0) {
+                return false;
+            }
+            writeCommand(new WriteInput(buffer.asSlice(0, length).toArray(ValueLayout.JAVA_BYTE)));
+            return true;
+        }
+    }
+
+    private void refreshMouseEncoder(MemorySegment mouseEncoder, boolean anyButtonPressed) {
+        ghostty_vt_h.ghostty_mouse_encoder_setopt_from_terminal(mouseEncoder, terminal);
+        try (var arena = Arena.ofConfined()) {
+            var size = GhosttyMouseEncoderSize.allocate(arena);
+            GhosttyMouseEncoderSize.size(size, GhosttyMouseEncoderSize.sizeof());
+            GhosttyMouseEncoderSize.screen_width(size, Math.max(1, (int) Math.ceil(getWidth())));
+            GhosttyMouseEncoderSize.screen_height(size, Math.max(1, (int) Math.ceil(getHeight())));
+            GhosttyMouseEncoderSize.cell_width(size, cellMetrics.get().cellWidthPx());
+            GhosttyMouseEncoderSize.cell_height(size, cellMetrics.get().cellHeightPx());
+            GhosttyMouseEncoderSize.padding_top(size, 0);
+            GhosttyMouseEncoderSize.padding_bottom(size, 0);
+            GhosttyMouseEncoderSize.padding_right(size, (int) Math.ceil(scrollbarReservedWidthPx()));
+            GhosttyMouseEncoderSize.padding_left(size, 0);
+            ghostty_vt_h.ghostty_mouse_encoder_setopt(
+                    mouseEncoder,
+                    ghostty_vt_h.GHOSTTY_MOUSE_ENCODER_OPT_SIZE(),
+                    size);
+
+            var anyPressed = arena.allocate(ValueLayout.JAVA_BOOLEAN);
+            anyPressed.set(ValueLayout.JAVA_BOOLEAN, 0, anyButtonPressed);
+            ghostty_vt_h.ghostty_mouse_encoder_setopt(
+                    mouseEncoder,
+                    ghostty_vt_h.GHOSTTY_MOUSE_ENCODER_OPT_ANY_BUTTON_PRESSED(),
+                    anyPressed);
+        }
+    }
+
+    private static boolean isDiscreteWheelScroll(ScrollEvent event) {
+        return event.getTouchCount() == 0 && !event.isInertia() && event.getTotalDeltaY() == 0;
+    }
+
+    private static double discreteScrollDeltaTicks(ScrollEvent event) {
+        if (event.getDeltaY() == 0) {
+            return 0;
+        }
+
+        var multiplierY = event.getMultiplierY();
+        var deltaTicks = multiplierY != 0
+                ? event.getDeltaY() / multiplierY
+                : event.getDeltaY() / DEFAULT_SCROLL_MULTIPLIER_Y;
+        if (!Double.isFinite(deltaTicks) || deltaTicks == 0) {
+            return 0;
+        }
+
+        return deltaTicks > 0
+                ? Math.max(deltaTicks, 1.0)
+                : Math.min(deltaTicks, -1.0);
+    }
+
+    private double smoothScrollDeltaRows(ScrollEvent event) {
+        if (event.getTextDeltaYUnits() == VerticalTextScrollUnits.LINES && event.getTextDeltaY() != 0) {
+            return event.getTextDeltaY();
+        }
+        if (event.getTextDeltaYUnits() == VerticalTextScrollUnits.PAGES && event.getTextDeltaY() != 0) {
+            return event.getTextDeltaY() * viewportRowCount();
+        }
+        if (event.getDeltaY() == 0) {
+            return 0;
+        }
+        return event.getDeltaY() / cellMetrics.get().cellHeightPx();
+    }
+
+    private static short eventModifiers(MouseEvent event) {
+        return eventModifiers(event.isShiftDown(), event.isControlDown(), event.isAltDown(), event.isMetaDown());
+    }
+
+    private static short eventModifiers(ScrollEvent event) {
+        return eventModifiers(event.isShiftDown(), event.isControlDown(), event.isAltDown(), event.isMetaDown());
+    }
+
+    private static short eventModifiers(boolean shiftDown, boolean controlDown, boolean altDown, boolean metaDown) {
+        var mods = 0;
+        if (shiftDown) {
+            mods |= ghostty_vt_h.GHOSTTY_MODS_SHIFT();
+        }
+        if (controlDown) {
+            mods |= ghostty_vt_h.GHOSTTY_MODS_CTRL();
+        }
+        if (altDown) {
+            mods |= ghostty_vt_h.GHOSTTY_MODS_ALT();
+        }
+        if (metaDown) {
+            mods |= ghostty_vt_h.GHOSTTY_MODS_SUPER();
+        }
+        return (short) mods;
+    }
+
+    private double contentWidthPx() {
+        return Math.max(0, getWidth() - scrollbarReservedWidthPx());
+    }
+
+    private boolean isInScrollbar(double x) {
+        return x >= contentWidthPx();
+    }
+
+    private static double scrollbarReservedWidthPx() {
+        return SCROLLBAR_WIDTH_PX + 2 * SCROLLBAR_MARGIN_PX;
+    }
+
+    private ScrollbarInfo scrollbarInfo() {
+        try (var arena = Arena.ofConfined()) {
+            var scrollbar = GhosttyTerminalScrollbar.allocate(arena);
+            if (ghostty_vt_h.ghostty_terminal_get(
+                    terminal,
+                    ghostty_vt_h.GHOSTTY_TERMINAL_DATA_SCROLLBAR(),
+                    scrollbar) != GHOSTTY_SUCCESS) {
+                return null;
+            }
+
+            var total = GhosttyTerminalScrollbar.total(scrollbar);
+            var visible = GhosttyTerminalScrollbar.len(scrollbar);
+            if (visible <= 0) {
+                return null;
+            }
+
+            var height = Math.max(0, getHeight());
+            var scrollableRows = Math.max(0, total - visible);
+            var thumbHeight = scrollableRows == 0
+                    ? 0
+                    : Math.max(MIN_SCROLLBAR_HEIGHT_PX, height * ((double) visible / total));
+            var thumbY = scrollableRows == 0
+                    ? 0
+                    : (height - thumbHeight) * ((double) GhosttyTerminalScrollbar.offset(scrollbar) / scrollableRows);
+            var left = contentWidthPx();
+            return new ScrollbarInfo(
+                    total,
+                    visible,
+                    GhosttyTerminalScrollbar.offset(scrollbar),
+                    left + SCROLLBAR_MARGIN_PX,
+                    height,
+                    thumbY,
+                    thumbHeight);
+        }
+    }
+
+    private int viewportRowCount() {
+        try (var arena = Arena.ofConfined()) {
+            var rows = arena.allocate(ValueLayout.JAVA_SHORT);
+            if (ghostty_vt_h.ghostty_terminal_get(
+                    terminal,
+                    ghostty_vt_h.GHOSTTY_TERMINAL_DATA_ROWS(),
+                    rows) != GHOSTTY_SUCCESS) {
+                return Math.max(1, (int) Math.floor(getHeight() / cellMetrics.get().cellHeightPx()));
+            }
+            return Math.max(1, Short.toUnsignedInt(rows.get(ValueLayout.JAVA_SHORT, 0)));
         }
     }
 
@@ -994,26 +1399,10 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
                 }
             }
 
-            var scrollbar = GhosttyTerminalScrollbar.allocate(arena);
-            if (ghostty_vt_h.ghostty_terminal_get(
-                    terminal,
-                    ghostty_vt_h.GHOSTTY_TERMINAL_DATA_SCROLLBAR(),
-                    scrollbar) == GHOSTTY_SUCCESS) {
-                var total = GhosttyTerminalScrollbar.total(scrollbar);
-                var visible = GhosttyTerminalScrollbar.len(scrollbar);
-                if (total > visible && visible > 0) {
-                    var canvasHeight = getHeight();
-                    var thumbHeight = Math.max(MIN_SCROLLBAR_HEIGHT_PX, canvasHeight * ((double) visible / total));
-                    var scrollable = total - visible;
-                    var thumbY = scrollable == 0
-                            ? canvasHeight - thumbHeight
-                            : (canvasHeight - thumbHeight) * ((double) GhosttyTerminalScrollbar.offset(scrollbar) / scrollable);
-                    var thumbX = getWidth() - SCROLLBAR_WIDTH_PX - SCROLLBAR_MARGIN_PX;
-                    if (thumbX >= 0) {
-                        graphics.setFill(Color.rgb(200, 200, 200, 0.5));
-                        graphics.fillRect(thumbX, thumbY, SCROLLBAR_WIDTH_PX, thumbHeight);
-                    }
-                }
+            var scrollbar = scrollbarInfo();
+            if (scrollbar != null && scrollbar.scrollable()) {
+                graphics.setFill(Color.rgb(200, 200, 200, 0.5));
+                graphics.fillRect(scrollbar.thumbX(), scrollbar.thumbY(), SCROLLBAR_WIDTH_PX, scrollbar.thumbHeight());
             }
         }
     }
@@ -1259,6 +1648,68 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
 
     private record CursorLocation(int cellX, int cellY, double pixelX, double pixelY) {
 
+    }
+
+    private record ScrollbarInfo(
+            long total,
+            long visible,
+            long offset,
+            double thumbX,
+            double height,
+            double thumbY,
+            double thumbHeight) {
+
+        boolean scrollable() {
+            return total > visible && visible > 0 && height > 0;
+        }
+
+        long scrollableRows() {
+            return Math.max(0, total - visible);
+        }
+
+        double movableHeight() {
+            return Math.max(0, height - thumbHeight);
+        }
+
+        boolean containsThumb(double y) {
+            return thumbHeight > 0 && y >= thumbY && y <= thumbY + thumbHeight;
+        }
+
+        double thumbGrabRatio(double y) {
+            if (thumbHeight <= 0) {
+                return 0;
+            }
+            return Math.clamp((y - thumbY) / thumbHeight, 0.0, 1.0);
+        }
+
+        long targetOffsetForTrackPress(double y) {
+            if (!scrollable()) {
+                return offset;
+            }
+
+            var movableHeight = movableHeight();
+            if (movableHeight == 0) {
+                return 0;
+            }
+
+            var thumbTop = Math.clamp(y - thumbHeight / 2.0, 0.0, movableHeight);
+            return (long) ((thumbTop / movableHeight) * scrollableRows());
+        }
+
+        long targetOffsetForDrag(double y, double thumbGrabRatio) {
+            if (!scrollable()) {
+                return offset;
+            }
+
+            var movableHeight = movableHeight();
+            if (movableHeight == 0) {
+                return 0;
+            }
+
+            var grabOffset = Math.clamp(thumbGrabRatio, 0.0, 1.0) * thumbHeight;
+            var thumbTop = Math.clamp(y - grabOffset, 0.0, movableHeight);
+            return (long) ((thumbTop / movableHeight) * scrollableRows());
+        }
     }
 
     private GhosttyInputModel.Selection selectAllSelection() {

@@ -13,7 +13,7 @@ final class GhosttyInputModel {
     private GhosttyInputModel() {}
 
     static InputState initialState() {
-        return new InputState(Set.of(), Set.of(), List.of(), false, Preedit.empty(), Selection.empty());
+        return new InputState(Set.of(), Set.of(), List.of(), false, Preedit.empty(), Selection.empty(), MouseState.initial());
     }
 
     static InputState select(InputState state, Selection selection) {
@@ -210,7 +210,50 @@ final class GhosttyInputModel {
     }
 
     static InputState onFocusLost(InputState state) {
-        return new InputState(Set.of(), Set.of(), List.of(), false, Preedit.empty(), state.selection());
+        return new InputState(Set.of(), Set.of(), List.of(), false, Preedit.empty(), state.selection(), MouseState.initial());
+    }
+
+    static InputState startScrollbarDrag(InputState state, double thumbGrabRatio) {
+        var nextMouseState = state.mouseState()
+                .withScrollbarThumbGrabRatio(Math.clamp(thumbGrabRatio, 0.0, 1.0))
+                .withScrollbarDragging(true);
+        return state.mouseState().equals(nextMouseState)
+                ? state
+                : state.withMouseState(nextMouseState);
+    }
+
+    static InputState stopScrollbarDrag(InputState state) {
+        return state.mouseState().scrollbarDragging()
+                ? state.withMouseState(state.mouseState()
+                        .withScrollbarDragging(false)
+                        .withScrollbarThumbGrabRatio(0))
+                : state;
+    }
+
+    static ScrollUpdate accumulateDiscreteScroll(InputState state, double deltaTicks) {
+        if (deltaTicks == 0 || !Double.isFinite(deltaTicks)) {
+            return new ScrollUpdate(state, 0);
+        }
+
+        var totalTicks = state.mouseState().discreteScrollRemainder() + deltaTicks;
+        var wholeTicks = (int) totalTicks;
+        var remainderTicks = totalTicks - wholeTicks;
+        return new ScrollUpdate(
+                state.withMouseState(state.mouseState().withDiscreteScrollRemainder(remainderTicks)),
+                wholeTicks);
+    }
+
+    static ScrollUpdate accumulateSmoothScroll(InputState state, double deltaRows) {
+        if (deltaRows == 0 || !Double.isFinite(deltaRows)) {
+            return new ScrollUpdate(state, 0);
+        }
+
+        var totalRows = state.mouseState().smoothScrollRemainderRows() + deltaRows;
+        var wholeRows = (int) totalRows;
+        var remainderRows = totalRows - wholeRows;
+        return new ScrollUpdate(
+                state.withMouseState(state.mouseState().withSmoothScrollRemainderRows(remainderRows)),
+                wholeRows);
     }
 
     static InputState acknowledgeEncode(InputState state, KeyCode code, int action, boolean producedBytes) {
@@ -447,30 +490,61 @@ final class GhosttyInputModel {
             List<PendingPress> deferredPresses,
             boolean altGraphDown,
             Preedit preedit,
-            Selection selection) {
+            Selection selection,
+            MouseState mouseState) {
 
         InputState withPressedKeys(Set<KeyCode> pressedKeys) {
-            return new InputState(pressedKeys, emittedKeys, deferredPresses, altGraphDown, preedit, selection);
+            return new InputState(pressedKeys, emittedKeys, deferredPresses, altGraphDown, preedit, selection, mouseState);
         }
 
         InputState withEmittedKeys(Set<KeyCode> emittedKeys) {
-            return new InputState(pressedKeys, emittedKeys, deferredPresses, altGraphDown, preedit, selection);
+            return new InputState(pressedKeys, emittedKeys, deferredPresses, altGraphDown, preedit, selection, mouseState);
         }
 
         InputState withDeferredPresses(List<PendingPress> deferredPresses) {
-            return new InputState(pressedKeys, emittedKeys, deferredPresses, altGraphDown, preedit, selection);
+            return new InputState(pressedKeys, emittedKeys, deferredPresses, altGraphDown, preedit, selection, mouseState);
         }
 
         InputState withAltGraphDown(boolean altGraphDown) {
-            return new InputState(pressedKeys, emittedKeys, deferredPresses, altGraphDown, preedit, selection);
+            return new InputState(pressedKeys, emittedKeys, deferredPresses, altGraphDown, preedit, selection, mouseState);
         }
 
         InputState withPreedit(Preedit preedit) {
-            return new InputState(pressedKeys, emittedKeys, deferredPresses, altGraphDown, preedit, selection);
+            return new InputState(pressedKeys, emittedKeys, deferredPresses, altGraphDown, preedit, selection, mouseState);
         }
 
         InputState withSelection(Selection selection) {
-            return new InputState(pressedKeys, emittedKeys, deferredPresses, altGraphDown, preedit, selection);
+            return new InputState(pressedKeys, emittedKeys, deferredPresses, altGraphDown, preedit, selection, mouseState);
+        }
+
+        InputState withMouseState(MouseState mouseState) {
+            return new InputState(pressedKeys, emittedKeys, deferredPresses, altGraphDown, preedit, selection, mouseState);
+        }
+    }
+
+    record MouseState(
+            double discreteScrollRemainder,
+            double smoothScrollRemainderRows,
+            boolean scrollbarDragging,
+            double scrollbarThumbGrabRatio) {
+        static MouseState initial() {
+            return new MouseState(0, 0, false, 0);
+        }
+
+        MouseState withDiscreteScrollRemainder(double discreteScrollRemainder) {
+            return new MouseState(discreteScrollRemainder, smoothScrollRemainderRows, scrollbarDragging, scrollbarThumbGrabRatio);
+        }
+
+        MouseState withSmoothScrollRemainderRows(double smoothScrollRemainderRows) {
+            return new MouseState(discreteScrollRemainder, smoothScrollRemainderRows, scrollbarDragging, scrollbarThumbGrabRatio);
+        }
+
+        MouseState withScrollbarDragging(boolean scrollbarDragging) {
+            return new MouseState(discreteScrollRemainder, smoothScrollRemainderRows, scrollbarDragging, scrollbarThumbGrabRatio);
+        }
+
+        MouseState withScrollbarThumbGrabRatio(double scrollbarThumbGrabRatio) {
+            return new MouseState(discreteScrollRemainder, smoothScrollRemainderRows, scrollbarDragging, scrollbarThumbGrabRatio);
         }
     }
 
@@ -492,6 +566,9 @@ final class GhosttyInputModel {
     }
 
     record Transition(InputState state, List<Output> outputs, boolean redraw) {
+    }
+
+    record ScrollUpdate(InputState state, int lineDelta) {
     }
 
     private static Transition emitImmediate(
