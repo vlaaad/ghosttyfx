@@ -213,6 +213,18 @@ final class GhosttyInputModel {
         return new InputState(Set.of(), Set.of(), List.of(), false, Preedit.empty(), state.selection(), MouseState.initial());
     }
 
+    static InputState startScrollGesture(InputState state) {
+        return state.mouseState().scrollGestureActive()
+                ? state
+                : state.withMouseState(state.mouseState().withScrollGestureActive(true));
+    }
+
+    static InputState stopScrollGesture(InputState state) {
+        return state.mouseState().scrollGestureActive()
+                ? state.withMouseState(state.mouseState().withScrollGestureActive(false))
+                : state;
+    }
+
     static InputState startScrollbarDrag(InputState state, double thumbGrabRatio) {
         var nextMouseState = state.mouseState()
                 .withScrollbarThumbGrabRatio(Math.clamp(thumbGrabRatio, 0.0, 1.0))
@@ -525,26 +537,31 @@ final class GhosttyInputModel {
     record MouseState(
             double discreteScrollRemainder,
             double smoothScrollRemainderRows,
+            boolean scrollGestureActive,
             boolean scrollbarDragging,
             double scrollbarThumbGrabRatio) {
         static MouseState initial() {
-            return new MouseState(0, 0, false, 0);
+            return new MouseState(0, 0, false, false, 0);
         }
 
         MouseState withDiscreteScrollRemainder(double discreteScrollRemainder) {
-            return new MouseState(discreteScrollRemainder, smoothScrollRemainderRows, scrollbarDragging, scrollbarThumbGrabRatio);
+            return new MouseState(discreteScrollRemainder, smoothScrollRemainderRows, scrollGestureActive, scrollbarDragging, scrollbarThumbGrabRatio);
         }
 
         MouseState withSmoothScrollRemainderRows(double smoothScrollRemainderRows) {
-            return new MouseState(discreteScrollRemainder, smoothScrollRemainderRows, scrollbarDragging, scrollbarThumbGrabRatio);
+            return new MouseState(discreteScrollRemainder, smoothScrollRemainderRows, scrollGestureActive, scrollbarDragging, scrollbarThumbGrabRatio);
+        }
+
+        MouseState withScrollGestureActive(boolean scrollGestureActive) {
+            return new MouseState(discreteScrollRemainder, smoothScrollRemainderRows, scrollGestureActive, scrollbarDragging, scrollbarThumbGrabRatio);
         }
 
         MouseState withScrollbarDragging(boolean scrollbarDragging) {
-            return new MouseState(discreteScrollRemainder, smoothScrollRemainderRows, scrollbarDragging, scrollbarThumbGrabRatio);
+            return new MouseState(discreteScrollRemainder, smoothScrollRemainderRows, scrollGestureActive, scrollbarDragging, scrollbarThumbGrabRatio);
         }
 
         MouseState withScrollbarThumbGrabRatio(double scrollbarThumbGrabRatio) {
-            return new MouseState(discreteScrollRemainder, smoothScrollRemainderRows, scrollbarDragging, scrollbarThumbGrabRatio);
+            return new MouseState(discreteScrollRemainder, smoothScrollRemainderRows, scrollGestureActive, scrollbarDragging, scrollbarThumbGrabRatio);
         }
     }
 

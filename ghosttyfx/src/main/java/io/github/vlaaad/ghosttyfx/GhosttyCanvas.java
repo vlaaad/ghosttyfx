@@ -79,6 +79,7 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
     private static final double SCROLLBAR_WIDTH_PX = 6;
     private static final double SCROLLBAR_MARGIN_PX = 2;
     private static final double MIN_SCROLLBAR_HEIGHT_PX = 10;
+    private static final double SCROLL_TOTAL_DELTA_EPSILON = 1e-6;
     private static final double BLOCK_CURSOR_ALPHA = 0.5;
     private static final int CURSOR_STYLE_BAR = 0;
     private static final int CURSOR_STYLE_UNDERLINE = 2;
@@ -226,6 +227,8 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
         setOnMouseDragged(this::handleMouseDragged);
         setOnMouseReleased(this::handleMouseReleased);
         setOnMouseClicked(this::handleMouseClicked);
+        addEventHandler(ScrollEvent.SCROLL_STARTED, this::handleScrollStarted);
+        addEventHandler(ScrollEvent.SCROLL_FINISHED, this::handleScrollFinished);
         setOnScroll(this::handleScroll);
         setOnKeyPressed(this::handleKeyPressed);
         setOnKeyReleased(this::handleKeyReleased);
@@ -548,10 +551,21 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
         event.consume();
     }
 
+    private void handleScrollStarted(ScrollEvent event) {
+        inputState = GhosttyInputModel.startScrollGesture(inputState);
+        event.consume();
+    }
+
+    private void handleScrollFinished(ScrollEvent event) {
+        inputState = GhosttyInputModel.stopScrollGesture(inputState);
+        event.consume();
+    }
+
     private void handleScroll(ScrollEvent event) {
         event.consume();
         var overContent = !isInScrollbar(event.getX());
-        if (isDiscreteWheelScroll(event)) {
+        var discrete = isDiscreteWheelScroll(inputState.mouseState().scrollGestureActive(), event);
+        if (discrete) {
             var tickDelta = discreteScrollDeltaTicks(event);
             if (tickDelta == 0) {
                 return;
@@ -564,12 +578,13 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
                 return;
             }
 
+            var mouseTrackingEnabled = overContent && mouseTrackingEnabled();
             var wroteToApplication = false;
-            if (overContent && mouseTrackingEnabled()) {
+            if (mouseTrackingEnabled) {
                 wroteToApplication = encodeAndWriteMouseScroll(event.getX(), event.getY(), wholeTicks, eventModifiers(event));
             }
             if (!wroteToApplication) {
-                scrollViewportBy(-3L * wholeTicks);
+                scrollViewportBy(-wholeTicks);
             }
             return;
         }
@@ -586,8 +601,9 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
             return;
         }
 
+        var mouseTrackingEnabled = overContent && mouseTrackingEnabled();
         var wroteToApplication = false;
-        if (overContent && mouseTrackingEnabled()) {
+        if (mouseTrackingEnabled) {
             wroteToApplication = encodeAndWriteMouseScroll(event.getX(), event.getY(), wholeRows, eventModifiers(event));
         }
         if (!wroteToApplication) {
@@ -759,8 +775,20 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
         }
     }
 
-    private static boolean isDiscreteWheelScroll(ScrollEvent event) {
-        return event.getTouchCount() == 0 && !event.isInertia() && event.getTotalDeltaY() == 0;
+    private static boolean isDiscreteWheelScroll(boolean scrollGestureActive, ScrollEvent event) {
+        if (scrollGestureActive || event.getTouchCount() != 0 || event.isInertia()) {
+            return false;
+        }
+
+        if (event.getTextDeltaYUnits() != VerticalTextScrollUnits.NONE) {
+            return Math.abs(event.getTextDeltaY()) >= 1;
+        }
+
+        if (Math.abs(event.getTotalDeltaY() - event.getDeltaY()) <= SCROLL_TOTAL_DELTA_EPSILON) {
+            return true;
+        }
+
+        return Math.abs(event.getTotalDeltaY()) <= SCROLL_TOTAL_DELTA_EPSILON;
     }
 
     private static double discreteScrollDeltaTicks(ScrollEvent event) {

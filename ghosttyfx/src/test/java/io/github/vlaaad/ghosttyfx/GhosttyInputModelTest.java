@@ -1,6 +1,7 @@
 package io.github.vlaaad.ghosttyfx;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.github.vlaaad.ghostty.bindings.ghostty_vt_h;
@@ -261,6 +262,15 @@ final class GhosttyInputModelTest {
                         "",
                         false),
                 typed.outputs().get(1));
+    }
+
+    @Test
+    void tracksScrollGestureInsideInputState() {
+        var state = GhosttyInputModel.startScrollGesture(GhosttyInputModel.initialState());
+        assertTrue(state.mouseState().scrollGestureActive());
+
+        state = GhosttyInputModel.stopScrollGesture(state);
+        assertFalse(state.mouseState().scrollGestureActive());
     }
 
     private static GhosttyInputModel.KeySnapshot snapshot(KeyCode code) {
