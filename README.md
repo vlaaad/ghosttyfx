@@ -20,6 +20,8 @@ Generated per-platform `jextract` bindings for `libghostty-vt`.
 5. terminal callbacks
 6. kitty graphics
 7. mouse scrolling over git log — should be sent?
+8. more shortcuts like pgup/pgdown
+9. customization/styles
 
 ## Local Build
 
