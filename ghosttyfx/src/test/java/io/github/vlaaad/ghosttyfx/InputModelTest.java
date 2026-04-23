@@ -12,22 +12,22 @@ final class InputModelTest {
     @Test
     void classifiesEveryKeyCode() {
         for (var keyCode : KeyCode.values()) {
-            var classification = InputModel.classify(keyCode);
+            var classification = KeyInput.classify(keyCode);
             assertTrue(classification != null);
         }
     }
 
     @Test
     void encodesPrintableInput() {
-        var state = InputModel.initialState();
-        var pressed = InputModel.onKeyPressed(state, InputModel.Platform.LINUX, false, snapshot(KeyCode.A));
+        var state = KeyInput.initialState();
+        var pressed = KeyInput.onKeyPressed(state, KeyInput.Platform.LINUX, false, snapshot(KeyCode.A));
         assertTrue(pressed.outputs().isEmpty());
         assertEquals(1, pressed.state().deferredPresses().size());
 
-        var typed = InputModel.onKeyTyped(pressed.state(), InputModel.Platform.LINUX, false, "a");
+        var typed = KeyInput.onKeyTyped(pressed.state(), KeyInput.Platform.LINUX, false, "a");
         assertEquals(1, typed.outputs().size());
         assertEquals(
-                new InputModel.EncodeOutput(
+                new KeyInput.EncodeOutput(
                         KeyCode.A,
                         ghostty_vt_h.GHOSTTY_KEY_ACTION_PRESS(),
                         ghostty_vt_h.GHOSTTY_KEY_A(),
@@ -41,16 +41,16 @@ final class InputModelTest {
 
     @Test
     void encodesShiftedPrintableInputWithConsumedShift() {
-        var state = InputModel.initialState();
-        var pressed = InputModel.onKeyPressed(
+        var state = KeyInput.initialState();
+        var pressed = KeyInput.onKeyPressed(
                 state,
-                InputModel.Platform.LINUX,
+                KeyInput.Platform.LINUX,
                 false,
                 snapshot(KeyCode.A, true, false, false, false));
 
-        var typed = InputModel.onKeyTyped(pressed.state(), InputModel.Platform.LINUX, false, "A");
+        var typed = KeyInput.onKeyTyped(pressed.state(), KeyInput.Platform.LINUX, false, "A");
         assertEquals(
-                new InputModel.EncodeOutput(
+                new KeyInput.EncodeOutput(
                         KeyCode.A,
                         ghostty_vt_h.GHOSTTY_KEY_ACTION_PRESS(),
                         ghostty_vt_h.GHOSTTY_KEY_A(),
@@ -64,14 +64,14 @@ final class InputModelTest {
 
     @Test
     void encodesCtrlComboImmediately() {
-        var transition = InputModel.onKeyPressed(
-                InputModel.initialState(),
-                InputModel.Platform.LINUX,
+        var transition = KeyInput.onKeyPressed(
+                KeyInput.initialState(),
+                KeyInput.Platform.LINUX,
                 false,
                 snapshot(KeyCode.C, false, true, false, false));
 
         assertEquals(
-                new InputModel.EncodeOutput(
+                new KeyInput.EncodeOutput(
                         KeyCode.C,
                         ghostty_vt_h.GHOSTTY_KEY_ACTION_PRESS(),
                         ghostty_vt_h.GHOSTTY_KEY_C(),
@@ -85,23 +85,23 @@ final class InputModelTest {
 
     @Test
     void defersAltGrText() {
-        var state = InputModel.onKeyPressed(
-                        InputModel.initialState(),
-                        InputModel.Platform.LINUX,
+        var state = KeyInput.onKeyPressed(
+                        KeyInput.initialState(),
+                        KeyInput.Platform.LINUX,
                         false,
                         snapshot(KeyCode.ALT_GRAPH))
                 .state();
 
-        var pressed = InputModel.onKeyPressed(
+        var pressed = KeyInput.onKeyPressed(
                 state,
-                InputModel.Platform.LINUX,
+                KeyInput.Platform.LINUX,
                 false,
                 snapshot(KeyCode.Q, false, true, true, false));
         assertTrue(pressed.outputs().isEmpty());
 
-        var typed = InputModel.onKeyTyped(pressed.state(), InputModel.Platform.LINUX, false, "@");
+        var typed = KeyInput.onKeyTyped(pressed.state(), KeyInput.Platform.LINUX, false, "@");
         assertEquals(
-                new InputModel.EncodeOutput(
+                new KeyInput.EncodeOutput(
                         KeyCode.Q,
                         ghostty_vt_h.GHOSTTY_KEY_ACTION_PRESS(),
                         ghostty_vt_h.GHOSTTY_KEY_Q(),
@@ -115,16 +115,16 @@ final class InputModelTest {
 
     @Test
     void defersMacOptionTextWhenOptionIsNotAlt() {
-        var pressed = InputModel.onKeyPressed(
-                InputModel.initialState(),
-                InputModel.Platform.MACOS,
+        var pressed = KeyInput.onKeyPressed(
+                KeyInput.initialState(),
+                KeyInput.Platform.MACOS,
                 false,
                 snapshot(KeyCode.E, false, false, true, false));
         assertTrue(pressed.outputs().isEmpty());
 
-        var typed = InputModel.onKeyTyped(pressed.state(), InputModel.Platform.MACOS, false, "€");
+        var typed = KeyInput.onKeyTyped(pressed.state(), KeyInput.Platform.MACOS, false, "€");
         assertEquals(
-                new InputModel.EncodeOutput(
+                new KeyInput.EncodeOutput(
                         KeyCode.E,
                         ghostty_vt_h.GHOSTTY_KEY_ACTION_PRESS(),
                         ghostty_vt_h.GHOSTTY_KEY_E(),
@@ -138,14 +138,14 @@ final class InputModelTest {
 
     @Test
     void treatsMacOptionAsAltWhenEnabled() {
-        var transition = InputModel.onKeyPressed(
-                InputModel.initialState(),
-                InputModel.Platform.MACOS,
+        var transition = KeyInput.onKeyPressed(
+                KeyInput.initialState(),
+                KeyInput.Platform.MACOS,
                 true,
                 snapshot(KeyCode.E, false, false, true, false));
 
         assertEquals(
-                new InputModel.EncodeOutput(
+                new KeyInput.EncodeOutput(
                         KeyCode.E,
                         ghostty_vt_h.GHOSTTY_KEY_ACTION_PRESS(),
                         ghostty_vt_h.GHOSTTY_KEY_E(),
@@ -159,57 +159,57 @@ final class InputModelTest {
 
     @Test
     void fallsBackToRawTextForWindowsAltNumpadCommit() {
-        var state = InputModel.initialState();
-        state = InputModel.onKeyPressed(
+        var state = KeyInput.initialState();
+        state = KeyInput.onKeyPressed(
                         state,
-                        InputModel.Platform.WINDOWS,
+                        KeyInput.Platform.WINDOWS,
                         false,
                         snapshot(KeyCode.NUMPAD1, false, false, true, false))
                 .state();
-        state = InputModel.onKeyPressed(
+        state = KeyInput.onKeyPressed(
                         state,
-                        InputModel.Platform.WINDOWS,
+                        KeyInput.Platform.WINDOWS,
                         false,
                         snapshot(KeyCode.NUMPAD6, false, false, true, false))
                 .state();
 
-        var typed = InputModel.onKeyTyped(state, InputModel.Platform.WINDOWS, false, "A");
+        var typed = KeyInput.onKeyTyped(state, KeyInput.Platform.WINDOWS, false, "A");
         assertEquals(1, typed.outputs().size());
-        assertEquals(new InputModel.RawTextOutput("A"), typed.outputs().getFirst());
+        assertEquals(new KeyInput.RawTextOutput("A"), typed.outputs().getFirst());
         assertTrue(typed.state().deferredPresses().isEmpty());
     }
 
     @Test
     void fallsBackToRawTextForDeadKeyComposition() {
-        var state = InputModel.initialState();
-        state = InputModel.onKeyPressed(
+        var state = KeyInput.initialState();
+        state = KeyInput.onKeyPressed(
                         state,
-                        InputModel.Platform.LINUX,
+                        KeyInput.Platform.LINUX,
                         false,
                         snapshot(KeyCode.DEAD_ACUTE))
                 .state();
-        state = InputModel.onKeyPressed(
+        state = KeyInput.onKeyPressed(
                         state,
-                        InputModel.Platform.LINUX,
+                        KeyInput.Platform.LINUX,
                         false,
                         snapshot(KeyCode.A))
                 .state();
 
-        var typed = InputModel.onKeyTyped(state, InputModel.Platform.LINUX, false, "á");
-        assertEquals(new InputModel.RawTextOutput("á"), typed.outputs().getFirst());
+        var typed = KeyInput.onKeyTyped(state, KeyInput.Platform.LINUX, false, "á");
+        assertEquals(new KeyInput.RawTextOutput("á"), typed.outputs().getFirst());
         assertTrue(typed.state().deferredPresses().isEmpty());
     }
 
     @Test
     void handlesImePreeditAndCommit() {
-        var pressed = InputModel.onKeyPressed(
-                InputModel.initialState(),
-                InputModel.Platform.LINUX,
+        var pressed = KeyInput.onKeyPressed(
+                KeyInput.initialState(),
+                KeyInput.Platform.LINUX,
                 false,
                 snapshot(KeyCode.A));
-        var preedit = InputModel.onInputMethodTextChanged(pressed.state(), "あ", 1, "");
+        var preedit = KeyInput.onInputMethodTextChanged(pressed.state(), "あ", 1, "");
         assertEquals(
-                new InputModel.EncodeOutput(
+                new KeyInput.EncodeOutput(
                         KeyCode.A,
                         ghostty_vt_h.GHOSTTY_KEY_ACTION_PRESS(),
                         ghostty_vt_h.GHOSTTY_KEY_A(),
@@ -219,59 +219,59 @@ final class InputModelTest {
                         "",
                         true),
                 preedit.outputs().getFirst());
-        assertEquals(new InputModel.Preedit("あ", 1), preedit.state().preedit());
+        assertEquals(new KeyInput.Preedit("あ", 1), preedit.state().preedit());
         assertTrue(preedit.redraw());
 
-        var committed = InputModel.onInputMethodTextChanged(preedit.state(), "", 0, "あ");
-        assertEquals(new InputModel.RawTextOutput("あ"), committed.outputs().getFirst());
-        assertEquals(InputModel.Preedit.empty(), committed.state().preedit());
+        var committed = KeyInput.onInputMethodTextChanged(preedit.state(), "", 0, "あ");
+        assertEquals(new KeyInput.RawTextOutput("あ"), committed.outputs().getFirst());
+        assertEquals(KeyInput.Preedit.empty(), committed.state().preedit());
         assertTrue(committed.state().deferredPresses().isEmpty());
     }
 
     @Test
     void clearsPreeditWhenInputMethodEventCommitsAndStillReportsComposition() {
-        var state = InputModel.initialState();
-        state = InputModel.onKeyPressed(
+        var state = KeyInput.initialState();
+        state = KeyInput.onKeyPressed(
                         state,
-                        InputModel.Platform.LINUX,
+                        KeyInput.Platform.LINUX,
                         false,
                         snapshot(KeyCode.DEAD_ACUTE))
                 .state();
-        state = InputModel.onInputMethodTextChanged(state, "´", 1, "´").state();
-        state = InputModel.onKeyPressed(
+        state = KeyInput.onInputMethodTextChanged(state, "´", 1, "´").state();
+        state = KeyInput.onKeyPressed(
                         state,
-                        InputModel.Platform.LINUX,
+                        KeyInput.Platform.LINUX,
                         false,
                         snapshot(KeyCode.A))
                 .state();
 
-        var transition = InputModel.onInputMethodTextChanged(state, "´", 1, "á");
-        assertEquals(new InputModel.RawTextOutput("á"), transition.outputs().getLast());
-        assertEquals(InputModel.Preedit.empty(), transition.state().preedit());
+        var transition = KeyInput.onInputMethodTextChanged(state, "´", 1, "á");
+        assertEquals(new KeyInput.RawTextOutput("á"), transition.outputs().getLast());
+        assertEquals(KeyInput.Preedit.empty(), transition.state().preedit());
         assertTrue(transition.state().deferredPresses().isEmpty());
     }
 
     @Test
     void showsImeOnlyPreeditWithoutDeferredPresses() {
-        var transition = InputModel.onInputMethodTextChanged(InputModel.initialState(), "´", 1, "");
+        var transition = KeyInput.onInputMethodTextChanged(KeyInput.initialState(), "´", 1, "");
         assertTrue(transition.outputs().isEmpty());
-        assertEquals(new InputModel.Preedit("´", 1), transition.state().preedit());
+        assertEquals(new KeyInput.Preedit("´", 1), transition.state().preedit());
     }
 
     @Test
     void supportsLateTypedAfterRelease() {
-        var pressed = InputModel.onKeyPressed(
-                InputModel.initialState(),
-                InputModel.Platform.LINUX,
+        var pressed = KeyInput.onKeyPressed(
+                KeyInput.initialState(),
+                KeyInput.Platform.LINUX,
                 false,
                 snapshot(KeyCode.A));
-        var released = InputModel.onKeyReleased(pressed.state(), snapshot(KeyCode.A));
+        var released = KeyInput.onKeyReleased(pressed.state(), snapshot(KeyCode.A));
         assertTrue(released.outputs().isEmpty());
 
-        var typed = InputModel.onKeyTyped(released.state(), InputModel.Platform.LINUX, false, "a");
+        var typed = KeyInput.onKeyTyped(released.state(), KeyInput.Platform.LINUX, false, "a");
         assertEquals(2, typed.outputs().size());
         assertEquals(
-                new InputModel.EncodeOutput(
+                new KeyInput.EncodeOutput(
                         KeyCode.A,
                         ghostty_vt_h.GHOSTTY_KEY_ACTION_PRESS(),
                         ghostty_vt_h.GHOSTTY_KEY_A(),
@@ -282,7 +282,7 @@ final class InputModelTest {
                         false),
                 typed.outputs().get(0));
         assertEquals(
-                new InputModel.EncodeOutput(
+                new KeyInput.EncodeOutput(
                         KeyCode.A,
                         ghostty_vt_h.GHOSTTY_KEY_ACTION_RELEASE(),
                         ghostty_vt_h.GHOSTTY_KEY_A(),
@@ -296,36 +296,36 @@ final class InputModelTest {
 
     @Test
     void ignoresMacCommandTypedText() {
-        var typed = InputModel.onKeyTyped(
-                InputModel.initialState(),
-                InputModel.Platform.MACOS,
+        var typed = KeyInput.onKeyTyped(
+                KeyInput.initialState(),
+                KeyInput.Platform.MACOS,
                 true,
                 "a");
 
         assertTrue(typed.outputs().isEmpty());
-        assertEquals(InputModel.initialState(), typed.state());
+        assertEquals(KeyInput.initialState(), typed.state());
     }
 
     @Test
     void tracksScrollGestureInsideInputState() {
-        var state = InputModel.startScrollGesture(InputModel.initialState());
-        assertTrue(state.mouseState().scrollGestureActive());
+        var state = MouseInput.startScrollGesture(MouseInput.initialState());
+        assertTrue(state.scrollGestureActive());
 
-        state = InputModel.stopScrollGesture(state);
-        assertFalse(state.mouseState().scrollGestureActive());
+        state = MouseInput.stopScrollGesture(state);
+        assertFalse(state.scrollGestureActive());
     }
 
-    private static InputModel.KeySnapshot snapshot(KeyCode code) {
+    private static KeyInput.KeySnapshot snapshot(KeyCode code) {
         return snapshot(code, false, false, false, false);
     }
 
-    private static InputModel.KeySnapshot snapshot(
+    private static KeyInput.KeySnapshot snapshot(
             KeyCode code,
             boolean shiftDown,
             boolean controlDown,
             boolean altDown,
             boolean metaDown) {
-        return new InputModel.KeySnapshot(code, shiftDown, controlDown, altDown, metaDown);
+        return new KeyInput.KeySnapshot(code, shiftDown, controlDown, altDown, metaDown);
     }
 
     private static short mods(int value) {

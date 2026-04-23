@@ -9,24 +9,16 @@ import java.util.Set;
 import javafx.scene.input.KeyCode;
 import javafx.scene.input.KeyEvent;
 
-final class InputModel {
-    private InputModel() {}
+final class KeyInput {
+    private KeyInput() {}
 
-    static InputState initialState() {
-        return new InputState(Set.of(), Set.of(), List.of(), false, Preedit.empty(), Selection.empty(), MouseState.initial());
+    static State initialState() {
+        return new State(Set.of(), Set.of(), List.of(), false, Preedit.empty());
     }
 
-    static InputState select(InputState state, Selection selection) {
-        return state.selection().equals(selection) ? state : state.withSelection(selection);
-    }
-
-    static InputState clearSelection(InputState state) {
-        return state.selection().isEmpty() ? state : state.withSelection(Selection.empty());
-    }
-
-    static Transition onKeyPressed(InputState state, Platform platform, boolean macOptionAsAlt, KeySnapshot event) {
+    static Transition onKeyPressed(State state, Platform platform, boolean macOptionAsAlt, KeySnapshot event) {
         var classification = classify(event.code());
-        var pressed = copyPressedKeys(state.pressedKeys());
+        var pressed = copyKeys(state.pressedKeys());
         var repeat = !pressed.add(event.code());
         var nextState = state.withPressedKeys(pressed)
                 .withAltGraphDown(state.altGraphDown() || event.code() == KeyCode.ALT_GRAPH);
@@ -35,20 +27,20 @@ final class InputModel {
         }
 
         if (event.code() == KeyCode.ALT_GRAPH) {
-            return new Transition(nextState, List.of(), false);
+            return new Transition(nextState, List.of(), false, false);
         }
 
         var action = repeat ? ghostty_vt_h.GHOSTTY_KEY_ACTION_REPEAT() : ghostty_vt_h.GHOSTTY_KEY_ACTION_PRESS();
         var mods = modifiers(event);
         if (classification.modifierOnly()) {
             return classification.bucket() != Bucket.PHYSICAL
-                    ? new Transition(nextState, List.of(), false)
+                    ? new Transition(nextState, List.of(), false, false)
                     : emitImmediate(nextState, event.code(), action, classification.ghosttyKey(), mods, (short) 0, 0, "", false, false);
         }
 
         if (classification.textKind() == TextKind.NONE) {
             return classification.bucket() != Bucket.PHYSICAL
-                    ? new Transition(nextState, List.of(), false)
+                    ? new Transition(nextState, List.of(), false, false)
                     : emitImmediate(nextState, event.code(), action, classification.ghosttyKey(), mods, (short) 0, 0, "", false, true);
         }
 
@@ -67,7 +59,7 @@ final class InputModel {
         if (classification.bucket() == Bucket.PHYSICAL
                 && shouldEncodeImmediately(mods, altGrText, macOptionText, windowsAltNumpad)) {
             return emitImmediate(
-                    nextState.withSelection(Selection.empty()),
+                    nextState,
                     event.code(),
                     action,
                     classification.ghosttyKey(),
@@ -94,30 +86,27 @@ final class InputModel {
                 false);
         var deferred = new ArrayList<>(nextState.deferredPresses());
         deferred.add(pending);
-        return new Transition(
-                nextState.withDeferredPresses(List.copyOf(deferred)).withSelection(Selection.empty()),
-                List.of(),
-                false);
+        return new Transition(nextState.withDeferredPresses(List.copyOf(deferred)), List.of(), false, true);
     }
 
-    static Transition onKeyReleased(InputState state, KeySnapshot event) {
-        var pressed = copyPressedKeys(state.pressedKeys());
+    static Transition onKeyReleased(State state, KeySnapshot event) {
+        var pressed = copyKeys(state.pressedKeys());
         pressed.remove(event.code());
         var deferred = markDeferredReleased(state.deferredPresses(), event.code());
         var nextState = state.withPressedKeys(pressed)
                 .withDeferredPresses(deferred)
                 .withAltGraphDown(event.code() == KeyCode.ALT_GRAPH ? false : state.altGraphDown());
         if (event.code() == KeyCode.ALT_GRAPH) {
-            return new Transition(nextState, List.of(), false);
+            return new Transition(nextState, List.of(), false, false);
         }
 
         if (!state.emittedKeys().contains(event.code())) {
-            return new Transition(nextState, List.of(), false);
+            return new Transition(nextState, List.of(), false, false);
         }
 
         var classification = classify(event.code());
         if (classification.bucket() != Bucket.PHYSICAL) {
-            return new Transition(nextState.withEmittedKeys(removeEmitted(state.emittedKeys(), event.code())), List.of(), false);
+            return new Transition(nextState.withEmittedKeys(removeEmitted(state.emittedKeys(), event.code())), List.of(), false, false);
         }
 
         var outputs = List.<Output>of(new EncodeOutput(
@@ -132,16 +121,17 @@ final class InputModel {
         return new Transition(
                 nextState.withEmittedKeys(removeEmitted(state.emittedKeys(), event.code())),
                 outputs,
+                false,
                 false);
     }
 
-    static Transition onKeyTyped(InputState state, Platform platform, boolean metaDown, String text) {
+    static Transition onKeyTyped(State state, Platform platform, boolean metaDown, String text) {
         if (platform == Platform.MACOS && metaDown) {
-            return new Transition(state, List.of(), false);
+            return new Transition(state, List.of(), false, false);
         }
 
         if (shouldIgnoreTypedText(text)) {
-            return new Transition(state, List.of(), false);
+            return new Transition(state, List.of(), false, false);
         }
 
         if (!state.deferredPresses().isEmpty()) {
@@ -168,12 +158,13 @@ final class InputModel {
                             0,
                             "",
                             false));
-                    return new Transition(nextState, List.copyOf(outputs), false);
+                    return new Transition(nextState, List.copyOf(outputs), false, false);
                 }
 
                 return new Transition(
                         nextState.withEmittedKeys(addEmitted(state.emittedKeys(), pending.code())),
                         List.copyOf(outputs),
+                        false,
                         false);
             }
         }
@@ -181,10 +172,11 @@ final class InputModel {
         return new Transition(
                 state.withDeferredPresses(List.of()),
                 List.of(new RawTextOutput(text)),
+                false,
                 false);
     }
 
-    static Transition onInputMethodTextChanged(InputState state, String composedText, int caretPosition, String committedText) {
+    static Transition onInputMethodTextChanged(State state, String composedText, int caretPosition, String committedText) {
         var outputs = new ArrayList<Output>(2);
         var nextState = state;
         if (!composedText.isEmpty() && !state.deferredPresses().isEmpty()) {
@@ -209,76 +201,21 @@ final class InputModel {
         var committed = !committedText.isEmpty();
         if (committed) {
             outputs.add(new RawTextOutput(committedText));
-            nextState = nextState.withDeferredPresses(List.of()).withSelection(Selection.empty());
+            nextState = nextState.withDeferredPresses(List.of());
         }
 
         var preedit = committed || composedText.isEmpty()
                 ? Preedit.empty()
                 : new Preedit(composedText, caretPosition);
         var redraw = !nextState.preedit().equals(preedit);
-        return new Transition(nextState.withPreedit(preedit), List.copyOf(outputs), redraw);
+        return new Transition(nextState.withPreedit(preedit), List.copyOf(outputs), redraw, committed);
     }
 
-    static InputState onFocusLost(InputState state) {
-        return new InputState(Set.of(), Set.of(), List.of(), false, Preedit.empty(), state.selection(), MouseState.initial());
+    static State onFocusLost(State state) {
+        return new State(Set.of(), Set.of(), List.of(), false, Preedit.empty());
     }
 
-    static InputState startScrollGesture(InputState state) {
-        return state.mouseState().scrollGestureActive()
-                ? state
-                : state.withMouseState(state.mouseState().withScrollGestureActive(true));
-    }
-
-    static InputState stopScrollGesture(InputState state) {
-        return state.mouseState().scrollGestureActive()
-                ? state.withMouseState(state.mouseState().withScrollGestureActive(false))
-                : state;
-    }
-
-    static InputState startScrollbarDrag(InputState state, double thumbGrabRatio) {
-        var nextMouseState = state.mouseState()
-                .withScrollbarThumbGrabRatio(Math.clamp(thumbGrabRatio, 0.0, 1.0))
-                .withScrollbarDragging(true);
-        return state.mouseState().equals(nextMouseState)
-                ? state
-                : state.withMouseState(nextMouseState);
-    }
-
-    static InputState stopScrollbarDrag(InputState state) {
-        return state.mouseState().scrollbarDragging()
-                ? state.withMouseState(state.mouseState()
-                        .withScrollbarDragging(false)
-                        .withScrollbarThumbGrabRatio(0))
-                : state;
-    }
-
-    static ScrollUpdate accumulateDiscreteScroll(InputState state, double deltaTicks) {
-        if (deltaTicks == 0 || !Double.isFinite(deltaTicks)) {
-            return new ScrollUpdate(state, 0);
-        }
-
-        var totalTicks = state.mouseState().discreteScrollRemainder() + deltaTicks;
-        var wholeTicks = (int) totalTicks;
-        var remainderTicks = totalTicks - wholeTicks;
-        return new ScrollUpdate(
-                state.withMouseState(state.mouseState().withDiscreteScrollRemainder(remainderTicks)),
-                wholeTicks);
-    }
-
-    static ScrollUpdate accumulateSmoothScroll(InputState state, double deltaRows) {
-        if (deltaRows == 0 || !Double.isFinite(deltaRows)) {
-            return new ScrollUpdate(state, 0);
-        }
-
-        var totalRows = state.mouseState().smoothScrollRemainderRows() + deltaRows;
-        var wholeRows = (int) totalRows;
-        var remainderRows = totalRows - wholeRows;
-        return new ScrollUpdate(
-                state.withMouseState(state.mouseState().withSmoothScrollRemainderRows(remainderRows)),
-                wholeRows);
-    }
-
-    static InputState acknowledgeEncode(InputState state, KeyCode code, int action, boolean producedBytes) {
+    static State acknowledgeEncode(State state, KeyCode code, int action, boolean producedBytes) {
         if (action == ghostty_vt_h.GHOSTTY_KEY_ACTION_RELEASE() || producedBytes) {
             return state;
         }
@@ -405,58 +342,6 @@ final class InputModel {
         COMMIT_ONLY
     }
 
-    record ScreenPoint(int x, int y) {
-        ScreenPoint {
-            if (x < 0 || x > 0xFFFF || y < 0) {
-                throw new IllegalArgumentException("screen coordinates out of range");
-            }
-        }
-    }
-
-    record Selection(ScreenPoint from, ScreenPoint to, boolean rectangle) {
-        Selection {
-            if ((from == null) != (to == null)) {
-                throw new IllegalArgumentException("selection endpoints must both be null or both be present");
-            }
-            if (from == null && rectangle) {
-                throw new IllegalArgumentException("empty selection cannot be rectangular");
-            }
-        }
-
-        static Selection empty() {
-            return new Selection(null, null, false);
-        }
-
-        static Selection linear(ScreenPoint from, ScreenPoint to) {
-            return new Selection(
-                    java.util.Objects.requireNonNull(from, "from"),
-                    java.util.Objects.requireNonNull(to, "to"),
-                    false);
-        }
-
-        boolean isEmpty() {
-            return from == null;
-        }
-
-        Selection normalized() {
-            if (isEmpty()) {
-                return this;
-            }
-            if (rectangle) {
-                return new Selection(
-                        new ScreenPoint(Math.min(from.x(), to.x()), Math.min(from.y(), to.y())),
-                        new ScreenPoint(Math.max(from.x(), to.x()), Math.max(from.y(), to.y())),
-                        true);
-            }
-            return compare(from, to) <= 0 ? this : new Selection(to, from, false);
-        }
-
-        private static int compare(ScreenPoint left, ScreenPoint right) {
-            var byY = Integer.compare(left.y(), right.y());
-            return byY != 0 ? byY : Integer.compare(left.x(), right.x());
-        }
-    }
-
     record KeySnapshot(KeyCode code, boolean shiftDown, boolean controlDown, boolean altDown, boolean metaDown) {
     }
 
@@ -506,72 +391,31 @@ final class InputModel {
         }
     }
 
-    record InputState(
+    record State(
             Set<KeyCode> pressedKeys,
             Set<KeyCode> emittedKeys,
             List<PendingPress> deferredPresses,
             boolean altGraphDown,
-            Preedit preedit,
-            Selection selection,
-            MouseState mouseState) {
+            Preedit preedit) {
 
-        InputState withPressedKeys(Set<KeyCode> pressedKeys) {
-            return new InputState(pressedKeys, emittedKeys, deferredPresses, altGraphDown, preedit, selection, mouseState);
+        State withPressedKeys(Set<KeyCode> pressedKeys) {
+            return new State(pressedKeys, emittedKeys, deferredPresses, altGraphDown, preedit);
         }
 
-        InputState withEmittedKeys(Set<KeyCode> emittedKeys) {
-            return new InputState(pressedKeys, emittedKeys, deferredPresses, altGraphDown, preedit, selection, mouseState);
+        State withEmittedKeys(Set<KeyCode> emittedKeys) {
+            return new State(pressedKeys, emittedKeys, deferredPresses, altGraphDown, preedit);
         }
 
-        InputState withDeferredPresses(List<PendingPress> deferredPresses) {
-            return new InputState(pressedKeys, emittedKeys, deferredPresses, altGraphDown, preedit, selection, mouseState);
+        State withDeferredPresses(List<PendingPress> deferredPresses) {
+            return new State(pressedKeys, emittedKeys, deferredPresses, altGraphDown, preedit);
         }
 
-        InputState withAltGraphDown(boolean altGraphDown) {
-            return new InputState(pressedKeys, emittedKeys, deferredPresses, altGraphDown, preedit, selection, mouseState);
+        State withAltGraphDown(boolean altGraphDown) {
+            return new State(pressedKeys, emittedKeys, deferredPresses, altGraphDown, preedit);
         }
 
-        InputState withPreedit(Preedit preedit) {
-            return new InputState(pressedKeys, emittedKeys, deferredPresses, altGraphDown, preedit, selection, mouseState);
-        }
-
-        InputState withSelection(Selection selection) {
-            return new InputState(pressedKeys, emittedKeys, deferredPresses, altGraphDown, preedit, selection, mouseState);
-        }
-
-        InputState withMouseState(MouseState mouseState) {
-            return new InputState(pressedKeys, emittedKeys, deferredPresses, altGraphDown, preedit, selection, mouseState);
-        }
-    }
-
-    record MouseState(
-            double discreteScrollRemainder,
-            double smoothScrollRemainderRows,
-            boolean scrollGestureActive,
-            boolean scrollbarDragging,
-            double scrollbarThumbGrabRatio) {
-        static MouseState initial() {
-            return new MouseState(0, 0, false, false, 0);
-        }
-
-        MouseState withDiscreteScrollRemainder(double discreteScrollRemainder) {
-            return new MouseState(discreteScrollRemainder, smoothScrollRemainderRows, scrollGestureActive, scrollbarDragging, scrollbarThumbGrabRatio);
-        }
-
-        MouseState withSmoothScrollRemainderRows(double smoothScrollRemainderRows) {
-            return new MouseState(discreteScrollRemainder, smoothScrollRemainderRows, scrollGestureActive, scrollbarDragging, scrollbarThumbGrabRatio);
-        }
-
-        MouseState withScrollGestureActive(boolean scrollGestureActive) {
-            return new MouseState(discreteScrollRemainder, smoothScrollRemainderRows, scrollGestureActive, scrollbarDragging, scrollbarThumbGrabRatio);
-        }
-
-        MouseState withScrollbarDragging(boolean scrollbarDragging) {
-            return new MouseState(discreteScrollRemainder, smoothScrollRemainderRows, scrollGestureActive, scrollbarDragging, scrollbarThumbGrabRatio);
-        }
-
-        MouseState withScrollbarThumbGrabRatio(double scrollbarThumbGrabRatio) {
-            return new MouseState(discreteScrollRemainder, smoothScrollRemainderRows, scrollGestureActive, scrollbarDragging, scrollbarThumbGrabRatio);
+        State withPreedit(Preedit preedit) {
+            return new State(pressedKeys, emittedKeys, deferredPresses, altGraphDown, preedit);
         }
     }
 
@@ -592,14 +436,11 @@ final class InputModel {
     record RawTextOutput(String text) implements Output {
     }
 
-    record Transition(InputState state, List<Output> outputs, boolean redraw) {
-    }
-
-    record ScrollUpdate(InputState state, int lineDelta) {
+    record Transition(State state, List<Output> outputs, boolean redraw, boolean clearSelection) {
     }
 
     private static Transition emitImmediate(
-            InputState state,
+            State state,
             KeyCode code,
             int action,
             int ghosttyKey,
@@ -609,14 +450,11 @@ final class InputModel {
             String utf8,
             boolean composing,
             boolean clearSelection) {
-        var nextState = state.withEmittedKeys(addEmitted(state.emittedKeys(), code));
-        if (clearSelection) {
-            nextState = nextState.withSelection(Selection.empty());
-        }
         return new Transition(
-                nextState,
+                state.withEmittedKeys(addEmitted(state.emittedKeys(), code)),
                 List.of(new EncodeOutput(code, action, ghosttyKey, mods, consumedMods, unshiftedCodepoint, utf8, composing)),
-                false);
+                false,
+                clearSelection);
     }
 
     private static List<PendingPress> dropFirstDeferred(List<PendingPress> deferredPresses) {
@@ -686,7 +524,7 @@ final class InputModel {
     }
 
     private static Set<KeyCode> addEmitted(Set<KeyCode> emittedKeys, KeyCode code) {
-        var emitted = copyPressedKeys(emittedKeys);
+        var emitted = copyKeys(emittedKeys);
         emitted.add(code);
         return Set.copyOf(emitted);
     }
@@ -695,12 +533,12 @@ final class InputModel {
         if (!emittedKeys.contains(code)) {
             return emittedKeys;
         }
-        var emitted = copyPressedKeys(emittedKeys);
+        var emitted = copyKeys(emittedKeys);
         emitted.remove(code);
         return Set.copyOf(emitted);
     }
 
-    private static EnumSet<KeyCode> copyPressedKeys(Set<KeyCode> keys) {
+    private static EnumSet<KeyCode> copyKeys(Set<KeyCode> keys) {
         var result = EnumSet.noneOf(KeyCode.class);
         result.addAll(keys);
         return result;
@@ -717,5 +555,4 @@ final class InputModel {
     private static KeyClassification directModifier(int ghosttyKey) {
         return directNonText(ghosttyKey, true, false);
     }
-
 }

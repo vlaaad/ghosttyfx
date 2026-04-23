@@ -267,7 +267,7 @@ final class TerminalSession implements AutoCloseable {
         }
     }
 
-    String selectedText(InputModel.Selection selection) {
+    String selectedText(Selection selection) {
         if (selection.isEmpty()) {
             return "";
         }
@@ -316,22 +316,22 @@ final class TerminalSession implements AutoCloseable {
         }
     }
 
-    InputModel.Selection selectAllSelection() {
+    Selection selectAllSelection() {
         try (var arena = Arena.ofConfined()) {
             var cols = arena.allocate(ValueLayout.JAVA_SHORT);
             var totalRows = arena.allocate(ValueLayout.JAVA_LONG);
             if (ghostty_vt_h.ghostty_terminal_get(terminal, ghostty_vt_h.GHOSTTY_TERMINAL_DATA_COLS(), cols) != GHOSTTY_SUCCESS
                     || ghostty_vt_h.ghostty_terminal_get(terminal, ghostty_vt_h.GHOSTTY_TERMINAL_DATA_TOTAL_ROWS(), totalRows) != GHOSTTY_SUCCESS) {
-                return InputModel.Selection.empty();
+                return Selection.empty();
             }
 
             var columnCount = Short.toUnsignedInt(cols.get(ValueLayout.JAVA_SHORT, 0));
             var rowCount = Math.toIntExact(totalRows.get(ValueLayout.JAVA_LONG, 0));
             return columnCount == 0 || rowCount == 0
-                    ? InputModel.Selection.empty()
-                    : InputModel.Selection.linear(
-                            new InputModel.ScreenPoint(0, 0),
-                            new InputModel.ScreenPoint(columnCount - 1, rowCount - 1));
+                    ? Selection.empty()
+                    : Selection.linear(
+                            new Selection.ScreenPoint(0, 0),
+                            new Selection.ScreenPoint(columnCount - 1, rowCount - 1));
         }
     }
 
@@ -343,7 +343,7 @@ final class TerminalSession implements AutoCloseable {
         }
     }
 
-    byte[] encode(InputModel.EncodeOutput output, boolean macOptionAsAlt) {
+    byte[] encode(KeyInput.EncodeOutput output, boolean macOptionAsAlt) {
         refreshKeyEncoder(macOptionAsAlt);
         try (var arena = Arena.ofConfined()) {
             ghostty_vt_h.ghostty_key_event_set_action(keyEvent, output.action());
@@ -431,7 +431,8 @@ final class TerminalSession implements AutoCloseable {
             double height,
             Font font,
             GhosttyCanvas.CellMetrics metrics,
-            InputModel.InputState inputState,
+            KeyInput.Preedit preedit,
+            Selection selection,
             double scrollbarWidthPx,
             double minScrollbarHeightPx,
             Color selectionColor,
@@ -590,8 +591,8 @@ final class TerminalSession implements AutoCloseable {
                 y += metrics.cellHeightPx();
             }
 
-            renderSelectionOverlay(graphics, metrics, inputState.selection(), selectionColor);
-            renderCursor(graphics, metrics, inputState.preedit(), colors, preeditFill, preeditBackground, preeditStroke);
+            renderSelectionOverlay(graphics, metrics, selection, selectionColor);
+            renderCursor(graphics, metrics, preedit, colors, preeditFill, preeditBackground, preeditStroke);
 
             var scrollbar = scrollbarInfo(width, height, scrollbarWidthPx, minScrollbarHeightPx);
             if (scrollbar != null && scrollbar.scrollable()) {
@@ -734,7 +735,7 @@ final class TerminalSession implements AutoCloseable {
         }
     }
 
-    private MemorySegment formatterSelection(Arena arena, InputModel.Selection selection) {
+    private MemorySegment formatterSelection(Arena arena, Selection selection) {
         var normalized = selection.normalized();
         if (normalized.isEmpty()) {
             return MemorySegment.NULL;
@@ -749,7 +750,7 @@ final class TerminalSession implements AutoCloseable {
                 : MemorySegment.NULL;
     }
 
-    private boolean writeGridRef(Arena arena, InputModel.ScreenPoint point, MemorySegment outGridRef) {
+    private boolean writeGridRef(Arena arena, Selection.ScreenPoint point, MemorySegment outGridRef) {
         var coordinate = GhosttyPointCoordinate.allocate(arena);
         GhosttyPointCoordinate.x(coordinate, (short) point.x());
         GhosttyPointCoordinate.y(coordinate, point.y());
@@ -762,7 +763,7 @@ final class TerminalSession implements AutoCloseable {
     private void renderSelectionOverlay(
             GraphicsContext graphics,
             GhosttyCanvas.CellMetrics metrics,
-            InputModel.Selection selection,
+            Selection selection,
             Color selectionColor) {
         var normalized = selection.normalized();
         if (normalized.isEmpty()) {
@@ -811,7 +812,7 @@ final class TerminalSession implements AutoCloseable {
     private void renderCursor(
             GraphicsContext graphics,
             GhosttyCanvas.CellMetrics metrics,
-            InputModel.Preedit preedit,
+            KeyInput.Preedit preedit,
             MemorySegment colors,
             Color preeditFill,
             Color preeditBackground,

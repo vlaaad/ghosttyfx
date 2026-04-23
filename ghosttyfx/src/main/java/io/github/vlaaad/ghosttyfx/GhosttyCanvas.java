@@ -71,9 +71,11 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
     private final BlockingQueue<ProcCommand> procCommands = new ArrayBlockingQueue<>(16_384);
     private final BlockingQueue<byte[]> processOutputChunks = new ArrayBlockingQueue<>(256);
     private final AnimationTimer processOutputDrain;
-    private final InputModel.Platform inputPlatform = InputModel.Platform.current();
+    private final KeyInput.Platform inputPlatform = KeyInput.Platform.current();
 
-    private InputModel.InputState inputState = InputModel.initialState();
+    private KeyInput.State keyInputState = KeyInput.initialState();
+    private MouseInput.State mouseInputState = MouseInput.initialState();
+    private Selection selection = Selection.empty();
 
     private final ObjectProperty<Font> font = new SimpleObjectProperty<>(this, "font", DEFAULT_FONT) {
         @Override
@@ -85,19 +87,19 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
     private final ObjectProperty<KeyCombination> copyShortcut = new SimpleObjectProperty<>(
             this,
             "copyShortcut",
-            inputPlatform == InputModel.Platform.MACOS
+            inputPlatform == KeyInput.Platform.MACOS
                     ? new KeyCodeCombination(KeyCode.C, KeyCombination.META_DOWN)
                     : new KeyCodeCombination(KeyCode.C, KeyCombination.CONTROL_DOWN));
     private final ObjectProperty<KeyCombination> pasteShortcut = new SimpleObjectProperty<>(
             this,
             "pasteShortcut",
-            inputPlatform == InputModel.Platform.MACOS
+            inputPlatform == KeyInput.Platform.MACOS
                     ? new KeyCodeCombination(KeyCode.V, KeyCombination.META_DOWN)
                     : new KeyCodeCombination(KeyCode.V, KeyCombination.CONTROL_DOWN));
     private final ObjectProperty<KeyCombination> selectAllShortcut = new SimpleObjectProperty<>(
             this,
             "selectAllShortcut",
-            inputPlatform == InputModel.Platform.MACOS
+            inputPlatform == KeyInput.Platform.MACOS
                     ? new KeyCodeCombination(KeyCode.A, KeyCombination.META_DOWN)
                     : new KeyCodeCombination(KeyCode.A, KeyCombination.CONTROL_DOWN, KeyCombination.SHIFT_DOWN));
 
@@ -355,9 +357,11 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
 
     private void handleFocusChange(boolean focused) {
         if (!focused) {
-            var nextInputState = InputModel.onFocusLost(inputState);
-            if (!nextInputState.equals(inputState)) {
-                inputState = nextInputState;
+            var nextKeyInputState = KeyInput.onFocusLost(keyInputState);
+            var nextMouseInputState = MouseInput.onFocusLost(mouseInputState);
+            if (!nextKeyInputState.equals(keyInputState) || !nextMouseInputState.equals(mouseInputState)) {
+                keyInputState = nextKeyInputState;
+                mouseInputState = nextMouseInputState;
                 redraw();
             }
         }
@@ -370,8 +374,8 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
     }
 
     private void handleKeyPressed(KeyEvent event) {
-        if (handleShortcut(event) || applyTransition(InputModel.onKeyPressed(
-                inputState,
+        if (handleShortcut(event) || applyTransition(KeyInput.onKeyPressed(
+                keyInputState,
                 inputPlatform,
                 isMacOptionAsAlt(),
                 snapshot(event)))) {
@@ -380,14 +384,14 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
     }
 
     private void handleKeyReleased(KeyEvent event) {
-        if (applyTransition(InputModel.onKeyReleased(inputState, snapshot(event)))) {
+        if (applyTransition(KeyInput.onKeyReleased(keyInputState, snapshot(event)))) {
             event.consume();
         }
     }
 
     private void handleKeyTyped(KeyEvent event) {
-        if (applyTransition(InputModel.onKeyTyped(
-                inputState,
+        if (applyTransition(KeyInput.onKeyTyped(
+                keyInputState,
                 inputPlatform,
                 event.isMetaDown(),
                 event.getCharacter()))) {
@@ -400,8 +404,8 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
         for (var run : event.getComposed()) {
             composedText.append(run.getText());
         }
-        if (applyTransition(InputModel.onInputMethodTextChanged(
-                inputState,
+        if (applyTransition(KeyInput.onInputMethodTextChanged(
+                keyInputState,
                 composedText.toString(),
                 event.getCaretPosition(),
                 event.getCommitted()))) {
@@ -423,12 +427,12 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
 
     private void handleMouseDragged(MouseEvent event) {
         event.consume();
-        if (!inputState.mouseState().scrollbarDragging()) {
+        if (!mouseInputState.scrollbarDragging()) {
             return;
         }
 
         if (!event.isPrimaryButtonDown()) {
-            inputState = InputModel.stopScrollbarDrag(inputState);
+            mouseInputState = MouseInput.stopScrollbarDrag(mouseInputState);
             return;
         }
 
@@ -441,9 +445,9 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
             return;
         }
 
-        var nextInputState = InputModel.stopScrollbarDrag(inputState);
-        if (!nextInputState.equals(inputState)) {
-            inputState = nextInputState;
+        var nextMouseInputState = MouseInput.stopScrollbarDrag(mouseInputState);
+        if (!nextMouseInputState.equals(mouseInputState)) {
+            mouseInputState = nextMouseInputState;
         }
     }
 
@@ -452,27 +456,27 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
     }
 
     private void handleScrollStarted(ScrollEvent event) {
-        inputState = InputModel.startScrollGesture(inputState);
+        mouseInputState = MouseInput.startScrollGesture(mouseInputState);
         event.consume();
     }
 
     private void handleScrollFinished(ScrollEvent event) {
-        inputState = InputModel.stopScrollGesture(inputState);
+        mouseInputState = MouseInput.stopScrollGesture(mouseInputState);
         event.consume();
     }
 
     private void handleScroll(ScrollEvent event) {
         event.consume();
         var overContent = !isInScrollbar(event.getX());
-        var discrete = isDiscreteWheelScroll(inputState.mouseState().scrollGestureActive(), event);
+        var discrete = isDiscreteWheelScroll(mouseInputState.scrollGestureActive(), event);
         if (discrete) {
             var tickDelta = discreteScrollDeltaTicks(event);
             if (tickDelta == 0) {
                 return;
             }
 
-            var scrollUpdate = InputModel.accumulateDiscreteScroll(inputState, tickDelta);
-            inputState = scrollUpdate.state();
+            var scrollUpdate = MouseInput.accumulateDiscreteScroll(mouseInputState, tickDelta);
+            mouseInputState = scrollUpdate.state();
             var wholeTicks = scrollUpdate.lineDelta();
             if (wholeTicks == 0) {
                 return;
@@ -502,8 +506,8 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
             return;
         }
 
-        var scrollUpdate = InputModel.accumulateSmoothScroll(inputState, deltaRows);
-        inputState = scrollUpdate.state();
+        var scrollUpdate = MouseInput.accumulateSmoothScroll(mouseInputState, deltaRows);
+        mouseInputState = scrollUpdate.state();
         var wholeRows = scrollUpdate.lineDelta();
         if (wholeRows == 0) {
             return;
@@ -534,14 +538,14 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
         }
 
         if (scrollbar.containsThumb(y)) {
-            inputState = InputModel.startScrollbarDrag(inputState, scrollbar.thumbGrabRatio(y));
+            mouseInputState = MouseInput.startScrollbarDrag(mouseInputState, scrollbar.thumbGrabRatio(y));
             return true;
         }
 
         scrollViewportTo(scrollbar.targetOffsetForTrackPress(y), scrollbar);
         var updatedScrollbar = scrollbarInfo();
         if (updatedScrollbar != null && updatedScrollbar.scrollable()) {
-            inputState = InputModel.startScrollbarDrag(inputState, updatedScrollbar.thumbGrabRatio(y));
+            mouseInputState = MouseInput.startScrollbarDrag(mouseInputState, updatedScrollbar.thumbGrabRatio(y));
         }
         return true;
     }
@@ -549,11 +553,11 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
     private boolean dragScrollbarTo(double y) {
         var scrollbar = scrollbarInfo();
         if (scrollbar == null || !scrollbar.scrollable()) {
-            inputState = InputModel.stopScrollbarDrag(inputState);
+            mouseInputState = MouseInput.stopScrollbarDrag(mouseInputState);
             return false;
         }
 
-        scrollViewportTo(scrollbar.targetOffsetForDrag(y, inputState.mouseState().scrollbarThumbGrabRatio()), scrollbar);
+        scrollViewportTo(scrollbar.targetOffsetForDrag(y, mouseInputState.scrollbarThumbGrabRatio()), scrollbar);
         return true;
     }
 
@@ -661,7 +665,7 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
 
     private boolean handleShortcut(KeyEvent event) {
         var copy = getCopyShortcut();
-        if (copy != null && copy.match(event) && !inputState.selection().isEmpty()) {
+        if (copy != null && copy.match(event) && !selection.isEmpty()) {
             var content = new ClipboardContent();
             content.putString(selectedText());
             if (Clipboard.getSystemClipboard().setContent(content)) {
@@ -682,9 +686,9 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
         }
         var selectAll = getSelectAllShortcut();
         if (selectAll != null && selectAll.match(event)) {
-            var nextInputState = InputModel.select(inputState, terminalSession.selectAllSelection());
-            if (!nextInputState.equals(inputState)) {
-                inputState = nextInputState;
+            var nextSelection = terminalSession.selectAllSelection();
+            if (!nextSelection.equals(selection)) {
+                selection = nextSelection;
                 redraw();
             }
             return true;
@@ -693,30 +697,33 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
     }
 
     private void clearSelection() {
-        var nextInputState = InputModel.clearSelection(inputState);
-        if (!nextInputState.equals(inputState)) {
-            inputState = nextInputState;
+        if (!selection.isEmpty()) {
+            selection = Selection.empty();
             redraw();
         }
     }
 
-    private boolean applyTransition(InputModel.Transition transition) {
-        var previousInputState = inputState;
-        inputState = transition.state();
+    private boolean applyTransition(KeyInput.Transition transition) {
+        var previousKeyInputState = keyInputState;
+        var previousSelection = selection;
+        keyInputState = transition.state();
+        if (transition.clearSelection()) {
+            selection = Selection.empty();
+        }
 
         var wroteToPty = false;
         for (var output : transition.outputs()) {
             switch (output) {
-                case InputModel.EncodeOutput encodeOutput -> {
+                case KeyInput.EncodeOutput encodeOutput -> {
                     var producedBytes = writeBytes(terminalSession.encode(encodeOutput, isMacOptionAsAlt()));
-                    inputState = InputModel.acknowledgeEncode(
-                            inputState,
+                    keyInputState = KeyInput.acknowledgeEncode(
+                            keyInputState,
                             encodeOutput.code(),
                             encodeOutput.action(),
                             producedBytes);
                     wroteToPty |= producedBytes;
                 }
-                case InputModel.RawTextOutput(var text) -> {
+                case KeyInput.RawTextOutput(var text) -> {
                     if (text != null && !text.isEmpty()) {
                         wroteToPty |= writeBytes(text.getBytes(StandardCharsets.UTF_8));
                     }
@@ -725,20 +732,20 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
         }
 
         var redraw = transition.redraw()
-                || !previousInputState.selection().equals(inputState.selection())
-                || !previousInputState.preedit().equals(inputState.preedit());
+                || !previousSelection.equals(selection)
+                || !previousKeyInputState.preedit().equals(keyInputState.preedit());
         if (redraw) {
             redraw();
         }
-        return wroteToPty || redraw || !previousInputState.equals(inputState);
+        return wroteToPty || redraw || !previousKeyInputState.equals(keyInputState) || !previousSelection.equals(selection);
     }
 
     private String selectedText() {
-        return terminalSession.selectedText(inputState.selection());
+        return terminalSession.selectedText(selection);
     }
 
-    private InputModel.KeySnapshot snapshot(KeyEvent event) {
-        return new InputModel.KeySnapshot(event.getCode(), event.isShiftDown(), event.isControlDown(), event.isAltDown(), event.isMetaDown());
+    private KeyInput.KeySnapshot snapshot(KeyEvent event) {
+        return new KeyInput.KeySnapshot(event.getCode(), event.isShiftDown(), event.isControlDown(), event.isAltDown(), event.isMetaDown());
     }
 
     private void redraw() {
@@ -754,7 +761,8 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
                 height,
                 font.get(),
                 cellMetrics.get(),
-                inputState,
+                keyInputState.preedit(),
+                selection,
                 scrollbarReservedWidthPx(),
                 MIN_SCROLLBAR_HEIGHT_PX,
                 SELECTION_COLOR,
@@ -828,7 +836,7 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
                 return new Point2D(0, 0);
             }
 
-            var codePointCount = inputState.preedit().text().codePointCount(0, inputState.preedit().text().length());
+            var codePointCount = keyInputState.preedit().text().codePointCount(0, keyInputState.preedit().text().length());
             var clampedOffset = Math.clamp(offset, 0, codePointCount);
             var metrics = cellMetrics.get();
             var screenPoint = localToScreen(
@@ -848,7 +856,7 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
 
             var localPoint = screenToLocal(x, y);
             var dx = Math.max(0, localPoint.getX() - cursorLocation.pixelX());
-            var codePointCount = inputState.preedit().text().codePointCount(0, inputState.preedit().text().length());
+            var codePointCount = keyInputState.preedit().text().codePointCount(0, keyInputState.preedit().text().length());
             return Math.clamp((int) Math.floor(dx / cellMetrics.get().cellWidthPx()), 0, codePointCount);
         }
 
