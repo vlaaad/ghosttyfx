@@ -1,24 +1,13 @@
 package io.github.vlaaad.ghosttyfx;
 
-import com.pty4j.PtyProcessBuilder;
-import com.pty4j.WinSize;
-
 import io.github.vlaaad.ghostty.bindings.ghostty_vt_h;
 
 import java.lang.ref.Cleaner;
 import java.lang.ref.WeakReference;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ArrayBlockingQueue;
-import java.util.concurrent.BlockingQueue;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
 
 import javafx.animation.AnimationTimer;
 import javafx.beans.binding.Bindings;
@@ -49,7 +38,6 @@ import javafx.scene.text.TextBoundsType;
 public final class GhosttyCanvas extends Canvas implements AutoCloseable {
 
     private static final Cleaner CLEANER = Cleaner.create();
-    private static final ExecutorService IO = Executors.newVirtualThreadPerTaskExecutor();
     private static final int INITIAL_COLUMNS = 80;
     private static final int INITIAL_ROWS = 24;
     private static final short FOCUS_EVENT_MODE = 1004;
@@ -59,7 +47,6 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
     private static final double SCROLLBAR_MARGIN_PX = 2;
     private static final double MIN_SCROLLBAR_HEIGHT_PX = 10;
     private static final double SCROLL_TOTAL_DELTA_EPSILON = 1e-6;
-    private static final byte[] PROCESS_OUTPUT_COMPLETE = new byte[0];
     private static final Color SELECTION_COLOR = Color.rgb(74, 144, 226, 0.25);
     private static final Color PREEDIT_FILL = Color.rgb(255, 255, 255, 0.95);
     private static final Color PREEDIT_BACKGROUND = Color.rgb(74, 144, 226, 0.18);
@@ -67,9 +54,7 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
     private static final Font DEFAULT_FONT = Font.font("Monospaced", 14);
 
     private final TerminalSession terminalSession;
-    private final Future<?> ioTask;
-    private final BlockingQueue<ProcCommand> procCommands = new ArrayBlockingQueue<>(16_384);
-    private final BlockingQueue<byte[]> processOutputChunks = new ArrayBlockingQueue<>(256);
+    private final PtySession ptySession;
     private final AnimationTimer processOutputDrain;
     private final KeyInput.Platform inputPlatform = KeyInput.Platform.current();
 
@@ -124,6 +109,7 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
     }, font);
 
     GhosttyCanvas(List<String> command, Path cwd, Map<String, String> environment) {
+        ptySession = new PtySession(command, cwd, environment, INITIAL_COLUMNS, INITIAL_ROWS);
         processOutputDrain = new ProcessOutputDrain(this);
         var initialCellMetrics = cellMetrics.get();
         terminalSession = new TerminalSession(INITIAL_COLUMNS, INITIAL_ROWS, initialCellMetrics);
@@ -150,12 +136,11 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
         redraw();
         processOutputDrain.start();
 
-        ioTask = IO.submit(() -> runProcess(command, cwd, environment));
         // The canvas only owns the process lifecycle directly. Native terminal resources stay alive as long as the
         // terminal session is reachable so an already-rendered view can still be queried or shown after close().
         CLEANER.register(terminalSession, () -> {
             try (terminalSession) {
-                ioTask.cancel(true);
+                ptySession.close();
             }
         });
     }
@@ -265,83 +250,7 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
     public void close() {
         // Closing the canvas is a process-lifecycle operation only. Native terminal state stays available until the
         // canvas itself becomes unreachable so the last rendered view can still be queried or shown.
-        ioTask.cancel(true);
-    }
-
-    private int runProcess(List<String> command, Path cwd, Map<String, String> environment) throws Exception {
-        if (!Files.isDirectory(cwd)) {
-            throw new IllegalArgumentException("cwd must be an existing directory: " + cwd);
-        }
-
-        var process = new PtyProcessBuilder()
-                .setCommand(command.toArray(String[]::new))
-                .setConsole(false)
-                .setRedirectErrorStream(true)
-                .setDirectory(cwd.toString())
-                .setEnvironment(environment)
-                .setInitialColumns(INITIAL_COLUMNS)
-                .setInitialRows(INITIAL_ROWS)
-                .setUseWinConPty(true)
-                .start();
-        try {
-            var outputTask = IO.submit(() -> {
-                try (var input = process.getInputStream()) {
-                    var buffer = new byte[8 * 1024];
-                    while (true) {
-                        var read = input.read(buffer);
-                        if (read < 0) {
-                            return null;
-                        }
-                        processOutputChunks.put(Arrays.copyOf(buffer, read));
-                    }
-                } finally {
-                    processOutputChunks.put(PROCESS_OUTPUT_COMPLETE);
-                }
-            });
-            try {
-                // input task, no cleanup since we want to consume the proc commands even after the process exits
-                IO.submit(() -> {
-                    try (var output = process.getOutputStream()) {
-                        while (true) {
-                            switch (procCommands.take()) {
-                                case WriteInput(var bytes) ->
-                                    output.write(bytes);
-                                case ResizePty(var columns, var rows) ->
-                                    process.setWinSize(new WinSize(columns, rows));
-                            }
-                        }
-                    } catch (Exception _) {
-                        while (true) {
-                            procCommands.take();
-                        }
-                    }
-                });
-                try {
-                    return process.waitFor();
-                } catch (InterruptedException _) {
-                    // exit requested
-                    outputTask.cancel(true);
-                    return destroyProcess(process);
-                }
-            } finally {
-                // outputTask cleanup
-                outputTask.cancel(true);
-            }
-        } finally {
-            // process cleanup
-            if (process.isAlive()) {
-                destroyProcess(process);
-            }
-        }
-    }
-
-    private int destroyProcess(Process process) throws InterruptedException {
-        process.destroy();
-        if (!process.waitFor(2, java.util.concurrent.TimeUnit.SECONDS)) {
-            process.destroyForcibly();
-            return process.waitFor();
-        }
-        return process.exitValue();
+        ptySession.close();
     }
 
     private void handleCanvasResize() {
@@ -351,7 +260,7 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
             return;
         }
 
-        writeCommand(new ResizePty(size.columns(), size.rows()));
+        writeCommand(new PtySession.ResizePty(size.columns(), size.rows()));
         redraw();
     }
 
@@ -778,50 +687,52 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
     private static final class ProcessOutputDrain extends AnimationTimer {
 
         private final WeakReference<GhosttyCanvas> canvasRef;
-        private final BlockingQueue<byte[]> processOutputChunks;
+        private final PtySession ptySession;
 
         private ProcessOutputDrain(GhosttyCanvas canvas) {
             canvasRef = new WeakReference<>(canvas);
-            processOutputChunks = canvas.processOutputChunks;
+            ptySession = canvas.ptySession;
         }
 
         @Override
         public void handle(long now) {
-            var firstChunk = processOutputChunks.poll();
-            if (firstChunk == null) {
+            var outputs = ptySession.pollProcessOutputs();
+            if (outputs.isEmpty()) {
                 return;
             }
-
-            var chunks = new ArrayList<byte[]>(1 + processOutputChunks.size());
-            chunks.add(firstChunk);
-            processOutputChunks.drainTo(chunks);
 
             var canvas = canvasRef.get();
             if (canvas != null) {
                 var totalBytes = 0;
-                for (var chunk : chunks) {
-                    totalBytes += chunk.length;
+                for (var output : outputs) {
+                    if (output instanceof PtySession.Chunk(var bytes)) {
+                        totalBytes += bytes.length;
+                    }
                 }
 
                 var bytes = new byte[totalBytes];
                 var offset = 0;
-                for (var chunk : chunks) {
-                    System.arraycopy(chunk, 0, bytes, offset, chunk.length);
-                    offset += chunk.length;
+                for (var output : outputs) {
+                    if (output instanceof PtySession.Chunk(var chunk)) {
+                        System.arraycopy(chunk, 0, bytes, offset, chunk.length);
+                        offset += chunk.length;
+                    }
                 }
 
-                canvas.terminalSession.writeToTerminal(bytes);
-                canvas.redraw();
+                if (bytes.length != 0) {
+                    canvas.terminalSession.writeToTerminal(bytes);
+                    canvas.redraw();
+                }
             }
-            if (chunks.get(chunks.size() - 1) == PROCESS_OUTPUT_COMPLETE) {
+            if (outputs.get(outputs.size() - 1) instanceof PtySession.Closed) {
                 stop();
             }
         }
     }
 
-    private void writeCommand(ProcCommand command) {
+    private void writeCommand(PtySession.Command command) {
         try {
-            procCommands.put(command);
+            ptySession.putCommand(command);
         } catch (InterruptedException _) {
             Thread.currentThread().interrupt();
         }
@@ -870,17 +781,6 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
         }
     }
 
-    private sealed interface ProcCommand permits WriteInput, ResizePty {
-    }
-
-    private record WriteInput(byte[] bytes) implements ProcCommand {
-
-    }
-
-    private record ResizePty(int columns, int rows) implements ProcCommand {
-
-    }
-
     static record CellMetrics(int cellWidthPx, int cellHeightPx, int baselineOffsetPx) {
 
     }
@@ -893,7 +793,7 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
         if (bytes.length == 0) {
             return false;
         }
-        writeCommand(new WriteInput(bytes));
+        writeCommand(new PtySession.WriteInput(bytes));
         return true;
     }
 
