@@ -934,7 +934,12 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
             }
         }
 
+        if (wroteToPty) {
+            terminalSession.scrollViewportToBottom();
+        }
+
         var redraw = transition.redraw()
+                || wroteToPty
                 || !previousSelection.equals(selection)
                 || !previousKeyInputState.preedit().equals(keyInputState.preedit());
         if (redraw) {

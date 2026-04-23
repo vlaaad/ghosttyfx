@@ -158,6 +158,15 @@ final class TerminalSession implements AutoCloseable {
         updateRenderState();
     }
 
+    void scrollViewportToBottom() {
+        try (var arena = Arena.ofConfined()) {
+            var behavior = GhosttyTerminalScrollViewport.allocate(arena);
+            GhosttyTerminalScrollViewport.tag(behavior, ghostty_vt_h.GHOSTTY_SCROLL_VIEWPORT_BOTTOM());
+            ghostty_vt_h.ghostty_terminal_scroll_viewport(terminal, behavior);
+        }
+        updateRenderState();
+    }
+
     boolean mouseTrackingEnabled() {
         try (var arena = Arena.ofConfined()) {
             var mouseTracking = arena.allocate(ValueLayout.JAVA_BOOLEAN);
