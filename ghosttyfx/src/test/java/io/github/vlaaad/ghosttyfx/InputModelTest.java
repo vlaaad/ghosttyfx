@@ -229,6 +229,36 @@ final class InputModelTest {
     }
 
     @Test
+    void clearsPreeditWhenInputMethodEventCommitsAndStillReportsComposition() {
+        var state = InputModel.initialState();
+        state = InputModel.onKeyPressed(
+                        state,
+                        InputModel.Platform.LINUX,
+                        false,
+                        snapshot(KeyCode.DEAD_ACUTE))
+                .state();
+        state = InputModel.onInputMethodTextChanged(state, "´", 1, "´").state();
+        state = InputModel.onKeyPressed(
+                        state,
+                        InputModel.Platform.LINUX,
+                        false,
+                        snapshot(KeyCode.A))
+                .state();
+
+        var transition = InputModel.onInputMethodTextChanged(state, "´", 1, "á");
+        assertEquals(new InputModel.RawTextOutput("á"), transition.outputs().getLast());
+        assertEquals(InputModel.Preedit.empty(), transition.state().preedit());
+        assertTrue(transition.state().deferredPresses().isEmpty());
+    }
+
+    @Test
+    void showsImeOnlyPreeditWithoutDeferredPresses() {
+        var transition = InputModel.onInputMethodTextChanged(InputModel.initialState(), "´", 1, "");
+        assertTrue(transition.outputs().isEmpty());
+        assertEquals(new InputModel.Preedit("´", 1), transition.state().preedit());
+    }
+
+    @Test
     void supportsLateTypedAfterRelease() {
         var pressed = InputModel.onKeyPressed(
                 InputModel.initialState(),

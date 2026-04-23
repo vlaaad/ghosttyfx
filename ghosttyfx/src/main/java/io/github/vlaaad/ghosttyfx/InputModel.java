@@ -30,6 +30,9 @@ final class InputModel {
         var repeat = !pressed.add(event.code());
         var nextState = state.withPressedKeys(pressed)
                 .withAltGraphDown(state.altGraphDown() || event.code() == KeyCode.ALT_GRAPH);
+        if (!state.preedit().text().isEmpty() && state.deferredPresses().isEmpty() && !classification.modifierOnly()) {
+            nextState = nextState.withPreedit(Preedit.empty());
+        }
 
         if (event.code() == KeyCode.ALT_GRAPH) {
             return new Transition(nextState, List.of(), false);
@@ -203,12 +206,15 @@ final class InputModel {
             }
         }
 
-        if (!committedText.isEmpty()) {
+        var committed = !committedText.isEmpty();
+        if (committed) {
             outputs.add(new RawTextOutput(committedText));
             nextState = nextState.withDeferredPresses(List.of()).withSelection(Selection.empty());
         }
 
-        var preedit = composedText.isEmpty() ? Preedit.empty() : new Preedit(composedText, caretPosition);
+        var preedit = committed || composedText.isEmpty()
+                ? Preedit.empty()
+                : new Preedit(composedText, caretPosition);
         var redraw = !nextState.preedit().equals(preedit);
         return new Transition(nextState.withPreedit(preedit), List.copyOf(outputs), redraw);
     }
