@@ -2,8 +2,10 @@ package io.github.vlaaad.ghosttyfx;
 
 import io.github.vlaaad.ghostty.bindings.ghostty_vt_h;
 
+import java.awt.Desktop;
 import java.lang.ref.Cleaner;
 import java.lang.ref.WeakReference;
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.List;
@@ -18,6 +20,7 @@ import javafx.beans.property.SimpleBooleanProperty;
 import javafx.beans.property.SimpleObjectProperty;
 import javafx.geometry.Point2D;
 import javafx.scene.canvas.Canvas;
+import javafx.scene.Cursor;
 import javafx.scene.input.Clipboard;
 import javafx.scene.input.ClipboardContent;
 import javafx.scene.input.InputMethodEvent;
@@ -48,6 +51,7 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
     private static final double MIN_SCROLLBAR_HEIGHT_PX = 10;
     private static final double SCROLL_TOTAL_DELTA_EPSILON = 1e-6;
     private static final Color SELECTION_COLOR = Color.rgb(74, 144, 226, 0.25);
+    private static final Color HOVERED_HYPERLINK_COLOR = Color.rgb(74, 144, 226, 0.18);
     private static final Color PREEDIT_FILL = Color.rgb(255, 255, 255, 0.95);
     private static final Color PREEDIT_BACKGROUND = Color.rgb(74, 144, 226, 0.18);
     private static final Color PREEDIT_STROKE = Color.rgb(74, 144, 226, 0.9);
@@ -61,6 +65,7 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
     private KeyInput.State keyInputState = KeyInput.initialState();
     private MouseInput.State mouseInputState = MouseInput.initialState();
     private Selection selection = Selection.empty();
+    private Selection hoveredHyperlink = Selection.empty();
 
     private final ObjectProperty<Font> font = new SimpleObjectProperty<>(this, "font", DEFAULT_FONT) {
         @Override
@@ -123,7 +128,9 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
         focusedProperty().addListener((_, _, focused) -> handleFocusChange(focused));
         setOnMousePressed(this::handleMousePressed);
         setOnMouseDragged(this::handleMouseDragged);
+        setOnMouseMoved(this::handleMouseMoved);
         setOnMouseReleased(this::handleMouseReleased);
+        setOnMouseExited(this::handleMouseExited);
         setOnMouseClicked(this::handleMouseClicked);
         addEventHandler(ScrollEvent.SCROLL_STARTED, this::handleScrollStarted);
         addEventHandler(ScrollEvent.SCROLL_FINISHED, this::handleScrollFinished);
@@ -133,6 +140,7 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
         setOnKeyTyped(this::handleKeyTyped);
         setOnInputMethodTextChanged(this::handleInputMethodTextChanged);
         setInputMethodRequests(new CanvasInputMethodRequests());
+        setCursor(Cursor.DEFAULT);
         redraw();
         processOutputDrain.start();
 
@@ -268,6 +276,7 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
         if (!focused) {
             var nextKeyInputState = KeyInput.onFocusLost(keyInputState);
             var nextMouseInputState = MouseInput.onFocusLost(mouseInputState);
+            clearHover(false);
             if (!nextKeyInputState.equals(keyInputState) || !nextMouseInputState.equals(mouseInputState)) {
                 keyInputState = nextKeyInputState;
                 mouseInputState = nextMouseInputState;
@@ -325,38 +334,150 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
     private void handleMousePressed(MouseEvent event) {
         requestFocus();
         event.consume();
-        if (event.getButton() != MouseButton.PRIMARY) {
+        if (event.getButton() == MouseButton.PRIMARY && isInScrollbar(event.getX())) {
+            handleScrollbarPress(event.getY());
             return;
         }
 
-        if (isInScrollbar(event.getX())) {
-            handleScrollbarPress(event.getY());
+        if (terminalSession.mouseTrackingEnabled() && !isInScrollbar(event.getX())) {
+            clearHover(true);
+            clearSelection();
+            mouseInputState = mouseInputState.withPressGesture(null);
+            writeReportedMousePress(event);
+            return;
+        }
+
+        if (event.getButton() != MouseButton.PRIMARY || isInScrollbar(event.getX())) {
+            return;
+        }
+
+        var hit = contentHit(event);
+        if (hit == null) {
+            mouseInputState = mouseInputState.withPressGesture(null);
+            clearHover(true);
+            return;
+        }
+
+        var clickCount = MouseInput.normalizeClickCount(event.getClickCount());
+        var rectangle = isRectangleSelection(event);
+        mouseInputState = mouseInputState.withPressGesture(new MouseInput.PressGesture(
+                TerminalSession.MouseButton.LEFT,
+                hit.screenPoint(),
+                hit.cellOffsetX(),
+                clickCount,
+                rectangle,
+                false,
+                hit.hyperlinkUri()));
+        clearHover(false);
+        switch (clickCount) {
+            case 1 -> clearSelection();
+            case 2 -> applySelection(terminalSession.wordSelection(hit.screenPoint()));
+            case 3 -> applySelection(terminalSession.lineSelection(hit.screenPoint()));
+            default -> throw new IllegalStateException("unsupported click count: " + clickCount);
         }
     }
 
     private void handleMouseDragged(MouseEvent event) {
         event.consume();
-        if (!mouseInputState.scrollbarDragging()) {
+        if (mouseInputState.scrollbarDragging()) {
+            if (!event.isPrimaryButtonDown()) {
+                mouseInputState = MouseInput.stopScrollbarDrag(mouseInputState);
+                return;
+            }
+
+            dragScrollbarTo(event.getY());
             return;
         }
 
-        if (!event.isPrimaryButtonDown()) {
-            mouseInputState = MouseInput.stopScrollbarDrag(mouseInputState);
+        if (terminalSession.mouseTrackingEnabled() && !isInScrollbar(event.getX())) {
+            clearHover(true);
+            writeReportedMouseMotion(event);
             return;
         }
 
-        dragScrollbarTo(event.getY());
+        var pressGesture = mouseInputState.pressGesture();
+        if (!event.isPrimaryButtonDown() || pressGesture == null || pressGesture.button() != TerminalSession.MouseButton.LEFT) {
+            return;
+        }
+
+        var hit = contentHit(event);
+        if (hit == null) {
+            clearHover(true);
+            return;
+        }
+
+        var movedOffOrigin = !pressGesture.anchor().equals(hit.screenPoint());
+        pressGesture = pressGesture.withDrag(movedOffOrigin || !selection.isEmpty());
+        mouseInputState = mouseInputState.withPressGesture(pressGesture);
+        clearHover(false);
+        switch (pressGesture.clickCount()) {
+            case 1 -> applySelection(MouseInput.selectionForDrag(
+                    pressGesture.anchor(),
+                    hit.screenPoint(),
+                    pressGesture.anchorCellOffsetX(),
+                    hit.cellOffsetX(),
+                    pressGesture.rectangleSelection(),
+                    terminalSession.columnCount(),
+                    cellMetrics.get().cellWidthPx()));
+            case 2 -> applyWordDragSelection(pressGesture, hit.screenPoint());
+            case 3 -> applyLineDragSelection(pressGesture, hit.screenPoint());
+            default -> throw new IllegalStateException("unsupported click count: " + pressGesture.clickCount());
+        }
+    }
+
+    private void handleMouseMoved(MouseEvent event) {
+        event.consume();
+        if (terminalSession.mouseTrackingEnabled() && !isInScrollbar(event.getX())) {
+            clearHover(true);
+            writeReportedMouseMotion(event);
+            return;
+        }
+
+        refreshHover(event);
     }
 
     private void handleMouseReleased(MouseEvent event) {
         event.consume();
+        var nextMouseInputState = MouseInput.stopScrollbarDrag(mouseInputState);
+        if (!nextMouseInputState.equals(mouseInputState)) {
+            mouseInputState = nextMouseInputState;
+        }
+
+        if (terminalSession.mouseTrackingEnabled() && !isInScrollbar(event.getX())) {
+            clearHover(true);
+            writeReportedMouseRelease(event);
+            mouseInputState = mouseInputState.withPressGesture(null);
+            return;
+        }
+
         if (event.getButton() != MouseButton.PRIMARY) {
             return;
         }
 
-        var nextMouseInputState = MouseInput.stopScrollbarDrag(mouseInputState);
-        if (!nextMouseInputState.equals(mouseInputState)) {
-            mouseInputState = nextMouseInputState;
+        var releasedGesture = mouseInputState.pressGesture();
+        mouseInputState = mouseInputState.withPressGesture(null);
+        if (releasedGesture == null) {
+            refreshHover(event);
+            return;
+        }
+
+        var hit = contentHit(event);
+        if (releasedGesture.clickCount() == 1
+                && !releasedGesture.dragged()
+                && hit != null
+                && releasedGesture.hyperlinkUri() != null
+                && releasedGesture.anchor().equals(hit.screenPoint())
+                && releasedGesture.hyperlinkUri().equals(hit.hyperlinkUri())) {
+            openHyperlink(releasedGesture.hyperlinkUri());
+        }
+        refreshHover(event);
+    }
+
+    private void handleMouseExited(MouseEvent event) {
+        event.consume();
+        clearHover(true);
+        if (terminalSession.mouseTrackingEnabled() && anyMouseButtonDown(event)) {
+            writeReportedMouseMotion(event);
         }
     }
 
@@ -572,6 +693,176 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
         return terminalSession.viewportRowCount(0, cellMetrics.get().cellHeightPx(), getHeight());
     }
 
+    private TerminalSession.CellHit contentHit(MouseEvent event) {
+        return terminalSession.hitTest(
+                event.getX(),
+                event.getY(),
+                getWidth(),
+                getHeight(),
+                cellMetrics.get(),
+                scrollbarReservedWidthPx());
+    }
+
+    private void refreshHover(MouseEvent event) {
+        var pressGesture = mouseInputState.pressGesture();
+        if (pressGesture != null && pressGesture.button() == TerminalSession.MouseButton.LEFT) {
+            var hit = contentHit(event);
+            if (hit == null || !pressGesture.anchor().equals(hit.screenPoint())) {
+                clearHover(true);
+                return;
+            }
+        }
+
+        var hit = contentHit(event);
+        if (hit == null || hit.hyperlinkUri() == null || hit.hyperlinkUri().isEmpty()) {
+            clearHover(true);
+            return;
+        }
+
+        var nextHover = terminalSession.hyperlinkSelection(hit.screenPoint(), hit.hyperlinkUri());
+        if (nextHover.isEmpty()) {
+            clearHover(true);
+            return;
+        }
+
+        if (!nextHover.equals(hoveredHyperlink)) {
+            hoveredHyperlink = nextHover;
+            redraw();
+        }
+        setCursor(Cursor.HAND);
+    }
+
+    private void clearHover(boolean redraw) {
+        var changed = !hoveredHyperlink.isEmpty() || getCursor() != Cursor.DEFAULT;
+        hoveredHyperlink = Selection.empty();
+        setCursor(Cursor.DEFAULT);
+        if (changed && redraw) {
+            redraw();
+        }
+    }
+
+    private void applySelection(Selection nextSelection) {
+        var normalized = nextSelection == null ? Selection.empty() : nextSelection;
+        if (!selection.equals(normalized)) {
+            if (!normalized.isEmpty()) {
+                clearHover(false);
+            }
+            selection = normalized;
+            redraw();
+        }
+    }
+
+    private void applyWordDragSelection(MouseInput.PressGesture pressGesture, Selection.ScreenPoint dragPoint) {
+        var anchorWord = terminalSession.wordSelection(pressGesture.anchor());
+        var currentWord = terminalSession.wordSelectionBetween(dragPoint, pressGesture.anchor());
+        if (anchorWord.isEmpty() || currentWord.isEmpty()) {
+            applySelection(Selection.empty());
+            return;
+        }
+
+        applySelection(compareScreenPoints(dragPoint, pressGesture.anchor()) < 0
+                ? Selection.linear(currentWord.normalized().from(), anchorWord.normalized().to())
+                : Selection.linear(anchorWord.normalized().from(), currentWord.normalized().to()));
+    }
+
+    private void applyLineDragSelection(MouseInput.PressGesture pressGesture, Selection.ScreenPoint dragPoint) {
+        var anchorLine = terminalSession.lineSelection(pressGesture.anchor());
+        var currentLine = terminalSession.lineSelection(dragPoint);
+        if (anchorLine.isEmpty() || currentLine.isEmpty()) {
+            applySelection(Selection.empty());
+            return;
+        }
+
+        applySelection(compareScreenPoints(dragPoint, pressGesture.anchor()) < 0
+                ? Selection.linear(currentLine.normalized().from(), anchorLine.normalized().to())
+                : Selection.linear(anchorLine.normalized().from(), currentLine.normalized().to()));
+    }
+
+    private void writeReportedMousePress(MouseEvent event) {
+        writeBytes(terminalSession.encodeMousePress(
+                toTerminalMouseButton(event.getButton()),
+                event.getX(),
+                event.getY(),
+                eventModifiers(event),
+                getWidth(),
+                getHeight(),
+                cellMetrics.get(),
+                scrollbarReservedWidthPx(),
+                anyMouseButtonDown(event)));
+    }
+
+    private void writeReportedMouseRelease(MouseEvent event) {
+        writeBytes(terminalSession.encodeMouseRelease(
+                toTerminalMouseButton(event.getButton()),
+                event.getX(),
+                event.getY(),
+                eventModifiers(event),
+                getWidth(),
+                getHeight(),
+                cellMetrics.get(),
+                scrollbarReservedWidthPx(),
+                anyMouseButtonDown(event)));
+    }
+
+    private void writeReportedMouseMotion(MouseEvent event) {
+        writeBytes(terminalSession.encodeMouseMotion(
+                currentPressedMouseButton(event),
+                event.getX(),
+                event.getY(),
+                eventModifiers(event),
+                getWidth(),
+                getHeight(),
+                cellMetrics.get(),
+                scrollbarReservedWidthPx(),
+                anyMouseButtonDown(event)));
+    }
+
+    private static TerminalSession.MouseButton toTerminalMouseButton(MouseButton button) {
+        return switch (button) {
+            case PRIMARY -> TerminalSession.MouseButton.LEFT;
+            case SECONDARY -> TerminalSession.MouseButton.RIGHT;
+            case MIDDLE -> TerminalSession.MouseButton.MIDDLE;
+            default -> TerminalSession.MouseButton.UNKNOWN;
+        };
+    }
+
+    private static TerminalSession.MouseButton currentPressedMouseButton(MouseEvent event) {
+        if (event.isPrimaryButtonDown()) {
+            return TerminalSession.MouseButton.LEFT;
+        }
+        if (event.isSecondaryButtonDown()) {
+            return TerminalSession.MouseButton.RIGHT;
+        }
+        if (event.isMiddleButtonDown()) {
+            return TerminalSession.MouseButton.MIDDLE;
+        }
+        return TerminalSession.MouseButton.UNKNOWN;
+    }
+
+    private static boolean anyMouseButtonDown(MouseEvent event) {
+        return event.isPrimaryButtonDown() || event.isSecondaryButtonDown() || event.isMiddleButtonDown();
+    }
+
+    private boolean isRectangleSelection(MouseEvent event) {
+        return inputPlatform == KeyInput.Platform.MACOS
+                ? event.isAltDown()
+                : event.isAltDown() && (event.isControlDown() || event.isMetaDown());
+    }
+
+    private static int compareScreenPoints(Selection.ScreenPoint left, Selection.ScreenPoint right) {
+        var byY = Integer.compare(left.y(), right.y());
+        return byY != 0 ? byY : Integer.compare(left.x(), right.x());
+    }
+
+    private static void openHyperlink(String hyperlinkUri) {
+        try {
+            if (Desktop.isDesktopSupported() && Desktop.getDesktop().isSupported(Desktop.Action.BROWSE)) {
+                Desktop.getDesktop().browse(URI.create(hyperlinkUri));
+            }
+        } catch (Exception _) {
+        }
+    }
+
     private boolean handleShortcut(KeyEvent event) {
         var copy = getCopyShortcut();
         if (copy != null && copy.match(event) && !selection.isEmpty()) {
@@ -597,6 +888,7 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
         if (selectAll != null && selectAll.match(event)) {
             var nextSelection = terminalSession.selectAllSelection();
             if (!nextSelection.equals(selection)) {
+                clearHover(false);
                 selection = nextSelection;
                 redraw();
             }
@@ -607,6 +899,7 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
 
     private void clearSelection() {
         if (!selection.isEmpty()) {
+            clearHover(false);
             selection = Selection.empty();
             redraw();
         }
@@ -617,6 +910,7 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
         var previousSelection = selection;
         keyInputState = transition.state();
         if (transition.clearSelection()) {
+            clearHover(false);
             selection = Selection.empty();
         }
 
@@ -672,9 +966,11 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
                 cellMetrics.get(),
                 keyInputState.preedit(),
                 selection,
+                hoveredHyperlink,
                 scrollbarReservedWidthPx(),
                 MIN_SCROLLBAR_HEIGHT_PX,
                 SELECTION_COLOR,
+                HOVERED_HYPERLINK_COLOR,
                 PREEDIT_FILL,
                 PREEDIT_BACKGROUND,
                 PREEDIT_STROKE);

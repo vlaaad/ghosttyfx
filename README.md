@@ -14,7 +14,6 @@ Generated per-platform `jextract` bindings for `libghostty-vt`.
 - `ghostling`: pinned Git submodule for the upstream Ghostling reference app
 
 ## Next steps
-1. mouse handling: hyperlinks (hover/click), terminal, selection (double clicks, triple clicks)
 3. scroll to bottom on input?
 4. font families: use italic and bold variants instead of shear/overdraw hacks
 5. terminal callbacks
