@@ -14,7 +14,6 @@ Generated per-platform `jextract` bindings for `libghostty-vt`.
 - `ghostling`: pinned Git submodule for the upstream Ghostling reference app
 
 ## Next steps
-5. terminal callbacks
 6. kitty graphics
 8. more shortcuts like pgup/pgdown
 9. customization/styles/better rendering

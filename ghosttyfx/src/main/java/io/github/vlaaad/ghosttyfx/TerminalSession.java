@@ -1,6 +1,10 @@
 package io.github.vlaaad.ghosttyfx;
 
 import io.github.vlaaad.ghostty.bindings.GhosttyColorRgb;
+import io.github.vlaaad.ghostty.bindings.GhosttyDeviceAttributes;
+import io.github.vlaaad.ghostty.bindings.GhosttyDeviceAttributesPrimary;
+import io.github.vlaaad.ghostty.bindings.GhosttyDeviceAttributesSecondary;
+import io.github.vlaaad.ghostty.bindings.GhosttyDeviceAttributesTertiary;
 import io.github.vlaaad.ghostty.bindings.GhosttyFormatterTerminalOptions;
 import io.github.vlaaad.ghostty.bindings.GhosttyGridRef;
 import io.github.vlaaad.ghostty.bindings.GhosttyMouseEncoderSize;
@@ -10,19 +14,27 @@ import io.github.vlaaad.ghostty.bindings.GhosttyPointCoordinate;
 import io.github.vlaaad.ghostty.bindings.GhosttyPointValue;
 import io.github.vlaaad.ghostty.bindings.GhosttyRenderStateColors;
 import io.github.vlaaad.ghostty.bindings.GhosttySelection;
+import io.github.vlaaad.ghostty.bindings.GhosttySizeReportSize;
 import io.github.vlaaad.ghostty.bindings.GhosttyStyle;
+import io.github.vlaaad.ghostty.bindings.GhosttyString;
+import io.github.vlaaad.ghostty.bindings.GhosttyTerminalBellFn;
+import io.github.vlaaad.ghostty.bindings.GhosttyTerminalDeviceAttributesFn;
 import io.github.vlaaad.ghostty.bindings.GhosttyTerminalOptions;
 import io.github.vlaaad.ghostty.bindings.GhosttyTerminalScrollbar;
 import io.github.vlaaad.ghostty.bindings.GhosttyTerminalScrollViewport;
 import io.github.vlaaad.ghostty.bindings.GhosttyTerminalScrollViewportValue;
+import io.github.vlaaad.ghostty.bindings.GhosttyTerminalSizeFn;
+import io.github.vlaaad.ghostty.bindings.GhosttyTerminalTitleChangedFn;
+import io.github.vlaaad.ghostty.bindings.GhosttyTerminalWritePtyFn;
+import io.github.vlaaad.ghostty.bindings.GhosttyTerminalXtversionFn;
 import io.github.vlaaad.ghostty.bindings.ghostty_vt_h;
 import java.lang.foreign.Arena;
 import java.lang.foreign.MemoryLayout;
 import java.lang.foreign.MemorySegment;
 import java.lang.foreign.ValueLayout;
 import java.nio.charset.StandardCharsets;
-import java.util.Objects;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Consumer;
 import javafx.scene.canvas.GraphicsContext;
 import javafx.scene.paint.Color;
 
@@ -37,8 +49,10 @@ final class TerminalSession implements AutoCloseable {
     private static final int MAX_GHOSTTY_DIMENSION = 0xFFFF;
     private static final long INITIAL_MAX_SCROLLBACK = 1_000;
     private static final double BLOCK_CURSOR_ALPHA = 0.5;
+    private static final byte[] XTVERSION_BYTES = "ghosttyfx".getBytes(StandardCharsets.UTF_8);
 
     private final AtomicBoolean closed = new AtomicBoolean();
+    private final Arena callbackArena = Arena.ofShared();
     private final MemorySegment terminal;
     private final MemorySegment renderState;
     private final MemorySegment rowIterator;
@@ -47,8 +61,29 @@ final class TerminalSession implements AutoCloseable {
     private final MemorySegment keyEvent;
     private final MemorySegment mouseEncoder;
     private final MemorySegment mouseEvent;
+    private final MemorySegment xtversionString;
+    private final PtySession ptySession;
+    private final Consumer<String> titleChanged;
+    private final Runnable bell;
+    private Size size;
+    private GhosttyCanvas.CellMetrics cellMetrics;
 
-    TerminalSession(int initialColumns, int initialRows, GhosttyCanvas.CellMetrics initialCellMetrics) {
+    TerminalSession(
+            int initialColumns,
+            int initialRows,
+            GhosttyCanvas.CellMetrics initialCellMetrics,
+            PtySession ptySession,
+            Consumer<String> titleChanged,
+            Runnable bell) {
+        this.ptySession = ptySession;
+        this.titleChanged = titleChanged;
+        this.bell = bell;
+        size = new Size(initialColumns, initialRows);
+        cellMetrics = initialCellMetrics;
+        xtversionString = GhosttyString.allocate(callbackArena);
+        GhosttyString.ptr(xtversionString, callbackArena.allocateFrom(ValueLayout.JAVA_BYTE, XTVERSION_BYTES));
+        GhosttyString.len(xtversionString, XTVERSION_BYTES.length);
+
         try (var arena = Arena.ofConfined()) {
             GhosttyFx.NativeLibraryHolder.ensureLoaded();
 
@@ -79,7 +114,112 @@ final class TerminalSession implements AutoCloseable {
                             initialCellMetrics.cellHeightPx()),
                     "ghostty_terminal_resize");
         }
+        requireGhosttySuccess(
+                ghostty_vt_h.ghostty_terminal_set(
+                        terminal,
+                        ghostty_vt_h.GHOSTTY_TERMINAL_OPT_WRITE_PTY(),
+                        GhosttyTerminalWritePtyFn.allocate(this::writePty, callbackArena)),
+                "ghostty_terminal_set");
+        requireGhosttySuccess(
+                ghostty_vt_h.ghostty_terminal_set(
+                        terminal,
+                        ghostty_vt_h.GHOSTTY_TERMINAL_OPT_SIZE(),
+                        GhosttyTerminalSizeFn.allocate(this::reportSize, callbackArena)),
+                "ghostty_terminal_set");
+        requireGhosttySuccess(
+                ghostty_vt_h.ghostty_terminal_set(
+                        terminal,
+                        ghostty_vt_h.GHOSTTY_TERMINAL_OPT_DEVICE_ATTRIBUTES(),
+                        GhosttyTerminalDeviceAttributesFn.allocate(this::reportDeviceAttributes, callbackArena)),
+                "ghostty_terminal_set");
+        requireGhosttySuccess(
+                ghostty_vt_h.ghostty_terminal_set(
+                        terminal,
+                        ghostty_vt_h.GHOSTTY_TERMINAL_OPT_XTVERSION(),
+                        GhosttyTerminalXtversionFn.allocate(this::reportXtversion, callbackArena)),
+                "ghostty_terminal_set");
+        requireGhosttySuccess(
+                ghostty_vt_h.ghostty_terminal_set(
+                        terminal,
+                        ghostty_vt_h.GHOSTTY_TERMINAL_OPT_TITLE_CHANGED(),
+                        GhosttyTerminalTitleChangedFn.allocate(this::reportTitleChanged, callbackArena)),
+                "ghostty_terminal_set");
+        requireGhosttySuccess(
+                ghostty_vt_h.ghostty_terminal_set(
+                        terminal,
+                        ghostty_vt_h.GHOSTTY_TERMINAL_OPT_BELL(),
+                        GhosttyTerminalBellFn.allocate((_, _) -> this.bell.run(), callbackArena)),
+                "ghostty_terminal_set");
         updateRenderState();
+    }
+
+    private void writePty(MemorySegment terminal, MemorySegment userdata, MemorySegment data, long length) {
+        if (length == 0) {
+            return;
+        }
+        try {
+            ptySession.putCommand(new PtySession.WriteInput(data.reinterpret(length).toArray(ValueLayout.JAVA_BYTE)));
+        } catch (InterruptedException _) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
+    private boolean reportSize(MemorySegment terminal, MemorySegment userdata, MemorySegment outSize) {
+        var sizeReport = outSize.reinterpret(GhosttySizeReportSize.sizeof());
+        var currentSize = size;
+        var currentCellMetrics = cellMetrics;
+        GhosttySizeReportSize.rows(sizeReport, (short) currentSize.rows());
+        GhosttySizeReportSize.columns(sizeReport, (short) currentSize.columns());
+        GhosttySizeReportSize.cell_width(sizeReport, currentCellMetrics.cellWidthPx());
+        GhosttySizeReportSize.cell_height(sizeReport, currentCellMetrics.cellHeightPx());
+        return true;
+    }
+
+    private boolean reportDeviceAttributes(MemorySegment terminal, MemorySegment userdata, MemorySegment outAttributes) {
+        var attributes = outAttributes.reinterpret(GhosttyDeviceAttributes.sizeof());
+        var primary = GhosttyDeviceAttributes.primary(attributes);
+        GhosttyDeviceAttributesPrimary.conformance_level(primary, (short) ghostty_vt_h.GHOSTTY_DA_CONFORMANCE_VT220());
+        GhosttyDeviceAttributesPrimary.features(primary, 0, (short) ghostty_vt_h.GHOSTTY_DA_FEATURE_COLUMNS_132());
+        GhosttyDeviceAttributesPrimary.features(primary, 1, (short) ghostty_vt_h.GHOSTTY_DA_FEATURE_SELECTIVE_ERASE());
+        GhosttyDeviceAttributesPrimary.features(primary, 2, (short) ghostty_vt_h.GHOSTTY_DA_FEATURE_ANSI_COLOR());
+        GhosttyDeviceAttributesPrimary.num_features(primary, 3);
+
+        var secondary = GhosttyDeviceAttributes.secondary(attributes);
+        GhosttyDeviceAttributesSecondary.device_type(secondary, (short) ghostty_vt_h.GHOSTTY_DA_DEVICE_TYPE_VT220());
+        GhosttyDeviceAttributesSecondary.firmware_version(secondary, (short) 1);
+        GhosttyDeviceAttributesSecondary.rom_cartridge(secondary, (short) 0);
+
+        var tertiary = GhosttyDeviceAttributes.tertiary(attributes);
+        GhosttyDeviceAttributesTertiary.unit_id(tertiary, 0);
+        return true;
+    }
+
+    private MemorySegment reportXtversion(MemorySegment terminal, MemorySegment userdata) {
+        return xtversionString;
+    }
+
+    private void reportTitleChanged(MemorySegment terminal, MemorySegment userdata) {
+        try (var arena = Arena.ofConfined()) {
+            var title = GhosttyString.allocate(arena);
+            if (ghostty_vt_h.ghostty_terminal_get(
+                    this.terminal,
+                    ghostty_vt_h.GHOSTTY_TERMINAL_DATA_TITLE(),
+                    title) == GHOSTTY_SUCCESS) {
+                titleChanged.accept(toJavaString(title));
+            }
+        }
+    }
+
+    private static String toJavaString(MemorySegment value) {
+        var length = GhosttyString.len(value);
+        if (length == 0) {
+            return "";
+        }
+        var pointer = GhosttyString.ptr(value);
+        if (pointer.equals(MemorySegment.NULL)) {
+            return "";
+        }
+        return new String(pointer.reinterpret(length).toArray(ValueLayout.JAVA_BYTE), StandardCharsets.UTF_8);
     }
 
     @Override
@@ -88,14 +228,16 @@ final class TerminalSession implements AutoCloseable {
             return;
         }
 
-        ghostty_vt_h.ghostty_mouse_event_free(mouseEvent);
-        ghostty_vt_h.ghostty_mouse_encoder_free(mouseEncoder);
-        ghostty_vt_h.ghostty_key_event_free(keyEvent);
-        ghostty_vt_h.ghostty_key_encoder_free(keyEncoder);
-        ghostty_vt_h.ghostty_render_state_row_cells_free(rowCells);
-        ghostty_vt_h.ghostty_render_state_row_iterator_free(rowIterator);
-        ghostty_vt_h.ghostty_render_state_free(renderState);
-        ghostty_vt_h.ghostty_terminal_free(terminal);
+        try (callbackArena) {
+            ghostty_vt_h.ghostty_mouse_event_free(mouseEvent);
+            ghostty_vt_h.ghostty_mouse_encoder_free(mouseEncoder);
+            ghostty_vt_h.ghostty_key_event_free(keyEvent);
+            ghostty_vt_h.ghostty_key_encoder_free(keyEncoder);
+            ghostty_vt_h.ghostty_render_state_row_cells_free(rowCells);
+            ghostty_vt_h.ghostty_render_state_row_iterator_free(rowIterator);
+            ghostty_vt_h.ghostty_render_state_free(renderState);
+            ghostty_vt_h.ghostty_terminal_free(terminal);
+        }
     }
 
     Size resize(double widthPx, double heightPx, GhosttyCanvas.CellMetrics metrics, double scrollbarReservedWidthPx) {
@@ -113,6 +255,8 @@ final class TerminalSession implements AutoCloseable {
                         metrics.cellWidthPx(),
                         metrics.cellHeightPx()),
                 "ghostty_terminal_resize");
+        size = new Size(columns, rows);
+        cellMetrics = metrics;
         updateRenderState();
         return new Size(columns, rows);
     }
@@ -408,16 +552,6 @@ final class TerminalSession implements AutoCloseable {
         }
     }
 
-    int totalRowCount() {
-        try (var arena = Arena.ofConfined()) {
-            var totalRows = arena.allocate(ValueLayout.JAVA_LONG);
-            if (ghostty_vt_h.ghostty_terminal_get(terminal, ghostty_vt_h.GHOSTTY_TERMINAL_DATA_TOTAL_ROWS(), totalRows) != GHOSTTY_SUCCESS) {
-                return 0;
-            }
-            return Math.toIntExact(totalRows.get(ValueLayout.JAVA_LONG, 0));
-        }
-    }
-
     CellHit hitTest(
             double x,
             double y,
@@ -531,8 +665,7 @@ final class TerminalSession implements AutoCloseable {
     }
 
     Selection hyperlinkSelection(Selection.ScreenPoint point, String uri) {
-        Objects.requireNonNull(point, "point");
-        if (uri == null || uri.isEmpty()) {
+        if (uri.isEmpty()) {
             return Selection.empty();
         }
 
@@ -1474,6 +1607,7 @@ final class TerminalSession implements AutoCloseable {
             double cellOffsetX,
             boolean hasText,
             String hyperlinkUri) {
+
     }
 
     record Size(int columns, int rows) {

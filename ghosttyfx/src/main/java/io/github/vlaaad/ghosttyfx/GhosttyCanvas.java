@@ -18,6 +18,8 @@ import javafx.beans.property.BooleanProperty;
 import javafx.beans.property.ObjectProperty;
 import javafx.beans.property.SimpleBooleanProperty;
 import javafx.beans.property.SimpleObjectProperty;
+import javafx.beans.property.SimpleStringProperty;
+import javafx.beans.property.StringProperty;
 import javafx.geometry.Point2D;
 import javafx.scene.canvas.Canvas;
 import javafx.scene.Cursor;
@@ -69,6 +71,8 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
     private MouseInput.State mouseInputState = MouseInput.initialState();
     private Selection selection = Selection.empty();
     private Selection hoveredHyperlink = Selection.empty();
+    private final StringProperty title;
+    private final ObjectProperty<Runnable> onBell = new SimpleObjectProperty<>(this, "onBell");
 
     private final ObjectProperty<Font> font = new SimpleObjectProperty<>(this, "font", DEFAULT_FONT) {
         @Override
@@ -125,10 +129,22 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
     }, font);
 
     GhosttyCanvas(List<String> command, Path cwd, Map<String, String> environment) {
+        title = new SimpleStringProperty(this, "title", command.getFirst());
         ptySession = new PtySession(command, cwd, environment, INITIAL_COLUMNS, INITIAL_ROWS);
         processOutputDrain = new ProcessOutputDrain(this);
         var initialCellMetrics = cellMetrics.get();
-        terminalSession = new TerminalSession(INITIAL_COLUMNS, INITIAL_ROWS, initialCellMetrics);
+        terminalSession = new TerminalSession(
+                INITIAL_COLUMNS,
+                INITIAL_ROWS,
+                initialCellMetrics,
+                ptySession,
+                title::set,
+                () -> {
+                    var handler = onBell.get();
+                    if (handler != null) {
+                        handler.run();
+                    }
+                });
 
         setFocusTraversable(true);
         setWidth(prefWidth(-1));
@@ -264,6 +280,26 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
 
     public ObjectProperty<KeyCombination> selectAllShortcutProperty() {
         return selectAllShortcut;
+    }
+
+    public String getTitle() {
+        return title.get();
+    }
+
+    public StringProperty titleProperty() {
+        return title;
+    }
+
+    public Runnable getOnBell() {
+        return onBell.get();
+    }
+
+    public void setOnBell(Runnable value) {
+        onBell.set(value);
+    }
+
+    public ObjectProperty<Runnable> onBellProperty() {
+        return onBell;
     }
 
     @Override
@@ -790,12 +826,11 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
     }
 
     private void applySelection(Selection nextSelection) {
-        var normalized = nextSelection == null ? Selection.empty() : nextSelection;
-        if (!selection.equals(normalized)) {
-            if (!normalized.isEmpty()) {
+        if (!selection.equals(nextSelection)) {
+            if (!nextSelection.isEmpty()) {
                 clearHover(false);
             }
-            selection = normalized;
+            selection = nextSelection;
             redraw();
         }
     }
@@ -975,7 +1010,7 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
                     wroteToPty |= producedBytes;
                 }
                 case KeyInput.RawTextOutput(var text) -> {
-                    if (text != null && !text.isEmpty()) {
+                    if (!text.isEmpty()) {
                         wroteToPty |= writeBytes(text.getBytes(StandardCharsets.UTF_8));
                     }
                 }

@@ -15,10 +15,7 @@ record Selection(ScreenPoint from, ScreenPoint to, boolean rectangle) {
     }
 
     static Selection linear(ScreenPoint from, ScreenPoint to) {
-        return new Selection(
-                java.util.Objects.requireNonNull(from, "from"),
-                java.util.Objects.requireNonNull(to, "to"),
-                false);
+        return new Selection(from, to, false);
     }
 
     boolean isEmpty() {

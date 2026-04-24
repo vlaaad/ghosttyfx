@@ -10,6 +10,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Objects;
 import javafx.application.Platform;
 import javafx.collections.FXCollections;
 import javafx.geometry.Insets;
@@ -23,6 +24,7 @@ import javafx.scene.control.TextField;
 import javafx.scene.layout.BorderPane;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
+import javafx.scene.media.AudioClip;
 import javafx.stage.DirectoryChooser;
 import javafx.stage.Stage;
 
@@ -45,6 +47,9 @@ public final class GhosttyFxManualApp {
             var chooseDirectory = new Button("Browse...");
             var startTerminal = new Button("New Terminal");
             var tabs = new TabPane();
+            var bellSound = new AudioClip(Objects.requireNonNull(
+                    GhosttyFxManualApp.class.getResource("bell_ding1.wav"),
+                    "bell_ding1.wav").toExternalForm());
 
             chooseDirectory.setOnAction(_ -> {
                 var chooser = new DirectoryChooser();
@@ -105,8 +110,11 @@ public final class GhosttyFxManualApp {
                     return;
                 }
 
-                var tab = new Tab(terminal.label(), canvas);
+                var tab = new Tab();
+                tab.textProperty().bind(canvas.titleProperty());
+                tab.setContent(canvas);
                 tab.setClosable(true);
+                canvas.setOnBell(bellSound::play);
                 tab.setOnClosed(_2 -> Thread.ofVirtual().name("ghosttyfx-tab-close").start(canvas::close));
                 tabs.getTabs().add(tab);
                 tabs.getSelectionModel().select(tab);
