@@ -177,6 +177,17 @@ final class TerminalSession implements AutoCloseable {
         }
     }
 
+    boolean alternateScreenActive() {
+        try (var arena = Arena.ofConfined()) {
+            var activeScreen = arena.allocate(ValueLayout.JAVA_INT);
+            return ghostty_vt_h.ghostty_terminal_get(
+                    terminal,
+                    ghostty_vt_h.GHOSTTY_TERMINAL_DATA_ACTIVE_SCREEN(),
+                    activeScreen) == GHOSTTY_SUCCESS
+                    && activeScreen.get(ValueLayout.JAVA_INT, 0) == ghostty_vt_h.GHOSTTY_TERMINAL_SCREEN_ALTERNATE();
+        }
+    }
+
     byte[] encodeMousePress(
             MouseButton button,
             double x,

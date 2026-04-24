@@ -44,6 +44,7 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
     private static final int INITIAL_COLUMNS = 80;
     private static final int INITIAL_ROWS = 24;
     private static final short FOCUS_EVENT_MODE = 1004;
+    private static final short MOUSE_ALTERNATE_SCROLL_MODE = 1007;
     private static final short BRACKETED_PASTE_MODE = 2004;
     private static final double DEFAULT_SCROLL_MULTIPLIER_Y = 40;
     private static final double SCROLLBAR_WIDTH_PX = 6;
@@ -525,6 +526,9 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
                         cellMetrics.get(),
                         scrollbarReservedWidthPx()));
             }
+            if (!wroteToApplication && alternateScrollEnabled(overContent)) {
+                wroteToApplication = writeAlternateScrollKeys(wholeTicks, eventModifiers(event));
+            }
             if (!wroteToApplication) {
                 scrollViewportBy(-wholeTicks);
             }
@@ -556,9 +560,42 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
                     cellMetrics.get(),
                     scrollbarReservedWidthPx()));
         }
+        if (!wroteToApplication && alternateScrollEnabled(overContent)) {
+            wroteToApplication = writeAlternateScrollKeys(wholeRows, eventModifiers(event));
+        }
         if (!wroteToApplication) {
             scrollViewportBy(-wholeRows);
         }
+    }
+
+    private boolean alternateScrollEnabled(boolean overContent) {
+        return overContent
+                && terminalSession.alternateScreenActive()
+                && terminalSession.readMode(MOUSE_ALTERNATE_SCROLL_MODE);
+    }
+
+    private boolean writeAlternateScrollKeys(int deltaRows, short mods) {
+        var code = deltaRows > 0 ? KeyCode.UP : KeyCode.DOWN;
+        var classification = KeyInput.classify(code);
+        var output = new KeyInput.EncodeOutput(
+                code,
+                ghostty_vt_h.GHOSTTY_KEY_ACTION_PRESS(),
+                classification.ghosttyKey(),
+                mods,
+                (short) 0,
+                classification.unshiftedCodepoint(),
+                "",
+                false);
+        var wroteToPty = false;
+        for (var i = 0; i < Math.abs(deltaRows); i++) {
+            wroteToPty |= writeBytes(terminalSession.encode(output, isMacOptionAsAlt()));
+        }
+        if (wroteToPty) {
+            clearSelection();
+            terminalSession.scrollViewportToBottom();
+            redraw();
+        }
+        return wroteToPty;
     }
 
     private boolean handleScrollbarPress(double y) {
