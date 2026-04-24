@@ -35,6 +35,8 @@ import javafx.scene.input.ScrollEvent;
 import javafx.scene.input.ScrollEvent.VerticalTextScrollUnits;
 import javafx.scene.paint.Color;
 import javafx.scene.text.Font;
+import javafx.scene.text.FontPosture;
+import javafx.scene.text.FontWeight;
 import javafx.scene.text.Text;
 import javafx.scene.text.TextBoundsType;
 
@@ -74,6 +76,14 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
             super.set(java.util.Objects.requireNonNull(value, "font"));
         }
     };
+    private final ObjectBinding<TerminalFonts> terminalFonts = Bindings.createObjectBinding(() -> {
+        var font = this.font.get();
+        return new TerminalFonts(
+                font,
+                Font.font(font.getFamily(), FontWeight.BOLD, font.getSize()),
+                Font.font(font.getFamily(), FontPosture.ITALIC, font.getSize()),
+                Font.font(font.getFamily(), FontWeight.BOLD, FontPosture.ITALIC, font.getSize()));
+    }, font);
     private final BooleanProperty macOptionAsAlt = new SimpleBooleanProperty(this, "macOptionAsAlt", false);
     private final ObjectProperty<KeyCombination> copyShortcut = new SimpleObjectProperty<>(
             this,
@@ -124,6 +134,7 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
         setWidth(prefWidth(-1));
         setHeight(prefHeight(-1));
         cellMetrics.addListener((_, _, _) -> handleCanvasResize());
+        terminalFonts.addListener((_, _, _) -> redraw());
         widthProperty().addListener((_, _, _) -> handleCanvasResize());
         heightProperty().addListener((_, _, _) -> handleCanvasResize());
         focusedProperty().addListener((_, _, focused) -> handleFocusChange(focused));
@@ -1004,7 +1015,7 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
                 getGraphicsContext2D(),
                 width,
                 height,
-                font.get(),
+                terminalFonts.get(),
                 cellMetrics.get(),
                 keyInputState.preedit(),
                 selection,
@@ -1124,6 +1135,20 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
     }
 
     static record CursorLocation(int cellX, int cellY, double pixelX, double pixelY) {
+
+    }
+
+    static record TerminalFonts(Font regular, Font bold, Font italic, Font boldItalic) {
+
+        Font forStyle(boolean bold, boolean italic) {
+            if (bold && italic) {
+                return boldItalic;
+            }
+            if (bold) {
+                return this.bold;
+            }
+            return italic ? this.italic : regular;
+        }
 
     }
 

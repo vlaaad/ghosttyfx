@@ -25,7 +25,6 @@ import java.util.Objects;
 import java.util.concurrent.atomic.AtomicBoolean;
 import javafx.scene.canvas.GraphicsContext;
 import javafx.scene.paint.Color;
-import javafx.scene.text.Font;
 
 final class TerminalSession implements AutoCloseable {
 
@@ -663,7 +662,7 @@ final class TerminalSession implements AutoCloseable {
             GraphicsContext graphics,
             double width,
             double height,
-            Font font,
+            GhosttyCanvas.TerminalFonts fonts,
             GhosttyCanvas.CellMetrics metrics,
             KeyInput.Preedit preedit,
             Selection selection,
@@ -675,7 +674,7 @@ final class TerminalSession implements AutoCloseable {
             Color preeditFill,
             Color preeditBackground,
             Color preeditStroke) {
-        graphics.setFont(font);
+        graphics.setFont(fonts.regular());
 
         try (var arena = Arena.ofConfined()) {
             var colors = GhosttyRenderStateColors.allocate(arena);
@@ -803,22 +802,8 @@ final class TerminalSession implements AutoCloseable {
                         var renderedText = text.toString();
                         var baseline = y + metrics.baselineOffsetPx();
                         graphics.setFill(toFxColor(foreground));
-
-                        if (GhosttyStyle.italic(style)) {
-                            graphics.save();
-                            graphics.translate(x, y);
-                            graphics.transform(1, 0, 0.2, 1, 0, 0);
-                            graphics.fillText(renderedText, 0, metrics.baselineOffsetPx());
-                            if (GhosttyStyle.bold(style)) {
-                                graphics.fillText(renderedText, 1, metrics.baselineOffsetPx());
-                            }
-                            graphics.restore();
-                        } else {
-                            graphics.fillText(renderedText, x, baseline);
-                            if (GhosttyStyle.bold(style)) {
-                                graphics.fillText(renderedText, x + 1, baseline);
-                            }
-                        }
+                        graphics.setFont(fonts.forStyle(GhosttyStyle.bold(style), GhosttyStyle.italic(style)));
+                        graphics.fillText(renderedText, x, baseline);
                     }
 
                     x += metrics.cellWidthPx();
@@ -829,6 +814,7 @@ final class TerminalSession implements AutoCloseable {
 
             renderSelectionOverlay(graphics, metrics, selection, selectionColor);
             renderSelectionOverlay(graphics, metrics, hoveredHyperlink, hoveredHyperlinkColor);
+            graphics.setFont(fonts.regular());
             renderCursor(graphics, metrics, preedit, colors, preeditFill, preeditBackground, preeditStroke);
 
             var scrollbar = scrollbarInfo(width, height, scrollbarWidthPx, minScrollbarHeightPx);
