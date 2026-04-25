@@ -19,7 +19,6 @@ Generated per-platform `jextract` bindings for `libghostty-vt`.
 9. OSC clipboard: copy/paste shortcuts exist, but terminal-initiated clipboard read/write sequences are not wired.
 11. Blinking: cursor visibility is respected, but there is no blink timer for blinking cursor or blinking text attributes.
 12. Faint/dim style: bold/italic/inverse/invisible are handled; faint is not visibly rendered.
-13. Mouse pointer shape from terminal: Ghostty can set requested mouse shapes; GhosttyCanvas only switches default/hand for hyperlinks.
 14. Semantic prompt / shell integration UI (osc 133): libghostty parses semantic prompt data, but the canvas does not expose prompt navigation, command regions, or similar UI behavior.
 15. Search UI: Ghostty has search behavior at the app layer; this canvas has selection and copy, but no find/highlight navigation.
 16. Rich font rendering: grapheme handling exists, but JavaFX fillText per cell means no full terminal-grade shaping/ligatures/fallback behavior like Ghostty’s renderer.
