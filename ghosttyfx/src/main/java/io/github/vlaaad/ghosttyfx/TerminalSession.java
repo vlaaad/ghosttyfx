@@ -18,6 +18,7 @@ import io.github.vlaaad.ghostty.bindings.GhosttySizeReportSize;
 import io.github.vlaaad.ghostty.bindings.GhosttyStyle;
 import io.github.vlaaad.ghostty.bindings.GhosttyString;
 import io.github.vlaaad.ghostty.bindings.GhosttyTerminalBellFn;
+import io.github.vlaaad.ghostty.bindings.GhosttyTerminalColorSchemeFn;
 import io.github.vlaaad.ghostty.bindings.GhosttyTerminalDeviceAttributesFn;
 import io.github.vlaaad.ghostty.bindings.GhosttyTerminalOptions;
 import io.github.vlaaad.ghostty.bindings.GhosttyTerminalScrollbar;
@@ -37,6 +38,8 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
+import javafx.application.ColorScheme;
+import javafx.application.Platform;
 import javafx.scene.canvas.GraphicsContext;
 import javafx.scene.paint.Color;
 
@@ -149,6 +152,12 @@ final class TerminalSession implements AutoCloseable {
         requireGhosttySuccess(
                 ghostty_vt_h.ghostty_terminal_set(
                         terminal,
+                        ghostty_vt_h.GHOSTTY_TERMINAL_OPT_COLOR_SCHEME(),
+                        GhosttyTerminalColorSchemeFn.allocate(this::reportColorScheme, callbackArena)),
+                "ghostty_terminal_set");
+        requireGhosttySuccess(
+                ghostty_vt_h.ghostty_terminal_set(
+                        terminal,
                         ghostty_vt_h.GHOSTTY_TERMINAL_OPT_XTVERSION(),
                         GhosttyTerminalXtversionFn.allocate(this::reportXtversion, callbackArena)),
                 "ghostty_terminal_set");
@@ -238,6 +247,21 @@ final class TerminalSession implements AutoCloseable {
 
         var tertiary = GhosttyDeviceAttributes.tertiary(attributes);
         GhosttyDeviceAttributesTertiary.unit_id(tertiary, 0);
+        return true;
+    }
+
+    private boolean reportColorScheme(MemorySegment terminal, MemorySegment userdata, MemorySegment outScheme) {
+        var scheme = Platform.getPreferences().getColorScheme();
+        if (scheme == null) {
+            return false;
+        }
+
+        outScheme.set(
+                ValueLayout.JAVA_INT,
+                0,
+                scheme == ColorScheme.DARK
+                        ? ghostty_vt_h.GHOSTTY_COLOR_SCHEME_DARK()
+                        : ghostty_vt_h.GHOSTTY_COLOR_SCHEME_LIGHT());
         return true;
     }
 
