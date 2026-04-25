@@ -16,6 +16,8 @@ import io.github.vlaaad.ghostty.bindings.GhosttyRenderStateColors;
 import io.github.vlaaad.ghostty.bindings.GhosttySelection;
 import io.github.vlaaad.ghostty.bindings.GhosttySizeReportSize;
 import io.github.vlaaad.ghostty.bindings.GhosttyStyle;
+import io.github.vlaaad.ghostty.bindings.GhosttyStyleColor;
+import io.github.vlaaad.ghostty.bindings.GhosttyStyleColorValue;
 import io.github.vlaaad.ghostty.bindings.GhosttyString;
 import io.github.vlaaad.ghostty.bindings.GhosttyTerminalBellFn;
 import io.github.vlaaad.ghostty.bindings.GhosttyTerminalColorSchemeFn;
@@ -1031,15 +1033,17 @@ final class TerminalSession implements AutoCloseable {
                         }
                         var baseline = y + metrics.baselineOffsetPx();
                         if (!preeditCell) {
-                            graphics.setFill(selected ? theme.selectionText() : toFxColor(foreground));
+                            var textColor = selected ? theme.selectionText() : toFxColor(foreground);
+                            graphics.setFill(textColor);
                             graphics.setFont(fonts.forStyle(GhosttyStyle.bold(style), GhosttyStyle.italic(style)));
                             graphics.fillText(renderedText, x, baseline);
+                            drawTextDecorations(graphics, x, y, metrics, style, selected, textColor, theme);
                         }
                     }
 
                     if (hovered) {
                         graphics.setStroke(selected ? theme.selectionText() : toFxColor(foreground));
-                        drawHoverUnderline(graphics, x, y, metrics, GhosttyStyle.underline(style));
+                        drawHoverUnderline(graphics, x, y, metrics);
                     }
                     x += metrics.cellWidthPx();
                     viewportX++;
@@ -1448,15 +1452,96 @@ final class TerminalSession implements AutoCloseable {
             GraphicsContext graphics,
             double x,
             double y,
-            GhosttyCanvas.CellMetrics metrics,
-            int underline) {
-        graphics.setLineWidth(underline == ghostty_vt_h.GHOSTTY_SGR_UNDERLINE_SINGLE() ? 1.0 : 1.5);
+            GhosttyCanvas.CellMetrics metrics) {
+        graphics.setLineWidth(1.0);
         var underlineY = y + metrics.cellHeightPx() - 2.5;
         graphics.strokeLine(x, underlineY, x + metrics.cellWidthPx(), underlineY);
-        if (underline == ghostty_vt_h.GHOSTTY_SGR_UNDERLINE_SINGLE()) {
-            graphics.strokeLine(x, underlineY - 2, x + metrics.cellWidthPx(), underlineY - 2);
+        graphics.setLineWidth(1.0);
+    }
+
+    private void drawTextDecorations(
+            GraphicsContext graphics,
+            double x,
+            double y,
+            GhosttyCanvas.CellMetrics metrics,
+            MemorySegment style,
+            boolean selected,
+            Color textColor,
+            TerminalTheme theme) {
+        var underline = GhosttyStyle.underline(style);
+        if (underline == ghostty_vt_h.GHOSTTY_SGR_UNDERLINE_NONE()
+                && !GhosttyStyle.strikethrough(style)
+                && !GhosttyStyle.overline(style)) {
+            return;
+        }
+
+        graphics.setLineWidth(1.0);
+        graphics.setLineDashes(null);
+        if (underline != ghostty_vt_h.GHOSTTY_SGR_UNDERLINE_NONE()) {
+            graphics.setStroke(selected ? theme.selectionText() : decorationColor(GhosttyStyle.underline_color(style), textColor, theme));
+            drawUnderline(graphics, x, y + metrics.cellHeightPx() - 2.5, metrics.cellWidthPx(), underline);
+        }
+        graphics.setStroke(textColor);
+        if (GhosttyStyle.strikethrough(style)) {
+            var strikeY = y + Math.round(metrics.cellHeightPx() * 0.55);
+            graphics.strokeLine(x, strikeY, x + metrics.cellWidthPx(), strikeY);
+        }
+        if (GhosttyStyle.overline(style)) {
+            graphics.strokeLine(x, y + 1.5, x + metrics.cellWidthPx(), y + 1.5);
         }
         graphics.setLineWidth(1.0);
+        graphics.setLineDashes(null);
+    }
+
+    private static void drawUnderline(GraphicsContext graphics, double x, double y, double width, int underline) {
+        if (underline == ghostty_vt_h.GHOSTTY_SGR_UNDERLINE_DOUBLE()) {
+            graphics.strokeLine(x, y, x + width, y);
+            graphics.strokeLine(x, y + 2, x + width, y + 2);
+            return;
+        }
+        if (underline == ghostty_vt_h.GHOSTTY_SGR_UNDERLINE_CURLY()) {
+            var points = Math.max(8, (int) Math.ceil(width) + 1);
+            var xs = new double[points];
+            var ys = new double[points];
+            for (var i = 0; i < points; i++) {
+                var progress = points == 1 ? 0.0 : i / (double) (points - 1);
+                xs[i] = x + width * progress;
+                ys[i] = y + 0.5 + Math.sin(progress * Math.PI * 4.0) * 1.0;
+            }
+            graphics.strokePolyline(xs, ys, points);
+            return;
+        }
+        if (underline == ghostty_vt_h.GHOSTTY_SGR_UNDERLINE_DOTTED()) {
+            graphics.setFill(graphics.getStroke());
+            var dotY = Math.round(y);
+            var spacing = 3.0;
+            var phase = 1.0;
+            var endX = x + width;
+            for (var dotX = Math.ceil((x - phase) / spacing) * spacing + phase; dotX <= endX; dotX += spacing) {
+                graphics.fillRect(dotX, dotY, 1, 1);
+            }
+            return;
+        }
+        if (underline == ghostty_vt_h.GHOSTTY_SGR_UNDERLINE_DASHED()) {
+            graphics.setLineDashes(4.0, 3.0);
+            graphics.strokeLine(x, y, x + width, y);
+            graphics.setLineDashes(null);
+            return;
+        }
+        graphics.strokeLine(x, y, x + width, y);
+    }
+
+    private Color decorationColor(MemorySegment color, Color fallback, TerminalTheme theme) {
+        var tag = GhosttyStyleColor.tag(color);
+        if (tag == ghostty_vt_h.GHOSTTY_STYLE_COLOR_RGB()) {
+            return toFxColor(GhosttyStyleColorValue.rgb(GhosttyStyleColor.value(color)));
+        }
+        if (tag == ghostty_vt_h.GHOSTTY_STYLE_COLOR_PALETTE()) {
+            var index = Byte.toUnsignedInt(GhosttyStyleColorValue.palette(GhosttyStyleColor.value(color)));
+            var palette = theme.palette();
+            return index < palette.size() ? palette.get(index) : builtInPalette.get(index);
+        }
+        return fallback;
     }
 
     private void renderPreedit(
