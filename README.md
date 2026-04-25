@@ -16,7 +16,6 @@ Generated per-platform `jextract` bindings for `libghostty-vt`.
 ## Next steps
 6. kitty graphics
 8. more shortcuts like pgup/pgdown
-9. OSC clipboard: copy/paste shortcuts exist, but terminal-initiated clipboard read/write sequences are not wired.
 11. Blinking: cursor visibility is respected, but there is no blink timer for blinking cursor or blinking text attributes.
 12. Faint/dim style: bold/italic/inverse/invisible are handled; faint is not visibly rendered.
 14. Semantic prompt / shell integration UI (osc 133): libghostty parses semantic prompt data, but the canvas does not expose prompt navigation, command regions, or similar UI behavior.
