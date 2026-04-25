@@ -1,6 +1,7 @@
 package io.github.vlaaad.ghosttyfx;
 
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.fail;
 
@@ -26,6 +27,7 @@ import javafx.scene.input.KeyCodeCombination;
 import javafx.scene.input.KeyCombination;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.BeforeAll;
+import javafx.scene.paint.Color;
 import javafx.scene.text.Font;
 
 final class GhosttyCanvasTest {
@@ -81,6 +83,32 @@ final class GhosttyCanvasTest {
                     canvas.prefWidth(-1) != initialPrefWidth || canvas.prefHeight(-1) != initialPrefHeight,
                     "Expected font change to update preferred size");
             assertThrows(NullPointerException.class, () -> canvas.fontProperty().set(null));
+        }
+    }
+
+    @Test
+    void themePropertyRejectsNullAndStoresTheme() throws Exception {
+        var tempDirectory = Files.createTempDirectory("ghosttyfx-canvas-theme-test-");
+        var pidFile = tempDirectory.resolve("shell.pid");
+        var shell = discoverShell(pidFile);
+
+        try (var canvas = GhosttyFx.create(shell.command(), tempDirectory, System.getenv())) {
+            var theme = new TerminalTheme(
+                    Color.WHITE,
+                    Color.BLACK,
+                    List.of(),
+                    Color.BLACK,
+                    Color.WHITE,
+                    Color.DARKBLUE,
+                    Color.WHITE,
+                    Color.gray(0.25));
+            runOnFxThread(() -> {
+                canvas.setTheme(theme);
+                assertEquals(theme, canvas.getTheme());
+                assertThrows(NullPointerException.class, () -> canvas.setTheme(null));
+                assertThrows(NullPointerException.class, () -> canvas.themeProperty().set(null));
+                return null;
+            });
         }
     }
 

@@ -31,8 +31,10 @@ import io.github.vlaaad.ghostty.bindings.ghostty_vt_h;
 import java.lang.foreign.Arena;
 import java.lang.foreign.MemoryLayout;
 import java.lang.foreign.MemorySegment;
+import java.lang.foreign.SegmentAllocator;
 import java.lang.foreign.ValueLayout;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 import javafx.scene.canvas.GraphicsContext;
@@ -46,6 +48,7 @@ final class TerminalSession implements AutoCloseable {
     private static final int CURSOR_STYLE_BAR = 0;
     private static final int CURSOR_STYLE_UNDERLINE = 2;
     private static final int CURSOR_STYLE_BLOCK_HOLLOW = 3;
+    private static final int PALETTE_SIZE = 256;
     private static final int MAX_GHOSTTY_DIMENSION = 0xFFFF;
     private static final long INITIAL_MAX_SCROLLBACK = 1_000;
     private static final double BLOCK_CURSOR_ALPHA = 0.5;
@@ -62,6 +65,7 @@ final class TerminalSession implements AutoCloseable {
     private final MemorySegment mouseEncoder;
     private final MemorySegment mouseEvent;
     private final MemorySegment xtversionString;
+    private final ArrayList<Color> builtInPalette = new ArrayList<>(PALETTE_SIZE);
     private final PtySession ptySession;
     private final Consumer<String> titleChanged;
     private final Runnable bell;
@@ -113,6 +117,16 @@ final class TerminalSession implements AutoCloseable {
                             initialCellMetrics.cellWidthPx(),
                             initialCellMetrics.cellHeightPx()),
                     "ghostty_terminal_resize");
+            var palette = GhosttyColorRgb.allocateArray(PALETTE_SIZE, arena);
+            requireGhosttySuccess(
+                    ghostty_vt_h.ghostty_terminal_get(
+                            terminal,
+                            ghostty_vt_h.GHOSTTY_TERMINAL_DATA_COLOR_PALETTE_DEFAULT(),
+                            palette),
+                    "ghostty_terminal_get(color_palette_default)");
+            for (var i = 0; i < PALETTE_SIZE; i++) {
+                builtInPalette.add(toFxColor(GhosttyColorRgb.asSlice(palette, i)));
+            }
         }
         requireGhosttySuccess(
                 ghostty_vt_h.ghostty_terminal_set(
@@ -150,6 +164,39 @@ final class TerminalSession implements AutoCloseable {
                         ghostty_vt_h.GHOSTTY_TERMINAL_OPT_BELL(),
                         GhosttyTerminalBellFn.allocate((_, _) -> this.bell.run(), callbackArena)),
                 "ghostty_terminal_set");
+        updateRenderState();
+    }
+
+    void applyTheme(TerminalTheme theme) {
+        try (var arena = Arena.ofConfined()) {
+            var background = toNativeColor(theme.background(), arena);
+            var foreground = toNativeColor(theme.foreground(), arena);
+            var cursor = toNativeColor(theme.cursorColor(), arena);
+            requireGhosttySuccess(
+                    ghostty_vt_h.ghostty_terminal_set(
+                            terminal,
+                            ghostty_vt_h.GHOSTTY_TERMINAL_OPT_COLOR_BACKGROUND(),
+                            background),
+                    "ghostty_terminal_set(color_background)");
+            requireGhosttySuccess(
+                    ghostty_vt_h.ghostty_terminal_set(
+                            terminal,
+                            ghostty_vt_h.GHOSTTY_TERMINAL_OPT_COLOR_FOREGROUND(),
+                            foreground),
+                    "ghostty_terminal_set(color_foreground)");
+            requireGhosttySuccess(
+                    ghostty_vt_h.ghostty_terminal_set(
+                            terminal,
+                            ghostty_vt_h.GHOSTTY_TERMINAL_OPT_COLOR_CURSOR(),
+                            cursor),
+                    "ghostty_terminal_set(color_cursor)");
+            requireGhosttySuccess(
+                    ghostty_vt_h.ghostty_terminal_set(
+                            terminal,
+                            ghostty_vt_h.GHOSTTY_TERMINAL_OPT_COLOR_PALETTE(),
+                            theme.palette().isEmpty() ? MemorySegment.NULL : nativePalette(theme, arena)),
+                    "ghostty_terminal_set(color_palette)");
+        }
         updateRenderState();
     }
 
@@ -800,13 +847,10 @@ final class TerminalSession implements AutoCloseable {
             KeyInput.Preedit preedit,
             Selection selection,
             Selection hoveredHyperlink,
+            boolean focused,
+            TerminalTheme theme,
             double scrollbarWidthPx,
-            double minScrollbarHeightPx,
-            Color selectionColor,
-            Color hoveredHyperlinkColor,
-            Color preeditFill,
-            Color preeditBackground,
-            Color preeditStroke) {
+            double minScrollbarHeightPx) {
         graphics.setFont(fonts.regular());
 
         try (var arena = Arena.ofConfined()) {
@@ -837,10 +881,20 @@ final class TerminalSession implements AutoCloseable {
             var foreground = GhosttyColorRgb.allocate(arena);
             var background = GhosttyColorRgb.allocate(arena);
             var swappedColor = GhosttyColorRgb.allocate(arena);
+            var scrollbar = GhosttyTerminalScrollbar.allocate(arena);
+            var viewportTop = ghostty_vt_h.ghostty_terminal_get(terminal, ghostty_vt_h.GHOSTTY_TERMINAL_DATA_SCROLLBAR(), scrollbar) == GHOSTTY_SUCCESS
+                    ? Math.toIntExact(GhosttyTerminalScrollbar.offset(scrollbar))
+                    : 0;
+            var cursor = cursorInfo(arena);
+            var preeditCellCount = preedit.text().codePointCount(0, preedit.text().length());
             var text = new StringBuilder(MAX_GRAPHEME_CODEPOINTS * 2);
             var codepointsCapacity = MAX_GRAPHEME_CODEPOINTS;
             var codepoints = arena.allocate(MemoryLayout.sequenceLayout(codepointsCapacity, ValueLayout.JAVA_INT));
             var y = 0.0;
+            var viewportY = 0;
+            var cursorText = "";
+            var cursorBold = false;
+            var cursorItalic = false;
 
             while (ghostty_vt_h.ghostty_render_state_row_iterator_next(rowIterator)) {
                 requireGhosttySuccess(
@@ -851,7 +905,16 @@ final class TerminalSession implements AutoCloseable {
                         "ghostty_render_state_row_get(cells)");
 
                 var x = 0.0;
+                var viewportX = 0;
                 while (ghostty_vt_h.ghostty_render_state_row_cells_next(rowCells)) {
+                    var screenPoint = new Selection.ScreenPoint(viewportX, viewportTop + viewportY);
+                    var selected = contains(selection, screenPoint);
+                    var hovered = contains(hoveredHyperlink, screenPoint);
+                    var preeditCell = cursor != null
+                            && preeditCellCount > 0
+                            && viewportY == cursor.y()
+                            && viewportX >= cursor.x()
+                            && viewportX < cursor.x() + preeditCellCount;
                     requireGhosttySuccess(
                             ghostty_vt_h.ghostty_render_state_row_cells_get(
                                     rowCells,
@@ -860,7 +923,10 @@ final class TerminalSession implements AutoCloseable {
                             "ghostty_render_state_row_cells_get(graphemes_len)");
                     var codePointCount = graphemeLength.get(ValueLayout.JAVA_INT, 0);
                     if (codePointCount == 0) {
-                        if (ghostty_vt_h.ghostty_render_state_row_cells_get(
+                        if (selected) {
+                            graphics.setFill(theme.selectionColor());
+                            graphics.fillRect(x, y, metrics.cellWidthPx(), metrics.cellHeightPx());
+                        } else if (ghostty_vt_h.ghostty_render_state_row_cells_get(
                                 rowCells,
                                 ghostty_vt_h.GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_BG_COLOR(),
                                 background) == GHOSTTY_SUCCESS) {
@@ -868,6 +934,7 @@ final class TerminalSession implements AutoCloseable {
                             graphics.fillRect(x, y, metrics.cellWidthPx(), metrics.cellHeightPx());
                         }
                         x += metrics.cellWidthPx();
+                        viewportX++;
                         continue;
                     }
 
@@ -921,8 +988,8 @@ final class TerminalSession implements AutoCloseable {
                         hasBackground = true;
                     }
 
-                    if (hasBackground) {
-                        graphics.setFill(toFxColor(background));
+                    if (selected || hasBackground) {
+                        graphics.setFill(selected ? theme.selectionColor() : toFxColor(background));
                         graphics.fillRect(x, y, metrics.cellWidthPx(), metrics.cellHeightPx());
                     }
 
@@ -933,27 +1000,39 @@ final class TerminalSession implements AutoCloseable {
                             text.appendCodePoint(Character.isValidCodePoint(codePoint) ? codePoint : 0xFFFD);
                         }
                         var renderedText = text.toString();
+                        if (cursor != null && viewportX == cursor.x() && viewportY == cursor.y()) {
+                            cursorText = renderedText;
+                            cursorBold = GhosttyStyle.bold(style);
+                            cursorItalic = GhosttyStyle.italic(style);
+                        }
                         var baseline = y + metrics.baselineOffsetPx();
-                        graphics.setFill(toFxColor(foreground));
-                        graphics.setFont(fonts.forStyle(GhosttyStyle.bold(style), GhosttyStyle.italic(style)));
-                        graphics.fillText(renderedText, x, baseline);
+                        if (!preeditCell) {
+                            graphics.setFill(selected ? theme.selectionText() : toFxColor(foreground));
+                            graphics.setFont(fonts.forStyle(GhosttyStyle.bold(style), GhosttyStyle.italic(style)));
+                            graphics.fillText(renderedText, x, baseline);
+                        }
                     }
 
+                    if (hovered) {
+                        graphics.setStroke(selected ? theme.selectionText() : toFxColor(foreground));
+                        drawHoverUnderline(graphics, x, y, metrics, GhosttyStyle.underline(style));
+                    }
                     x += metrics.cellWidthPx();
+                    viewportX++;
                 }
 
                 y += metrics.cellHeightPx();
+                viewportY++;
             }
 
-            renderSelectionOverlay(graphics, metrics, selection, selectionColor);
-            renderSelectionOverlay(graphics, metrics, hoveredHyperlink, hoveredHyperlinkColor);
+            renderCursor(graphics, metrics, fonts, colors, focused, theme, cursor, cursorText, cursorBold, cursorItalic);
             graphics.setFont(fonts.regular());
-            renderCursor(graphics, metrics, preedit, colors, preeditFill, preeditBackground, preeditStroke);
+            renderPreedit(graphics, metrics, fonts, preedit, cursor, theme);
 
-            var scrollbar = scrollbarInfo(width, height, scrollbarWidthPx, minScrollbarHeightPx);
-            if (scrollbar != null && scrollbar.scrollable()) {
-                graphics.setFill(Color.rgb(200, 200, 200, 0.5));
-                graphics.fillRect(scrollbar.thumbX(), scrollbar.thumbY(), scrollbarWidthPx, scrollbar.thumbHeight());
+            var scrollbarInfo = scrollbarInfo(width, height, scrollbarWidthPx, minScrollbarHeightPx);
+            if (scrollbarInfo != null && scrollbarInfo.scrollable()) {
+                graphics.setFill(theme.scrollbarColor());
+                graphics.fillRect(scrollbarInfo.thumbX(), scrollbarInfo.thumbY(), scrollbarWidthPx, scrollbarInfo.thumbHeight());
             }
         }
     }
@@ -1318,164 +1397,129 @@ final class TerminalSession implements AutoCloseable {
                 : point;
     }
 
-    private void renderSelectionOverlay(
-            GraphicsContext graphics,
-            GhosttyCanvas.CellMetrics metrics,
-            Selection selection,
-            Color selectionColor) {
+    private static boolean contains(Selection selection, Selection.ScreenPoint point) {
         var normalized = selection.normalized();
         if (normalized.isEmpty()) {
+            return false;
+        }
+
+        var from = normalized.from();
+        var to = normalized.to();
+        if (normalized.rectangle()) {
+            return point.y() >= from.y()
+                    && point.y() <= to.y()
+                    && point.x() >= from.x()
+                    && point.x() <= to.x();
+        }
+        if (point.y() < from.y() || point.y() > to.y()) {
+            return false;
+        }
+        if (point.y() == from.y() && point.x() < from.x()) {
+            return false;
+        }
+        return point.y() != to.y() || point.x() <= to.x();
+    }
+
+    private static void drawHoverUnderline(
+            GraphicsContext graphics,
+            double x,
+            double y,
+            GhosttyCanvas.CellMetrics metrics,
+            int underline) {
+        graphics.setLineWidth(underline == ghostty_vt_h.GHOSTTY_SGR_UNDERLINE_SINGLE() ? 1.0 : 1.5);
+        var underlineY = y + metrics.cellHeightPx() - 2.5;
+        graphics.strokeLine(x, underlineY, x + metrics.cellWidthPx(), underlineY);
+        if (underline == ghostty_vt_h.GHOSTTY_SGR_UNDERLINE_SINGLE()) {
+            graphics.strokeLine(x, underlineY - 2, x + metrics.cellWidthPx(), underlineY - 2);
+        }
+        graphics.setLineWidth(1.0);
+    }
+
+    private void renderPreedit(
+            GraphicsContext graphics,
+            GhosttyCanvas.CellMetrics metrics,
+            GhosttyCanvas.TerminalFonts fonts,
+            KeyInput.Preedit preedit,
+            CursorInfo cursor,
+            TerminalTheme theme) {
+        if (cursor == null || preedit.text().isEmpty()) {
             return;
         }
 
-        try (var arena = Arena.ofConfined()) {
-            var cols = arena.allocate(ValueLayout.JAVA_SHORT);
-            var rows = arena.allocate(ValueLayout.JAVA_SHORT);
-            var scrollbar = GhosttyTerminalScrollbar.allocate(arena);
-            if (ghostty_vt_h.ghostty_terminal_get(terminal, ghostty_vt_h.GHOSTTY_TERMINAL_DATA_COLS(), cols) != GHOSTTY_SUCCESS
-                    || ghostty_vt_h.ghostty_terminal_get(terminal, ghostty_vt_h.GHOSTTY_TERMINAL_DATA_ROWS(), rows) != GHOSTTY_SUCCESS
-                    || ghostty_vt_h.ghostty_terminal_get(terminal, ghostty_vt_h.GHOSTTY_TERMINAL_DATA_SCROLLBAR(), scrollbar) != GHOSTTY_SUCCESS) {
-                return;
-            }
-
-            var columnCount = Short.toUnsignedInt(cols.get(ValueLayout.JAVA_SHORT, 0));
-            var rowCount = Short.toUnsignedInt(rows.get(ValueLayout.JAVA_SHORT, 0));
-            var viewportTop = Math.toIntExact(GhosttyTerminalScrollbar.offset(scrollbar));
-            var viewportBottom = viewportTop + rowCount - 1;
-            var from = normalized.from();
-            var to = normalized.to();
-            graphics.setFill(selectionColor);
-            for (var screenRow = Math.max(from.y(), viewportTop); screenRow <= Math.min(to.y(), viewportBottom); screenRow++) {
-                var startColumn = normalized.rectangle() || screenRow != from.y() ? 0 : from.x();
-                var endColumn = normalized.rectangle() || screenRow != to.y() ? columnCount - 1 : to.x();
-                if (normalized.rectangle()) {
-                    startColumn = Math.min(from.x(), to.x());
-                    endColumn = Math.max(from.x(), to.x());
-                }
-                startColumn = Math.max(0, Math.min(startColumn, columnCount - 1));
-                endColumn = Math.max(0, Math.min(endColumn, columnCount - 1));
-                if (startColumn > endColumn) {
-                    continue;
-                }
-
-                graphics.fillRect(
-                        startColumn * (double) metrics.cellWidthPx(),
-                        (screenRow - viewportTop) * (double) metrics.cellHeightPx(),
-                        (endColumn - startColumn + 1) * (double) metrics.cellWidthPx(),
-                        metrics.cellHeightPx());
-            }
+        var codePointCount = preedit.text().codePointCount(0, preedit.text().length());
+        var x = cursor.x() * (double) metrics.cellWidthPx();
+        var y = cursor.y() * (double) metrics.cellHeightPx();
+        graphics.setFont(fonts.regular());
+        graphics.setFill(theme.foreground());
+        graphics.fillText(preedit.text(), x, y + metrics.baselineOffsetPx());
+        graphics.setStroke(theme.foreground());
+        for (var i = 0; i < codePointCount; i++) {
+            var cellX = x + i * (double) metrics.cellWidthPx();
+            graphics.strokeLine(
+                    cellX,
+                    y + metrics.cellHeightPx() - 1,
+                    cellX + metrics.cellWidthPx(),
+                    y + metrics.cellHeightPx() - 1);
         }
+        var caret = Math.clamp(preedit.caretPosition(), 0, codePointCount);
+        var caretX = x + caret * (double) metrics.cellWidthPx();
+        graphics.strokeLine(caretX, y + 2, caretX, y + metrics.cellHeightPx() - 2);
     }
 
     private void renderCursor(
             GraphicsContext graphics,
             GhosttyCanvas.CellMetrics metrics,
-            KeyInput.Preedit preedit,
+            GhosttyCanvas.TerminalFonts fonts,
             MemorySegment colors,
-            Color preeditFill,
-            Color preeditBackground,
-            Color preeditStroke) {
-        try (var arena = Arena.ofConfined()) {
-            var cursorVisible = arena.allocate(ValueLayout.JAVA_BOOLEAN);
-            requireGhosttySuccess(
-                    ghostty_vt_h.ghostty_render_state_get(
-                            renderState,
-                            ghostty_vt_h.GHOSTTY_RENDER_STATE_DATA_CURSOR_VISIBLE(),
-                            cursorVisible),
-                    "ghostty_render_state_get(cursor_visible)");
-            if (!cursorVisible.get(ValueLayout.JAVA_BOOLEAN, 0)) {
-                return;
+            boolean focused,
+            TerminalTheme theme,
+            CursorInfo cursor,
+            String cursorText,
+            boolean cursorBold,
+            boolean cursorItalic) {
+        if (cursor == null) {
+            return;
+        }
+
+        var cursorColor = GhosttyRenderStateColors.cursor_has_value(colors)
+                ? toFxColor(GhosttyRenderStateColors.cursor(colors))
+                : theme.cursorColor();
+        var cursorPixelX = cursor.x() * (double) metrics.cellWidthPx();
+        var cursorPixelY = cursor.y() * (double) metrics.cellHeightPx();
+        var cursorWidth = metrics.cellWidthPx();
+        var cursorHeight = metrics.cellHeightPx();
+        var cursorStyle = focused ? cursor.style() : CURSOR_STYLE_BLOCK_HOLLOW;
+
+        switch (cursorStyle) {
+            case CURSOR_STYLE_BAR -> {
+                graphics.setFill(cursorColor);
+                graphics.fillRect(cursorPixelX, cursorPixelY, Math.max(1, Math.ceil(cursorWidth / 6.0)), cursorHeight);
             }
-
-            var cursorInViewport = arena.allocate(ValueLayout.JAVA_BOOLEAN);
-            requireGhosttySuccess(
-                    ghostty_vt_h.ghostty_render_state_get(
-                            renderState,
-                            ghostty_vt_h.GHOSTTY_RENDER_STATE_DATA_CURSOR_VIEWPORT_HAS_VALUE(),
-                            cursorInViewport),
-                    "ghostty_render_state_get(cursor_viewport_has_value)");
-            if (!cursorInViewport.get(ValueLayout.JAVA_BOOLEAN, 0)) {
-                return;
+            case CURSOR_STYLE_UNDERLINE -> {
+                graphics.setFill(cursorColor);
+                graphics.fillRect(
+                        cursorPixelX,
+                        cursorPixelY + cursorHeight - Math.max(1, cursorHeight / 8.0),
+                        cursorWidth,
+                        Math.max(1, cursorHeight / 8.0));
             }
-
-            var cursorX = arena.allocate(ValueLayout.JAVA_SHORT);
-            var cursorY = arena.allocate(ValueLayout.JAVA_SHORT);
-            var cursorStyle = arena.allocate(ValueLayout.JAVA_INT);
-            requireGhosttySuccess(
-                    ghostty_vt_h.ghostty_render_state_get(
-                            renderState,
-                            ghostty_vt_h.GHOSTTY_RENDER_STATE_DATA_CURSOR_VIEWPORT_X(),
-                            cursorX),
-                    "ghostty_render_state_get(cursor_viewport_x)");
-            requireGhosttySuccess(
-                    ghostty_vt_h.ghostty_render_state_get(
-                            renderState,
-                            ghostty_vt_h.GHOSTTY_RENDER_STATE_DATA_CURSOR_VIEWPORT_Y(),
-                            cursorY),
-                    "ghostty_render_state_get(cursor_viewport_y)");
-            requireGhosttySuccess(
-                    ghostty_vt_h.ghostty_render_state_get(
-                            renderState,
-                            ghostty_vt_h.GHOSTTY_RENDER_STATE_DATA_CURSOR_VISUAL_STYLE(),
-                            cursorStyle),
-                    "ghostty_render_state_get(cursor_visual_style)");
-
-            var cursorColor = GhosttyRenderStateColors.cursor_has_value(colors)
-                    ? toFxColor(GhosttyRenderStateColors.cursor(colors))
-                    : toFxColor(GhosttyRenderStateColors.foreground(colors));
-            var cursorCellX = Short.toUnsignedInt(cursorX.get(ValueLayout.JAVA_SHORT, 0));
-            var cursorCellY = Short.toUnsignedInt(cursorY.get(ValueLayout.JAVA_SHORT, 0));
-            var cursorPixelX = cursorCellX * (double) metrics.cellWidthPx();
-            var cursorPixelY = cursorCellY * (double) metrics.cellHeightPx();
-            var cursorWidth = metrics.cellWidthPx();
-            var cursorHeight = metrics.cellHeightPx();
-
-            switch (cursorStyle.get(ValueLayout.JAVA_INT, 0)) {
-                case CURSOR_STYLE_BAR -> {
-                    graphics.setFill(cursorColor);
-                    graphics.fillRect(cursorPixelX, cursorPixelY, Math.max(1, Math.ceil(cursorWidth / 6.0)), cursorHeight);
-                }
-                case CURSOR_STYLE_UNDERLINE -> {
-                    graphics.setFill(cursorColor);
-                    graphics.fillRect(
-                            cursorPixelX,
-                            cursorPixelY + cursorHeight - Math.max(1, cursorHeight / 8.0),
-                            cursorWidth,
-                            Math.max(1, cursorHeight / 8.0));
-                }
-                case CURSOR_STYLE_BLOCK_HOLLOW -> {
-                    graphics.setStroke(cursorColor);
-                    graphics.strokeRect(
-                            cursorPixelX + 0.5,
-                            cursorPixelY + 0.5,
-                            Math.max(0, cursorWidth - 1),
-                            Math.max(0, cursorHeight - 1));
-                }
-                default -> {
-                    graphics.setFill(cursorColor.deriveColor(0, 1, 1, BLOCK_CURSOR_ALPHA));
-                    graphics.fillRect(cursorPixelX, cursorPixelY, cursorWidth, cursorHeight);
+            case CURSOR_STYLE_BLOCK_HOLLOW -> {
+                graphics.setStroke(cursorColor);
+                graphics.strokeRect(
+                        cursorPixelX + 0.5,
+                        cursorPixelY + 0.5,
+                        Math.max(0, cursorWidth - 1),
+                        Math.max(0, cursorHeight - 1));
+            }
+            default -> {
+                graphics.setFill(cursorColor.deriveColor(0, 1, 1, BLOCK_CURSOR_ALPHA));
+                graphics.fillRect(cursorPixelX, cursorPixelY, cursorWidth, cursorHeight);
+                if (!cursorText.isEmpty()) {
+                    graphics.setFill(theme.cursorText());
+                    graphics.setFont(fonts.forStyle(cursorBold, cursorItalic));
+                    graphics.fillText(cursorText, cursorPixelX, cursorPixelY + metrics.baselineOffsetPx());
                 }
             }
-
-            if (preedit.text().isEmpty()) {
-                return;
-            }
-
-            var codePointCount = preedit.text().codePointCount(0, preedit.text().length());
-            var caret = Math.clamp(preedit.caretPosition(), 0, codePointCount);
-            var preeditWidth = Math.max(metrics.cellWidthPx(), codePointCount * (double) metrics.cellWidthPx());
-            graphics.setFill(preeditBackground);
-            graphics.fillRect(cursorPixelX, cursorPixelY, preeditWidth, metrics.cellHeightPx());
-            graphics.setFill(preeditFill);
-            graphics.fillText(preedit.text(), cursorPixelX, cursorPixelY + metrics.baselineOffsetPx());
-            graphics.setStroke(preeditStroke);
-            graphics.strokeLine(
-                    cursorPixelX,
-                    cursorPixelY + metrics.cellHeightPx() - 1,
-                    cursorPixelX + preeditWidth,
-                    cursorPixelY + metrics.cellHeightPx() - 1);
-            var caretX = cursorPixelX + caret * (double) metrics.cellWidthPx();
-            graphics.strokeLine(caretX, cursorPixelY + 2, caretX, cursorPixelY + metrics.cellHeightPx() - 2);
         }
     }
 
@@ -1483,6 +1527,56 @@ final class TerminalSession implements AutoCloseable {
         requireGhosttySuccess(
                 ghostty_vt_h.ghostty_render_state_update(renderState, terminal),
                 "ghostty_render_state_update");
+    }
+
+    private CursorInfo cursorInfo(Arena arena) {
+        var cursorVisible = arena.allocate(ValueLayout.JAVA_BOOLEAN);
+        requireGhosttySuccess(
+                ghostty_vt_h.ghostty_render_state_get(
+                        renderState,
+                        ghostty_vt_h.GHOSTTY_RENDER_STATE_DATA_CURSOR_VISIBLE(),
+                        cursorVisible),
+                "ghostty_render_state_get(cursor_visible)");
+        if (!cursorVisible.get(ValueLayout.JAVA_BOOLEAN, 0)) {
+            return null;
+        }
+
+        var cursorInViewport = arena.allocate(ValueLayout.JAVA_BOOLEAN);
+        requireGhosttySuccess(
+                ghostty_vt_h.ghostty_render_state_get(
+                        renderState,
+                        ghostty_vt_h.GHOSTTY_RENDER_STATE_DATA_CURSOR_VIEWPORT_HAS_VALUE(),
+                        cursorInViewport),
+                "ghostty_render_state_get(cursor_viewport_has_value)");
+        if (!cursorInViewport.get(ValueLayout.JAVA_BOOLEAN, 0)) {
+            return null;
+        }
+
+        var cursorX = arena.allocate(ValueLayout.JAVA_SHORT);
+        var cursorY = arena.allocate(ValueLayout.JAVA_SHORT);
+        var cursorStyle = arena.allocate(ValueLayout.JAVA_INT);
+        requireGhosttySuccess(
+                ghostty_vt_h.ghostty_render_state_get(
+                        renderState,
+                        ghostty_vt_h.GHOSTTY_RENDER_STATE_DATA_CURSOR_VIEWPORT_X(),
+                        cursorX),
+                "ghostty_render_state_get(cursor_viewport_x)");
+        requireGhosttySuccess(
+                ghostty_vt_h.ghostty_render_state_get(
+                        renderState,
+                        ghostty_vt_h.GHOSTTY_RENDER_STATE_DATA_CURSOR_VIEWPORT_Y(),
+                        cursorY),
+                "ghostty_render_state_get(cursor_viewport_y)");
+        requireGhosttySuccess(
+                ghostty_vt_h.ghostty_render_state_get(
+                        renderState,
+                        ghostty_vt_h.GHOSTTY_RENDER_STATE_DATA_CURSOR_VISUAL_STYLE(),
+                        cursorStyle),
+                "ghostty_render_state_get(cursor_visual_style)");
+        return new CursorInfo(
+                Short.toUnsignedInt(cursorX.get(ValueLayout.JAVA_SHORT, 0)),
+                Short.toUnsignedInt(cursorY.get(ValueLayout.JAVA_SHORT, 0)),
+                cursorStyle.get(ValueLayout.JAVA_INT, 0));
     }
 
     private static MemorySegment newAddress(Arena arena, String operation, Allocator allocator) {
@@ -1496,6 +1590,33 @@ final class TerminalSession implements AutoCloseable {
                 Byte.toUnsignedInt(GhosttyColorRgb.r(color)),
                 Byte.toUnsignedInt(GhosttyColorRgb.g(color)),
                 Byte.toUnsignedInt(GhosttyColorRgb.b(color)));
+    }
+
+    private static MemorySegment toNativeColor(Color color, SegmentAllocator allocator) {
+        var result = GhosttyColorRgb.allocate(allocator);
+        GhosttyColorRgb.r(result, toNativeColorChannel(color.getRed()));
+        GhosttyColorRgb.g(result, toNativeColorChannel(color.getGreen()));
+        GhosttyColorRgb.b(result, toNativeColorChannel(color.getBlue()));
+        return result;
+    }
+
+    private MemorySegment nativePalette(TerminalTheme theme, Arena arena) {
+        var result = GhosttyColorRgb.allocateArray(PALETTE_SIZE, arena);
+        var palette = theme.palette();
+        for (var i = 0; i < PALETTE_SIZE; i++) {
+            var color = i < palette.size() ? palette.get(i) : builtInPalette.get(i);
+            MemorySegment.copy(
+                    toNativeColor(color, arena),
+                    0,
+                    GhosttyColorRgb.asSlice(result, i),
+                    0,
+                    GhosttyColorRgb.sizeof());
+        }
+        return result;
+    }
+
+    private static byte toNativeColorChannel(double value) {
+        return (byte) Math.clamp((int) Math.round(value * 255), 0, 255);
     }
 
     private static void requireGhosttySuccess(int result, String operation) {
@@ -1598,6 +1719,10 @@ final class TerminalSession implements AutoCloseable {
         WHITESPACE,
         WORD,
         SYMBOL
+    }
+
+    private record CursorInfo(int x, int y, int style) {
+
     }
 
     record CellHit(

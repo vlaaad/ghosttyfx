@@ -16,7 +16,7 @@ Generated per-platform `jextract` bindings for `libghostty-vt`.
 ## Next steps
 6. kitty graphics
 8. more shortcuts like pgup/pgdown
-9. customization/styles/better rendering
+10. forward JavaFX light/dark color scheme preference to Ghostty's terminal query callback
 
 ## Local Build
 

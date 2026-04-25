@@ -10,6 +10,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 import javafx.animation.AnimationTimer;
 import javafx.beans.binding.Bindings;
@@ -35,7 +36,6 @@ import javafx.scene.input.MouseButton;
 import javafx.scene.input.MouseEvent;
 import javafx.scene.input.ScrollEvent;
 import javafx.scene.input.ScrollEvent.VerticalTextScrollUnits;
-import javafx.scene.paint.Color;
 import javafx.scene.text.Font;
 import javafx.scene.text.FontPosture;
 import javafx.scene.text.FontWeight;
@@ -55,11 +55,6 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
     private static final double SCROLLBAR_MARGIN_PX = 2;
     private static final double MIN_SCROLLBAR_HEIGHT_PX = 10;
     private static final double SCROLL_TOTAL_DELTA_EPSILON = 1e-6;
-    private static final Color SELECTION_COLOR = Color.rgb(74, 144, 226, 0.25);
-    private static final Color HOVERED_HYPERLINK_COLOR = Color.rgb(74, 144, 226, 0.18);
-    private static final Color PREEDIT_FILL = Color.rgb(255, 255, 255, 0.95);
-    private static final Color PREEDIT_BACKGROUND = Color.rgb(74, 144, 226, 0.18);
-    private static final Color PREEDIT_STROKE = Color.rgb(74, 144, 226, 0.9);
     private static final Font DEFAULT_FONT = Font.font("Monospaced", 14);
 
     private final TerminalSession terminalSession;
@@ -73,6 +68,12 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
     private Selection hoveredHyperlink = Selection.empty();
     private final StringProperty title;
     private final ObjectProperty<Runnable> onBell = new SimpleObjectProperty<>(this, "onBell");
+    private final ObjectProperty<TerminalTheme> theme = new SimpleObjectProperty<>(this, "theme", TerminalTheme.defaults()) {
+        @Override
+        public void set(TerminalTheme value) {
+            super.set(Objects.requireNonNull(value, "theme"));
+        }
+    };
 
     private final ObjectProperty<Font> font = new SimpleObjectProperty<>(this, "font", DEFAULT_FONT) {
         @Override
@@ -151,6 +152,10 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
         setHeight(prefHeight(-1));
         cellMetrics.addListener((_, _, _) -> handleCanvasResize());
         terminalFonts.addListener((_, _, _) -> redraw());
+        theme.addListener((_, _, value) -> {
+            terminalSession.applyTheme(value);
+            redraw();
+        });
         widthProperty().addListener((_, _, _) -> handleCanvasResize());
         heightProperty().addListener((_, _, _) -> handleCanvasResize());
         focusedProperty().addListener((_, _, focused) -> handleFocusChange(focused));
@@ -169,6 +174,7 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
         setOnInputMethodTextChanged(this::handleInputMethodTextChanged);
         setInputMethodRequests(new CanvasInputMethodRequests());
         setCursor(Cursor.DEFAULT);
+        terminalSession.applyTheme(getTheme());
         redraw();
         processOutputDrain.start();
 
@@ -232,6 +238,18 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
 
     public ObjectProperty<Font> fontProperty() {
         return font;
+    }
+
+    public TerminalTheme getTheme() {
+        return theme.get();
+    }
+
+    public void setTheme(TerminalTheme value) {
+        theme.set(value);
+    }
+
+    public ObjectProperty<TerminalTheme> themeProperty() {
+        return theme;
     }
 
     public boolean isMacOptionAsAlt() {
@@ -328,9 +346,9 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
             if (!nextKeyInputState.equals(keyInputState) || !nextMouseInputState.equals(mouseInputState)) {
                 keyInputState = nextKeyInputState;
                 mouseInputState = nextMouseInputState;
-                redraw();
             }
         }
+        redraw();
 
         if (!terminalSession.readMode(FOCUS_EVENT_MODE)) {
             return;
@@ -1055,13 +1073,10 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
                 keyInputState.preedit(),
                 selection,
                 hoveredHyperlink,
+                isFocused(),
+                getTheme(),
                 scrollbarReservedWidthPx(),
-                MIN_SCROLLBAR_HEIGHT_PX,
-                SELECTION_COLOR,
-                HOVERED_HYPERLINK_COLOR,
-                PREEDIT_FILL,
-                PREEDIT_BACKGROUND,
-                PREEDIT_STROKE);
+                MIN_SCROLLBAR_HEIGHT_PX);
     }
 
     private CursorLocation currentCursorLocation() {
