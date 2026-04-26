@@ -101,6 +101,7 @@ final class GhosttyCanvasTest {
                     Color.WHITE,
                     Color.DARKBLUE,
                     Color.WHITE,
+                    0.5,
                     Color.gray(0.25));
             runOnFxThread(() -> {
                 canvas.setTheme(theme);

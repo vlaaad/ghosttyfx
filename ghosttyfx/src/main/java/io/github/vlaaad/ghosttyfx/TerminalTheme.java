@@ -12,6 +12,7 @@ public record TerminalTheme(
         Color cursorText,
         Color selectionColor,
         Color selectionText,
+    double faintOpacity,
         Color scrollbarColor) {
 
     public TerminalTheme {
@@ -23,6 +24,9 @@ public record TerminalTheme(
         Objects.requireNonNull(selectionColor, "selectionColor");
         Objects.requireNonNull(selectionText, "selectionText");
         Objects.requireNonNull(scrollbarColor, "scrollbarColor");
+        if (!Double.isFinite(faintOpacity) || faintOpacity < 0.0 || faintOpacity > 1.0) {
+            throw new IllegalArgumentException("faintOpacity must be between 0 and 1");
+        }
         palette = List.copyOf(palette);
         for (var color : palette) {
             Objects.requireNonNull(color, "palette color");
@@ -43,6 +47,7 @@ public record TerminalTheme(
                 background,
                 foreground,
                 background,
+                0.5,
                 foreground.deriveColor(0, 1, 1, 0.45));
     }
 }

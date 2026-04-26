@@ -1019,6 +1019,8 @@ final class TerminalSession implements AutoCloseable {
                         graphics.fillRect(x, y, metrics.cellWidthPx(), metrics.cellHeightPx());
                     }
 
+                    var faintFactor = GhosttyStyle.faint(style) ? theme.faintOpacity() : 1.0;
+
                     if (!GhosttyStyle.invisible(style)) {
                         text.setLength(0);
                         for (var i = 0; i < codePointCount; i++) {
@@ -1033,16 +1035,18 @@ final class TerminalSession implements AutoCloseable {
                         }
                         var baseline = y + metrics.baselineOffsetPx();
                         if (!preeditCell) {
-                            var textColor = selected ? theme.selectionText() : toFxColor(foreground);
+                            var baseTextColor = selected ? theme.selectionText() : toFxColor(foreground);
+                            var textColor = applyOpacity(baseTextColor, faintFactor);
                             graphics.setFill(textColor);
                             graphics.setFont(fonts.forStyle(GhosttyStyle.bold(style), GhosttyStyle.italic(style)));
                             graphics.fillText(renderedText, x, baseline);
-                            drawTextDecorations(graphics, x, y, metrics, style, selected, textColor, theme);
+                            drawTextDecorations(graphics, x, y, metrics, style, selected, baseTextColor, textColor, theme, faintFactor);
                         }
                     }
 
                     if (hovered) {
-                        graphics.setStroke(selected ? theme.selectionText() : toFxColor(foreground));
+                        var hoverColor = selected ? theme.selectionText() : toFxColor(foreground);
+                        graphics.setStroke(applyOpacity(hoverColor, faintFactor));
                         drawHoverUnderline(graphics, x, y, metrics);
                     }
                     x += metrics.cellWidthPx();
@@ -1466,8 +1470,10 @@ final class TerminalSession implements AutoCloseable {
             GhosttyCanvas.CellMetrics metrics,
             MemorySegment style,
             boolean selected,
+            Color baseTextColor,
             Color textColor,
-            TerminalTheme theme) {
+            TerminalTheme theme,
+            double faintFactor) {
         var underline = GhosttyStyle.underline(style);
         if (underline == ghostty_vt_h.GHOSTTY_SGR_UNDERLINE_NONE()
                 && !GhosttyStyle.strikethrough(style)
@@ -1478,7 +1484,10 @@ final class TerminalSession implements AutoCloseable {
         graphics.setLineWidth(1.0);
         graphics.setLineDashes(null);
         if (underline != ghostty_vt_h.GHOSTTY_SGR_UNDERLINE_NONE()) {
-            graphics.setStroke(selected ? theme.selectionText() : decorationColor(GhosttyStyle.underline_color(style), textColor, theme));
+            var underlineBaseColor = selected
+                    ? theme.selectionText()
+                    : decorationColor(GhosttyStyle.underline_color(style), baseTextColor, theme);
+            graphics.setStroke(applyOpacity(underlineBaseColor, faintFactor));
             drawUnderline(graphics, x, y + metrics.cellHeightPx() - 2.5, metrics.cellWidthPx(), underline);
         }
         graphics.setStroke(textColor);
@@ -1529,6 +1538,14 @@ final class TerminalSession implements AutoCloseable {
             return;
         }
         graphics.strokeLine(x, y, x + width, y);
+    }
+
+    private static Color applyOpacity(Color color, double factor) {
+        if (factor >= 1.0) {
+            return color;
+        }
+
+        return color.deriveColor(0, 1, 1, color.getOpacity() * factor);
     }
 
     private Color decorationColor(MemorySegment color, Color fallback, TerminalTheme theme) {

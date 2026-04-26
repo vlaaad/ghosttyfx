@@ -301,6 +301,7 @@ public final class GhosttyFxManualApp {
                 color(cursorText),
                 color(selection),
                 fg,
+                0.5,
                 fg.deriveColor(0, 1, 1, 0.45)));
     }
 
