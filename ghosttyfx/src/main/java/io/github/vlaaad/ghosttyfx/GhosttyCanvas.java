@@ -17,13 +17,15 @@ import javafx.beans.binding.Bindings;
 import javafx.beans.binding.ObjectBinding;
 import javafx.beans.property.BooleanProperty;
 import javafx.beans.property.ObjectProperty;
+import javafx.beans.property.ReadOnlyBooleanProperty;
+import javafx.beans.property.ReadOnlyBooleanWrapper;
 import javafx.beans.property.SimpleBooleanProperty;
 import javafx.beans.property.SimpleObjectProperty;
 import javafx.beans.property.SimpleStringProperty;
 import javafx.beans.property.StringProperty;
 import javafx.geometry.Point2D;
-import javafx.scene.canvas.Canvas;
 import javafx.scene.Cursor;
+import javafx.scene.canvas.Canvas;
 import javafx.scene.input.Clipboard;
 import javafx.scene.input.ClipboardContent;
 import javafx.scene.input.InputMethodEvent;
@@ -108,6 +110,7 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
             inputPlatform == KeyInput.Platform.MACOS
                     ? new KeyCodeCombination(KeyCode.A, KeyCombination.META_DOWN)
                     : new KeyCodeCombination(KeyCode.A, KeyCombination.CONTROL_DOWN, KeyCombination.SHIFT_DOWN));
+    private final ReadOnlyBooleanWrapper processExited = new ReadOnlyBooleanWrapper(this, "processExited", false);
 
     private final ObjectBinding<CellMetrics> cellMetrics = Bindings.createObjectBinding(() -> {
         var text = new Text();
@@ -318,6 +321,14 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
 
     public ObjectProperty<Runnable> onBellProperty() {
         return onBell;
+    }
+
+    public boolean isProcessExited() {
+        return processExited.get();
+    }
+
+    public ReadOnlyBooleanProperty processExitedProperty() {
+        return processExited.getReadOnlyProperty();
     }
 
     @Override
@@ -1125,6 +1136,9 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
             }
             if (outputs.get(outputs.size() - 1) instanceof PtySession.Closed) {
                 stop();
+                if (canvas != null) {
+                    canvas.processExited.set(true);
+                }
             }
         }
     }

@@ -21,7 +21,6 @@ Generated per-platform `jextract` bindings for `libghostty-vt`.
 14. Semantic prompt / shell integration UI (osc 133): libghostty parses semantic prompt data, but the canvas does not expose prompt navigation, command regions, or similar UI behavior.
 15. Search UI: Ghostty has search behavior at the app layer; this canvas has selection and copy, but no find/highlight navigation.
 16. Rich font rendering: grapheme handling exists, but JavaFX fillText per cell means no full terminal-grade shaping/ligatures/fallback behavior like Ghostty’s renderer.
-17. on process exit -> close tab
 
 ## Local Build
 

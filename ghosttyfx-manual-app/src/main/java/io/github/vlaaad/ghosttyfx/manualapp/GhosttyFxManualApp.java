@@ -127,6 +127,7 @@ public final class GhosttyFxManualApp {
                 tabs.getTabs().add(tab);
                 tabs.getSelectionModel().select(tab);
                 canvas.requestFocus();
+                canvas.processExitedProperty().addListener((_, _, _) -> tabs.getTabs().remove(tab));
             });
             themePicker.valueProperty().addListener((_, _, theme) -> {
                 if (theme == null) {

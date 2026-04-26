@@ -82,6 +82,8 @@ final class PtySession implements AutoCloseable {
                         processOutputs.put(new Chunk(Arrays.copyOf(buffer, read)));
                     }
                 } finally {
+                    // clear interrupt status to allow putting Closed into the queue
+                    Thread.interrupted();
                     processOutputs.put(new Closed());
                 }
             });
