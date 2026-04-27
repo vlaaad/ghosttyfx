@@ -71,7 +71,8 @@ final class PtySession implements AutoCloseable {
                 .setUseWinConPty(true)
                 .start();
         try {
-            var outputTask = IO.submit(() -> {
+            // output task, no cleanup since we want to emit closed event when the process exits
+            IO.submit(() -> {
                 try (var input = process.getInputStream()) {
                     var buffer = new byte[8 * 1024];
                     while (true) {
@@ -82,36 +83,30 @@ final class PtySession implements AutoCloseable {
                         processOutputs.put(new Chunk(Arrays.copyOf(buffer, read)));
                     }
                 } finally {
-                    // clear interrupt status to allow putting Closed into the queue
-                    Thread.interrupted();
                     processOutputs.put(new Closed());
                 }
             });
-            try {
-                // input task, no cleanup since we want to consume the proc commands even after the process exits
-                IO.submit(() -> {
-                    try (var output = process.getOutputStream()) {
-                        while (true) {
-                            switch (commands.take()) {
-                                case WriteInput(var bytes) ->
-                                    output.write(bytes);
-                                case ResizePty(var columns, var rows) ->
-                                    process.setWinSize(new WinSize(columns, rows));
-                            }
-                        }
-                    } catch (Exception _) {
-                        while (true) {
-                            commands.take();
+            // input task, no cleanup since we want to consume the proc commands even after the process exits
+            IO.submit(() -> {
+                try (var output = process.getOutputStream()) {
+                    while (true) {
+                        switch (commands.take()) {
+                            case WriteInput(var bytes) ->
+                                output.write(bytes);
+                            case ResizePty(var columns, var rows) ->
+                                process.setWinSize(new WinSize(columns, rows));
                         }
                     }
-                });
+                } catch (Exception _) {
+                    while (true) {
+                        commands.take();
+                    }
+                }
+            });
+            try {
                 return process.waitFor();
             } catch (InterruptedException _) {
-                outputTask.cancel(true);
                 return destroyProcess(process);
-            } finally {
-                // outputTask cleanup
-                outputTask.cancel(true);
             }
         } finally {
             // process cleanup
