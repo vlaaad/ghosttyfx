@@ -2,6 +2,7 @@ package io.github.vlaaad.ghosttyfx;
 
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.fail;
 
@@ -136,6 +137,18 @@ final class GhosttyCanvasTest {
                         : new KeyCodeCombination(KeyCode.A, KeyCombination.CONTROL_DOWN, KeyCombination.SHIFT_DOWN)));
                 assertTrue(combinations.contains(new KeyCodeCombination(KeyCode.PAGE_UP, KeyCombination.SHIFT_DOWN)));
                 assertTrue(combinations.contains(new KeyCodeCombination(KeyCode.END, KeyCombination.SHIFT_DOWN)));
+                assertTrue(combinations.contains(isMac()
+                        ? new KeyCodeCombination(KeyCode.PAGE_UP, KeyCombination.META_DOWN)
+                        : new KeyCodeCombination(KeyCode.PAGE_UP, KeyCombination.SHIFT_DOWN)));
+                assertTrue(combinations.contains(isMac()
+                        ? new KeyCodeCombination(KeyCode.PAGE_DOWN, KeyCombination.META_DOWN)
+                        : new KeyCodeCombination(KeyCode.PAGE_DOWN, KeyCombination.SHIFT_DOWN)));
+                assertTrue(combinations.contains(isMac()
+                        ? new KeyCodeCombination(KeyCode.HOME, KeyCombination.META_DOWN)
+                        : new KeyCodeCombination(KeyCode.HOME, KeyCombination.SHIFT_DOWN)));
+                assertTrue(combinations.contains(isMac()
+                        ? new KeyCodeCombination(KeyCode.END, KeyCombination.META_DOWN)
+                        : new KeyCodeCombination(KeyCode.END, KeyCombination.SHIFT_DOWN)));
 
                 var shortcut = new Shortcut(
                         new KeyCodeCombination(KeyCode.B, KeyCombination.SHIFT_DOWN),
@@ -176,6 +189,44 @@ final class GhosttyCanvasTest {
 
                 fireShortcut(canvas, new KeyCodeCombination(KeyCode.END, KeyCombination.SHIFT_DOWN));
                 assertEquals(marker.substring(1), canvas.getInputMethodRequests().getSelectedText());
+                return null;
+            });
+        }
+    }
+
+    @Test
+    void viewportScrollShortcutsReportUnavailableWithoutScrollableViewport() throws Exception {
+        var tempDirectory = Files.createTempDirectory("ghosttyfx-canvas-viewport-scroll-shortcuts-test-");
+        var pidFile = tempDirectory.resolve("shell.pid");
+        var shell = discoverShell(pidFile);
+
+        try (var canvas = GhosttyFx.create(shell.command(), tempDirectory, System.getenv())) {
+            runOnFxThread(() -> {
+                assertFalse(canvas.scrollViewportPageUp());
+                assertFalse(canvas.scrollViewportPageDown());
+                assertFalse(canvas.scrollViewportToTop());
+                assertFalse(canvas.scrollViewportToBottom());
+                return null;
+            });
+        }
+    }
+
+    @Test
+    void viewportScrollShortcutsConsumeAtScrollableBoundaries() throws Exception {
+        var tempDirectory = Files.createTempDirectory("ghosttyfx-canvas-viewport-scroll-boundary-shortcuts-test-");
+        var pidFile = tempDirectory.resolve("shell.pid");
+        var shell = discoverOutputShell(pidFile, lineOutput(80));
+
+        try (var canvas = GhosttyFx.create(shell.command(), tempDirectory, System.getenv())) {
+            await("scrollable terminal output", START_TIMEOUT, () -> runOnFxThread(() ->
+                    canvas.scrollViewportToTop() ? Optional.of(Boolean.TRUE) : Optional.empty()));
+
+            runOnFxThread(() -> {
+                assertTrue(canvas.scrollViewportPageUp());
+                assertTrue(canvas.scrollViewportToTop());
+                assertTrue(canvas.scrollViewportToBottom());
+                assertTrue(canvas.scrollViewportPageDown());
+                assertTrue(canvas.scrollViewportToBottom());
                 return null;
             });
         }
@@ -373,6 +424,17 @@ final class GhosttyCanvasTest {
 
     private static ShellCommand discoverOutputShell(Path pidFile, String output) {
         return isWindows() ? discoverWindowsOutputShell(pidFile, output) : discoverPosixOutputShell(pidFile, output);
+    }
+
+    private static String lineOutput(int count) {
+        var lines = new StringBuilder();
+        for (var i = 0; i < count; i++) {
+            if (!lines.isEmpty()) {
+                lines.append('\n');
+            }
+            lines.append("line-").append(i);
+        }
+        return lines.toString();
     }
 
     private static ShellCommand discoverWindowsShell(Path pidFile) {

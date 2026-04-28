@@ -17,7 +17,6 @@ Generated per-platform `jextract` bindings for `libghostty-vt`.
 
 ### v1
 - More shortcuts:
-  - viewport scrolling: Linux/Windows `Shift+Home/End`, `Shift+PageUp/PageDown`; macOS `Cmd+Home/End`, `Cmd+PageUp/PageDown`
   - shortcut injection: map shortcuts to PTY sequences; default macOS `Alt+Left/Right` -> `Esc+b/f`, `Meta+Left/Right/Backspace` -> `Ctrl+A/E/U`
 11. Blinking: cursor visibility is respected, but there is no blink timer for blinking cursor or blinking text attributes.
 15. Search UI:

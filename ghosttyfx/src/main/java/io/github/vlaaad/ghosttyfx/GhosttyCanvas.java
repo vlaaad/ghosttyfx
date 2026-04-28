@@ -119,7 +119,27 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
             new Shortcut(new KeyCodeCombination(KeyCode.PAGE_UP, KeyCombination.SHIFT_DOWN), this::extendSelectionPageUp),
             new Shortcut(new KeyCodeCombination(KeyCode.PAGE_DOWN, KeyCombination.SHIFT_DOWN), this::extendSelectionPageDown),
             new Shortcut(new KeyCodeCombination(KeyCode.HOME, KeyCombination.SHIFT_DOWN), this::extendSelectionHome),
-            new Shortcut(new KeyCodeCombination(KeyCode.END, KeyCombination.SHIFT_DOWN), this::extendSelectionEnd)))) {
+            new Shortcut(new KeyCodeCombination(KeyCode.END, KeyCombination.SHIFT_DOWN), this::extendSelectionEnd),
+            new Shortcut(
+                    inputPlatform == KeyInput.Platform.MACOS
+                            ? new KeyCodeCombination(KeyCode.PAGE_UP, KeyCombination.META_DOWN)
+                            : new KeyCodeCombination(KeyCode.PAGE_UP, KeyCombination.SHIFT_DOWN),
+                    this::scrollViewportPageUp),
+            new Shortcut(
+                    inputPlatform == KeyInput.Platform.MACOS
+                            ? new KeyCodeCombination(KeyCode.PAGE_DOWN, KeyCombination.META_DOWN)
+                            : new KeyCodeCombination(KeyCode.PAGE_DOWN, KeyCombination.SHIFT_DOWN),
+                    this::scrollViewportPageDown),
+            new Shortcut(
+                    inputPlatform == KeyInput.Platform.MACOS
+                            ? new KeyCodeCombination(KeyCode.HOME, KeyCombination.META_DOWN)
+                            : new KeyCodeCombination(KeyCode.HOME, KeyCombination.SHIFT_DOWN),
+                    this::scrollViewportToTop),
+            new Shortcut(
+                    inputPlatform == KeyInput.Platform.MACOS
+                            ? new KeyCodeCombination(KeyCode.END, KeyCombination.META_DOWN)
+                            : new KeyCodeCombination(KeyCode.END, KeyCombination.SHIFT_DOWN),
+                    this::scrollViewportToBottom)))) {
         @Override
         public void set(ObservableList<Shortcut> value) {
             super.set(Objects.requireNonNull(value, "shortcuts"));
@@ -1063,6 +1083,57 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
 
     public boolean extendSelectionEnd() {
         return !selection.isEmpty() && extendSelectionTo(new Selection.ScreenPoint(Math.max(0, terminalSession.columnCount() - 1), selection.to().y()));
+    }
+
+    public boolean scrollViewportPageUp() {
+        return scrollViewportWithoutSelection(-viewportRowCount());
+    }
+
+    public boolean scrollViewportPageDown() {
+        return scrollViewportWithoutSelection(viewportRowCount());
+    }
+
+    public boolean scrollViewportToTop() {
+        var scrollbar = scrollbarInfo();
+        if (!viewportScrollAvailable(scrollbar)) {
+            return false;
+        }
+        if (scrollbar.offset() == 0) {
+            return true;
+        }
+        scrollViewportTo(0, scrollbar);
+        return true;
+    }
+
+    public boolean scrollViewportToBottom() {
+        var scrollbar = scrollbarInfo();
+        if (!viewportScrollAvailable(scrollbar)) {
+            return false;
+        }
+        if (scrollbar.offset() == scrollbar.scrollableRows()) {
+            return true;
+        }
+        scrollViewportTo(scrollbar.scrollableRows(), scrollbar);
+        return true;
+    }
+
+    private boolean scrollViewportWithoutSelection(long deltaRows) {
+        var scrollbar = scrollbarInfo();
+        if (!viewportScrollAvailable(scrollbar) || deltaRows == 0) {
+            return false;
+        }
+
+        var nextOffset = Math.clamp(scrollbar.offset() + deltaRows, 0, scrollbar.scrollableRows());
+        if (nextOffset == scrollbar.offset()) {
+            return true;
+        }
+
+        scrollViewportTo(nextOffset, scrollbar);
+        return true;
+    }
+
+    private boolean viewportScrollAvailable(TerminalSession.ScrollbarInfo scrollbar) {
+        return selection.isEmpty() && scrollbar != null && scrollbar.scrollable();
     }
 
     private boolean extendSelectionTo(Selection.ScreenPoint nextFocus) {
