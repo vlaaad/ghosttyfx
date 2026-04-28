@@ -20,11 +20,15 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Pattern;
 import javafx.application.Platform;
 import javafx.event.Event;
+import javafx.event.EventType;
+import javafx.scene.input.KeyCode;
 import javafx.scene.input.Clipboard;
 import javafx.scene.input.DataFormat;
 import javafx.scene.input.KeyEvent;
 import javafx.scene.input.KeyCodeCombination;
 import javafx.scene.input.KeyCombination;
+import javafx.scene.input.MouseButton;
+import javafx.scene.input.MouseEvent;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.BeforeAll;
 import javafx.scene.paint.Color;
@@ -108,6 +112,66 @@ final class GhosttyCanvasTest {
                 assertEquals(theme, canvas.getTheme());
                 assertThrows(NullPointerException.class, () -> canvas.setTheme(null));
                 assertThrows(NullPointerException.class, () -> canvas.themeProperty().set(null));
+                return null;
+            });
+        }
+    }
+
+    @Test
+    void exposesExtendSelectionShortcutProperties() throws Exception {
+        var tempDirectory = Files.createTempDirectory("ghosttyfx-canvas-selection-shortcuts-test-");
+        var pidFile = tempDirectory.resolve("shell.pid");
+        var shell = discoverShell(pidFile);
+
+        try (var canvas = GhosttyFx.create(shell.command(), tempDirectory, System.getenv())) {
+            runOnFxThread(() -> {
+                assertEquals(new KeyCodeCombination(KeyCode.LEFT, KeyCombination.SHIFT_DOWN), canvas.getExtendSelectionLeftShortcut());
+                assertEquals(new KeyCodeCombination(KeyCode.RIGHT, KeyCombination.SHIFT_DOWN), canvas.getExtendSelectionRightShortcut());
+                assertEquals(new KeyCodeCombination(KeyCode.UP, KeyCombination.SHIFT_DOWN), canvas.getExtendSelectionUpShortcut());
+                assertEquals(new KeyCodeCombination(KeyCode.DOWN, KeyCombination.SHIFT_DOWN), canvas.getExtendSelectionDownShortcut());
+                assertEquals(new KeyCodeCombination(KeyCode.PAGE_UP, KeyCombination.SHIFT_DOWN), canvas.getExtendSelectionPageUpShortcut());
+                assertEquals(new KeyCodeCombination(KeyCode.PAGE_DOWN, KeyCombination.SHIFT_DOWN), canvas.getExtendSelectionPageDownShortcut());
+                assertEquals(new KeyCodeCombination(KeyCode.HOME, KeyCombination.SHIFT_DOWN), canvas.getExtendSelectionHomeShortcut());
+                assertEquals(new KeyCodeCombination(KeyCode.END, KeyCombination.SHIFT_DOWN), canvas.getExtendSelectionEndShortcut());
+
+                var shortcut = new KeyCodeCombination(KeyCode.B, KeyCombination.SHIFT_DOWN);
+                canvas.setExtendSelectionRightShortcut(shortcut);
+                assertEquals(shortcut, canvas.extendSelectionRightShortcutProperty().get());
+                canvas.extendSelectionRightShortcutProperty().set(null);
+                assertEquals(null, canvas.getExtendSelectionRightShortcut());
+                return null;
+            });
+        }
+    }
+
+    @Test
+    void shiftArrowShortcutsExtendExistingSelection() throws Exception {
+        var marker = "ghosttyfx-selection";
+        var tempDirectory = Files.createTempDirectory("ghosttyfx-canvas-selection-test-");
+        var pidFile = tempDirectory.resolve("shell.pid");
+        var shell = discoverOutputShell(pidFile, marker);
+
+        try (var canvas = GhosttyFx.create(shell.command(), tempDirectory, System.getenv())) {
+            await("terminal output to be addressable", START_TIMEOUT, () -> runOnFxThread(() -> {
+                fireShortcut(canvas, canvas.getSelectAllShortcut());
+                return marker.equals(canvas.getInputMethodRequests().getSelectedText())
+                        ? Optional.of(Boolean.TRUE)
+                        : Optional.empty();
+            }));
+
+            runOnFxThread(() -> {
+                dragSelection(canvas, 1, 1);
+                fireShortcut(canvas, canvas.getExtendSelectionRightShortcut());
+                assertEquals(marker.substring(1, 3), canvas.getInputMethodRequests().getSelectedText());
+
+                fireShortcut(canvas, canvas.getExtendSelectionLeftShortcut());
+                assertEquals(marker.substring(1, 2), canvas.getInputMethodRequests().getSelectedText());
+
+                fireShortcut(canvas, canvas.getExtendSelectionHomeShortcut());
+                assertEquals(marker.substring(0, 2), canvas.getInputMethodRequests().getSelectedText());
+
+                fireShortcut(canvas, canvas.getExtendSelectionEndShortcut());
+                assertEquals(marker.substring(1), canvas.getInputMethodRequests().getSelectedText());
                 return null;
             });
         }
@@ -244,6 +308,39 @@ final class GhosttyCanvasTest {
                 modifierDown(combination.getAlt()),
                 modifierDown(combination.getMeta()) || (shortcutDownOnCurrentPlatform(combination.getShortcut()) && isMac()));
         Event.fireEvent(canvas, event);
+    }
+
+    private static void dragSelection(GhosttyCanvas canvas, int fromColumn, int toColumn) {
+        var cellWidth = (canvas.prefWidth(-1) - 10) / 80;
+        var cellHeight = canvas.prefHeight(-1) / 24;
+        var fromX = fromColumn * cellWidth + cellWidth * 0.1;
+        var toX = toColumn * cellWidth + cellWidth * 0.8;
+        var y = cellHeight * 0.5;
+        Event.fireEvent(canvas, mouseEvent(MouseEvent.MOUSE_PRESSED, fromX, y, true));
+        Event.fireEvent(canvas, mouseEvent(MouseEvent.MOUSE_DRAGGED, toX, y, true));
+        Event.fireEvent(canvas, mouseEvent(MouseEvent.MOUSE_RELEASED, toX, y, false));
+    }
+
+    private static MouseEvent mouseEvent(EventType<MouseEvent> eventType, double x, double y, boolean primaryButtonDown) {
+        return new MouseEvent(
+                eventType,
+                x,
+                y,
+                x,
+                y,
+                MouseButton.PRIMARY,
+                1,
+                false,
+                false,
+                false,
+                false,
+                primaryButtonDown,
+                false,
+                false,
+                false,
+                false,
+                false,
+                null);
     }
 
     private static boolean modifierDown(KeyCombination.ModifierValue value) {

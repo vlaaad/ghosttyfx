@@ -1,5 +1,15 @@
 package io.github.vlaaad.ghosttyfx;
 
+import java.lang.foreign.Arena;
+import java.lang.foreign.MemoryLayout;
+import java.lang.foreign.MemorySegment;
+import java.lang.foreign.SegmentAllocator;
+import java.lang.foreign.ValueLayout;
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Consumer;
+
 import io.github.vlaaad.ghostty.bindings.GhosttyColorRgb;
 import io.github.vlaaad.ghostty.bindings.GhosttyDeviceAttributes;
 import io.github.vlaaad.ghostty.bindings.GhosttyDeviceAttributesPrimary;
@@ -15,31 +25,22 @@ import io.github.vlaaad.ghostty.bindings.GhosttyPointValue;
 import io.github.vlaaad.ghostty.bindings.GhosttyRenderStateColors;
 import io.github.vlaaad.ghostty.bindings.GhosttySelection;
 import io.github.vlaaad.ghostty.bindings.GhosttySizeReportSize;
+import io.github.vlaaad.ghostty.bindings.GhosttyString;
 import io.github.vlaaad.ghostty.bindings.GhosttyStyle;
 import io.github.vlaaad.ghostty.bindings.GhosttyStyleColor;
 import io.github.vlaaad.ghostty.bindings.GhosttyStyleColorValue;
-import io.github.vlaaad.ghostty.bindings.GhosttyString;
 import io.github.vlaaad.ghostty.bindings.GhosttyTerminalBellFn;
 import io.github.vlaaad.ghostty.bindings.GhosttyTerminalColorSchemeFn;
 import io.github.vlaaad.ghostty.bindings.GhosttyTerminalDeviceAttributesFn;
 import io.github.vlaaad.ghostty.bindings.GhosttyTerminalOptions;
-import io.github.vlaaad.ghostty.bindings.GhosttyTerminalScrollbar;
 import io.github.vlaaad.ghostty.bindings.GhosttyTerminalScrollViewport;
 import io.github.vlaaad.ghostty.bindings.GhosttyTerminalScrollViewportValue;
+import io.github.vlaaad.ghostty.bindings.GhosttyTerminalScrollbar;
 import io.github.vlaaad.ghostty.bindings.GhosttyTerminalSizeFn;
 import io.github.vlaaad.ghostty.bindings.GhosttyTerminalTitleChangedFn;
 import io.github.vlaaad.ghostty.bindings.GhosttyTerminalWritePtyFn;
 import io.github.vlaaad.ghostty.bindings.GhosttyTerminalXtversionFn;
 import io.github.vlaaad.ghostty.bindings.ghostty_vt_h;
-import java.lang.foreign.Arena;
-import java.lang.foreign.MemoryLayout;
-import java.lang.foreign.MemorySegment;
-import java.lang.foreign.SegmentAllocator;
-import java.lang.foreign.ValueLayout;
-import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.function.Consumer;
 import javafx.application.ColorScheme;
 import javafx.application.Platform;
 import javafx.scene.canvas.GraphicsContext;
@@ -622,6 +623,16 @@ final class TerminalSession implements AutoCloseable {
                 return 0;
             }
             return Short.toUnsignedInt(cols.get(ValueLayout.JAVA_SHORT, 0));
+        }
+    }
+
+    int totalRowCount() {
+        try (var arena = Arena.ofConfined()) {
+            var rows = arena.allocate(ValueLayout.JAVA_LONG);
+            if (ghostty_vt_h.ghostty_terminal_get(terminal, ghostty_vt_h.GHOSTTY_TERMINAL_DATA_TOTAL_ROWS(), rows) != GHOSTTY_SUCCESS) {
+                return 0;
+            }
+            return Math.toIntExact(rows.get(ValueLayout.JAVA_LONG, 0));
         }
     }
 

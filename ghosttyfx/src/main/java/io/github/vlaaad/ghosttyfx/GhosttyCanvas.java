@@ -110,6 +110,38 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
             inputPlatform == KeyInput.Platform.MACOS
                     ? new KeyCodeCombination(KeyCode.A, KeyCombination.META_DOWN)
                     : new KeyCodeCombination(KeyCode.A, KeyCombination.CONTROL_DOWN, KeyCombination.SHIFT_DOWN));
+    private final ObjectProperty<KeyCombination> extendSelectionLeftShortcut = new SimpleObjectProperty<>(
+            this,
+            "extendSelectionLeftShortcut",
+            new KeyCodeCombination(KeyCode.LEFT, KeyCombination.SHIFT_DOWN));
+    private final ObjectProperty<KeyCombination> extendSelectionRightShortcut = new SimpleObjectProperty<>(
+            this,
+            "extendSelectionRightShortcut",
+            new KeyCodeCombination(KeyCode.RIGHT, KeyCombination.SHIFT_DOWN));
+    private final ObjectProperty<KeyCombination> extendSelectionUpShortcut = new SimpleObjectProperty<>(
+            this,
+            "extendSelectionUpShortcut",
+            new KeyCodeCombination(KeyCode.UP, KeyCombination.SHIFT_DOWN));
+    private final ObjectProperty<KeyCombination> extendSelectionDownShortcut = new SimpleObjectProperty<>(
+            this,
+            "extendSelectionDownShortcut",
+            new KeyCodeCombination(KeyCode.DOWN, KeyCombination.SHIFT_DOWN));
+    private final ObjectProperty<KeyCombination> extendSelectionPageUpShortcut = new SimpleObjectProperty<>(
+            this,
+            "extendSelectionPageUpShortcut",
+            new KeyCodeCombination(KeyCode.PAGE_UP, KeyCombination.SHIFT_DOWN));
+    private final ObjectProperty<KeyCombination> extendSelectionPageDownShortcut = new SimpleObjectProperty<>(
+            this,
+            "extendSelectionPageDownShortcut",
+            new KeyCodeCombination(KeyCode.PAGE_DOWN, KeyCombination.SHIFT_DOWN));
+    private final ObjectProperty<KeyCombination> extendSelectionHomeShortcut = new SimpleObjectProperty<>(
+            this,
+            "extendSelectionHomeShortcut",
+            new KeyCodeCombination(KeyCode.HOME, KeyCombination.SHIFT_DOWN));
+    private final ObjectProperty<KeyCombination> extendSelectionEndShortcut = new SimpleObjectProperty<>(
+            this,
+            "extendSelectionEndShortcut",
+            new KeyCodeCombination(KeyCode.END, KeyCombination.SHIFT_DOWN));
     private final ReadOnlyBooleanWrapper processExited = new ReadOnlyBooleanWrapper(this, "processExited", false);
 
     private final ObjectBinding<CellMetrics> cellMetrics = Bindings.createObjectBinding(() -> {
@@ -301,6 +333,102 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
 
     public ObjectProperty<KeyCombination> selectAllShortcutProperty() {
         return selectAllShortcut;
+    }
+
+    public KeyCombination getExtendSelectionLeftShortcut() {
+        return extendSelectionLeftShortcut.get();
+    }
+
+    public void setExtendSelectionLeftShortcut(KeyCombination value) {
+        extendSelectionLeftShortcut.set(value);
+    }
+
+    public ObjectProperty<KeyCombination> extendSelectionLeftShortcutProperty() {
+        return extendSelectionLeftShortcut;
+    }
+
+    public KeyCombination getExtendSelectionRightShortcut() {
+        return extendSelectionRightShortcut.get();
+    }
+
+    public void setExtendSelectionRightShortcut(KeyCombination value) {
+        extendSelectionRightShortcut.set(value);
+    }
+
+    public ObjectProperty<KeyCombination> extendSelectionRightShortcutProperty() {
+        return extendSelectionRightShortcut;
+    }
+
+    public KeyCombination getExtendSelectionUpShortcut() {
+        return extendSelectionUpShortcut.get();
+    }
+
+    public void setExtendSelectionUpShortcut(KeyCombination value) {
+        extendSelectionUpShortcut.set(value);
+    }
+
+    public ObjectProperty<KeyCombination> extendSelectionUpShortcutProperty() {
+        return extendSelectionUpShortcut;
+    }
+
+    public KeyCombination getExtendSelectionDownShortcut() {
+        return extendSelectionDownShortcut.get();
+    }
+
+    public void setExtendSelectionDownShortcut(KeyCombination value) {
+        extendSelectionDownShortcut.set(value);
+    }
+
+    public ObjectProperty<KeyCombination> extendSelectionDownShortcutProperty() {
+        return extendSelectionDownShortcut;
+    }
+
+    public KeyCombination getExtendSelectionPageUpShortcut() {
+        return extendSelectionPageUpShortcut.get();
+    }
+
+    public void setExtendSelectionPageUpShortcut(KeyCombination value) {
+        extendSelectionPageUpShortcut.set(value);
+    }
+
+    public ObjectProperty<KeyCombination> extendSelectionPageUpShortcutProperty() {
+        return extendSelectionPageUpShortcut;
+    }
+
+    public KeyCombination getExtendSelectionPageDownShortcut() {
+        return extendSelectionPageDownShortcut.get();
+    }
+
+    public void setExtendSelectionPageDownShortcut(KeyCombination value) {
+        extendSelectionPageDownShortcut.set(value);
+    }
+
+    public ObjectProperty<KeyCombination> extendSelectionPageDownShortcutProperty() {
+        return extendSelectionPageDownShortcut;
+    }
+
+    public KeyCombination getExtendSelectionHomeShortcut() {
+        return extendSelectionHomeShortcut.get();
+    }
+
+    public void setExtendSelectionHomeShortcut(KeyCombination value) {
+        extendSelectionHomeShortcut.set(value);
+    }
+
+    public ObjectProperty<KeyCombination> extendSelectionHomeShortcutProperty() {
+        return extendSelectionHomeShortcut;
+    }
+
+    public KeyCombination getExtendSelectionEndShortcut() {
+        return extendSelectionEndShortcut.get();
+    }
+
+    public void setExtendSelectionEndShortcut(KeyCombination value) {
+        extendSelectionEndShortcut.set(value);
+    }
+
+    public ObjectProperty<KeyCombination> extendSelectionEndShortcutProperty() {
+        return extendSelectionEndShortcut;
     }
 
     public String getTitle() {
@@ -1006,7 +1134,90 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
             }
             return true;
         }
+        var extendSelectionLeft = getExtendSelectionLeftShortcut();
+        if (extendSelectionLeft != null && extendSelectionLeft.match(event)) {
+            if (selection.isEmpty()) {
+                return false;
+            }
+            if (terminalSession.columnCount() <= 0) {
+                return extendSelectionTo(selection.to());
+            }
+            if (selection.to().x() > 0) {
+                return extendSelectionTo(new Selection.ScreenPoint(selection.to().x() - 1, selection.to().y()));
+            }
+            if (selection.to().y() > 0) {
+                return extendSelectionTo(new Selection.ScreenPoint(terminalSession.columnCount() - 1, selection.to().y() - 1));
+            }
+            return extendSelectionTo(selection.to());
+        }
+        var extendSelectionRight = getExtendSelectionRightShortcut();
+        if (extendSelectionRight != null && extendSelectionRight.match(event)) {
+            if (selection.isEmpty()) {
+                return false;
+            }
+            if (terminalSession.columnCount() <= 0 || terminalSession.totalRowCount() <= 0) {
+                return extendSelectionTo(selection.to());
+            }
+            if (selection.to().x() + 1 < terminalSession.columnCount()) {
+                return extendSelectionTo(new Selection.ScreenPoint(selection.to().x() + 1, selection.to().y()));
+            }
+            if (selection.to().y() + 1 < terminalSession.totalRowCount()) {
+                return extendSelectionTo(new Selection.ScreenPoint(0, selection.to().y() + 1));
+            }
+            return extendSelectionTo(selection.to());
+        }
+        var extendSelectionUp = getExtendSelectionUpShortcut();
+        if (extendSelectionUp != null && extendSelectionUp.match(event)) {
+            return !selection.isEmpty() && extendSelectionTo(moveScreenPointRows(selection.to(), terminalSession.columnCount(), terminalSession.totalRowCount(), -1));
+        }
+        var extendSelectionDown = getExtendSelectionDownShortcut();
+        if (extendSelectionDown != null && extendSelectionDown.match(event)) {
+            return !selection.isEmpty() && extendSelectionTo(moveScreenPointRows(selection.to(), terminalSession.columnCount(), terminalSession.totalRowCount(), 1));
+        }
+        var extendSelectionPageUp = getExtendSelectionPageUpShortcut();
+        if (extendSelectionPageUp != null && extendSelectionPageUp.match(event)) {
+            return !selection.isEmpty() && extendSelectionTo(moveScreenPointRows(selection.to(), terminalSession.columnCount(), terminalSession.totalRowCount(), -viewportRowCount()));
+        }
+        var extendSelectionPageDown = getExtendSelectionPageDownShortcut();
+        if (extendSelectionPageDown != null && extendSelectionPageDown.match(event)) {
+            return !selection.isEmpty() && extendSelectionTo(moveScreenPointRows(selection.to(), terminalSession.columnCount(), terminalSession.totalRowCount(), viewportRowCount()));
+        }
+        var extendSelectionHome = getExtendSelectionHomeShortcut();
+        if (extendSelectionHome != null && extendSelectionHome.match(event)) {
+            return !selection.isEmpty() && extendSelectionTo(new Selection.ScreenPoint(0, selection.to().y()));
+        }
+        var extendSelectionEnd = getExtendSelectionEndShortcut();
+        if (extendSelectionEnd != null && extendSelectionEnd.match(event)) {
+            return !selection.isEmpty() && extendSelectionTo(new Selection.ScreenPoint(Math.max(0, terminalSession.columnCount() - 1), selection.to().y()));
+        }
         return false;
+    }
+
+    private boolean extendSelectionTo(Selection.ScreenPoint nextFocus) {
+        var anchor = selection.from();
+        applySelection(new Selection(anchor, nextFocus, selection.rectangle()));
+        var scrollbar = scrollbarInfo();
+        if (scrollbar == null || scrollbar.visible() <= 0) {
+            return true;
+        }
+
+        var viewportTop = scrollbar.offset();
+        var viewportBottom = viewportTop + scrollbar.visible() - 1;
+        if (nextFocus.y() < viewportTop) {
+            scrollViewportTo(nextFocus.y(), scrollbar);
+        } else if (nextFocus.y() > viewportBottom) {
+            scrollViewportTo(nextFocus.y() - scrollbar.visible() + 1, scrollbar);
+        }
+        return true;
+    }
+
+    private static Selection.ScreenPoint moveScreenPointRows(Selection.ScreenPoint point, int columns, int rows, int delta) {
+        if (columns <= 0 || rows <= 0) {
+            return point;
+        }
+        return new Selection.ScreenPoint(
+                Math.clamp(point.x(), 0, columns - 1),
+                Math.clamp(point.y() + delta, 0, rows - 1));
     }
 
     private void clearSelection() {
