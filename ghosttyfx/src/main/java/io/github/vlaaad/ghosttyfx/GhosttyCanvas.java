@@ -96,50 +96,7 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
                 Font.font(font.getFamily(), FontWeight.BOLD, FontPosture.ITALIC, font.getSize()));
     }, font);
     private final BooleanProperty macOptionAsAlt = new SimpleBooleanProperty(this, "macOptionAsAlt", false);
-    private final ListProperty<Shortcut> shortcuts = new SimpleListProperty<>(this, "shortcuts", FXCollections.observableArrayList(List.of(
-            new Shortcut(
-                    inputPlatform == KeyInput.Platform.MACOS
-                            ? new KeyCodeCombination(KeyCode.C, KeyCombination.META_DOWN)
-                            : new KeyCodeCombination(KeyCode.C, KeyCombination.CONTROL_DOWN),
-                    this::copySelection),
-            new Shortcut(
-                    inputPlatform == KeyInput.Platform.MACOS
-                            ? new KeyCodeCombination(KeyCode.V, KeyCombination.META_DOWN)
-                            : new KeyCodeCombination(KeyCode.V, KeyCombination.CONTROL_DOWN),
-                    this::pasteClipboard),
-            new Shortcut(
-                    inputPlatform == KeyInput.Platform.MACOS
-                            ? new KeyCodeCombination(KeyCode.A, KeyCombination.META_DOWN)
-                            : new KeyCodeCombination(KeyCode.A, KeyCombination.CONTROL_DOWN, KeyCombination.SHIFT_DOWN),
-                    this::selectAll),
-            new Shortcut(new KeyCodeCombination(KeyCode.LEFT, KeyCombination.SHIFT_DOWN), this::extendSelectionLeft),
-            new Shortcut(new KeyCodeCombination(KeyCode.RIGHT, KeyCombination.SHIFT_DOWN), this::extendSelectionRight),
-            new Shortcut(new KeyCodeCombination(KeyCode.UP, KeyCombination.SHIFT_DOWN), this::extendSelectionUp),
-            new Shortcut(new KeyCodeCombination(KeyCode.DOWN, KeyCombination.SHIFT_DOWN), this::extendSelectionDown),
-            new Shortcut(new KeyCodeCombination(KeyCode.PAGE_UP, KeyCombination.SHIFT_DOWN), this::extendSelectionPageUp),
-            new Shortcut(new KeyCodeCombination(KeyCode.PAGE_DOWN, KeyCombination.SHIFT_DOWN), this::extendSelectionPageDown),
-            new Shortcut(new KeyCodeCombination(KeyCode.HOME, KeyCombination.SHIFT_DOWN), this::extendSelectionHome),
-            new Shortcut(new KeyCodeCombination(KeyCode.END, KeyCombination.SHIFT_DOWN), this::extendSelectionEnd),
-            new Shortcut(
-                    inputPlatform == KeyInput.Platform.MACOS
-                            ? new KeyCodeCombination(KeyCode.PAGE_UP, KeyCombination.META_DOWN)
-                            : new KeyCodeCombination(KeyCode.PAGE_UP, KeyCombination.SHIFT_DOWN),
-                    this::scrollViewportPageUp),
-            new Shortcut(
-                    inputPlatform == KeyInput.Platform.MACOS
-                            ? new KeyCodeCombination(KeyCode.PAGE_DOWN, KeyCombination.META_DOWN)
-                            : new KeyCodeCombination(KeyCode.PAGE_DOWN, KeyCombination.SHIFT_DOWN),
-                    this::scrollViewportPageDown),
-            new Shortcut(
-                    inputPlatform == KeyInput.Platform.MACOS
-                            ? new KeyCodeCombination(KeyCode.HOME, KeyCombination.META_DOWN)
-                            : new KeyCodeCombination(KeyCode.HOME, KeyCombination.SHIFT_DOWN),
-                    this::scrollViewportToTop),
-            new Shortcut(
-                    inputPlatform == KeyInput.Platform.MACOS
-                            ? new KeyCodeCombination(KeyCode.END, KeyCombination.META_DOWN)
-                            : new KeyCodeCombination(KeyCode.END, KeyCombination.SHIFT_DOWN),
-                    this::scrollViewportToBottom)))) {
+    private final ListProperty<Shortcut> shortcuts = new SimpleListProperty<>(this, "shortcuts", FXCollections.observableArrayList()) {
         @Override
         public void set(ObservableList<Shortcut> value) {
             super.set(Objects.requireNonNull(value, "shortcuts"));
@@ -184,6 +141,58 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
                         handler.run();
                     }
                 });
+        shortcuts.addAll(
+                new Shortcut(
+                        inputPlatform == KeyInput.Platform.MACOS
+                                ? new KeyCodeCombination(KeyCode.C, KeyCombination.META_DOWN)
+                                : new KeyCodeCombination(KeyCode.C, KeyCombination.CONTROL_DOWN),
+                        this::copySelection),
+                new Shortcut(
+                        inputPlatform == KeyInput.Platform.MACOS
+                                ? new KeyCodeCombination(KeyCode.V, KeyCombination.META_DOWN)
+                                : new KeyCodeCombination(KeyCode.V, KeyCombination.CONTROL_DOWN),
+                        this::pasteClipboard),
+                new Shortcut(
+                        inputPlatform == KeyInput.Platform.MACOS
+                                ? new KeyCodeCombination(KeyCode.A, KeyCombination.META_DOWN)
+                                : new KeyCodeCombination(KeyCode.A, KeyCombination.CONTROL_DOWN, KeyCombination.SHIFT_DOWN),
+                        this::selectAll),
+                new Shortcut(new KeyCodeCombination(KeyCode.LEFT, KeyCombination.SHIFT_DOWN), this::extendSelectionLeft),
+                new Shortcut(new KeyCodeCombination(KeyCode.RIGHT, KeyCombination.SHIFT_DOWN), this::extendSelectionRight),
+                new Shortcut(new KeyCodeCombination(KeyCode.UP, KeyCombination.SHIFT_DOWN), this::extendSelectionUp),
+                new Shortcut(new KeyCodeCombination(KeyCode.DOWN, KeyCombination.SHIFT_DOWN), this::extendSelectionDown),
+                new Shortcut(new KeyCodeCombination(KeyCode.PAGE_UP, KeyCombination.SHIFT_DOWN), this::extendSelectionPageUp),
+                new Shortcut(new KeyCodeCombination(KeyCode.PAGE_DOWN, KeyCombination.SHIFT_DOWN), this::extendSelectionPageDown),
+                new Shortcut(new KeyCodeCombination(KeyCode.HOME, KeyCombination.SHIFT_DOWN), this::extendSelectionHome),
+                new Shortcut(new KeyCodeCombination(KeyCode.END, KeyCombination.SHIFT_DOWN), this::extendSelectionEnd),
+                new Shortcut(
+                        inputPlatform == KeyInput.Platform.MACOS
+                                ? new KeyCodeCombination(KeyCode.PAGE_UP, KeyCombination.META_DOWN)
+                                : new KeyCodeCombination(KeyCode.PAGE_UP, KeyCombination.SHIFT_DOWN),
+                        this::scrollViewportPageUp),
+                new Shortcut(
+                        inputPlatform == KeyInput.Platform.MACOS
+                                ? new KeyCodeCombination(KeyCode.PAGE_DOWN, KeyCombination.META_DOWN)
+                                : new KeyCodeCombination(KeyCode.PAGE_DOWN, KeyCombination.SHIFT_DOWN),
+                        this::scrollViewportPageDown),
+                new Shortcut(
+                        inputPlatform == KeyInput.Platform.MACOS
+                                ? new KeyCodeCombination(KeyCode.HOME, KeyCombination.META_DOWN)
+                                : new KeyCodeCombination(KeyCode.HOME, KeyCombination.SHIFT_DOWN),
+                        this::scrollViewportToTop),
+                new Shortcut(
+                        inputPlatform == KeyInput.Platform.MACOS
+                                ? new KeyCodeCombination(KeyCode.END, KeyCombination.META_DOWN)
+                                : new KeyCodeCombination(KeyCode.END, KeyCombination.SHIFT_DOWN),
+                        this::scrollViewportToBottom));
+        if (inputPlatform == KeyInput.Platform.MACOS) {
+            shortcuts.addAll(
+                    new Shortcut(new KeyCodeCombination(KeyCode.LEFT, KeyCombination.ALT_DOWN), () -> sendEsc("b")),
+                    new Shortcut(new KeyCodeCombination(KeyCode.RIGHT, KeyCombination.ALT_DOWN), () -> sendEsc("f")),
+                    new Shortcut(new KeyCodeCombination(KeyCode.LEFT, KeyCombination.META_DOWN), () -> sendText("\u0001")),
+                    new Shortcut(new KeyCodeCombination(KeyCode.RIGHT, KeyCombination.META_DOWN), () -> sendText("\u0005")),
+                    new Shortcut(new KeyCodeCombination(KeyCode.BACK_SPACE, KeyCombination.META_DOWN), () -> sendText("\u0015")));
+        }
 
         setFocusTraversable(true);
         setWidth(prefWidth(-1));
@@ -1016,6 +1025,22 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
 
         writeBytes(terminalSession.encodePaste(text, terminalSession.readMode(BRACKETED_PASTE_MODE)));
         clearSelection();
+        return true;
+    }
+
+    public boolean sendEsc(String text) {
+        Objects.requireNonNull(text, "text");
+        return sendText("\u001B" + text);
+    }
+
+    public boolean sendText(String text) {
+        Objects.requireNonNull(text, "text");
+        if (!writeBytes(text.getBytes(StandardCharsets.UTF_8))) {
+            return false;
+        }
+        clearSelection();
+        terminalSession.scrollViewportToBottom();
+        redraw();
         return true;
     }
 

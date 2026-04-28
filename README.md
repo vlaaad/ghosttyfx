@@ -16,8 +16,6 @@ Generated per-platform `jextract` bindings for `libghostty-vt`.
 ## Next steps
 
 ### v1
-- More shortcuts:
-  - shortcut injection: map shortcuts to PTY sequences; default macOS `Alt+Left/Right` -> `Esc+b/f`, `Meta+Left/Right/Backspace` -> `Ctrl+A/E/U`
 11. Blinking: cursor visibility is respected, but there is no blink timer for blinking cursor or blinking text attributes.
 15. Search UI:
   - find/highlight navigation in scrollback

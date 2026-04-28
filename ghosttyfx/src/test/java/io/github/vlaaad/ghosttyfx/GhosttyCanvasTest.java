@@ -149,6 +149,13 @@ final class GhosttyCanvasTest {
                 assertTrue(combinations.contains(isMac()
                         ? new KeyCodeCombination(KeyCode.END, KeyCombination.META_DOWN)
                         : new KeyCodeCombination(KeyCode.END, KeyCombination.SHIFT_DOWN)));
+                if (isMac()) {
+                    assertTrue(combinations.contains(new KeyCodeCombination(KeyCode.LEFT, KeyCombination.ALT_DOWN)));
+                    assertTrue(combinations.contains(new KeyCodeCombination(KeyCode.RIGHT, KeyCombination.ALT_DOWN)));
+                    assertTrue(combinations.contains(new KeyCodeCombination(KeyCode.LEFT, KeyCombination.META_DOWN)));
+                    assertTrue(combinations.contains(new KeyCodeCombination(KeyCode.RIGHT, KeyCombination.META_DOWN)));
+                    assertTrue(combinations.contains(new KeyCodeCombination(KeyCode.BACK_SPACE, KeyCombination.META_DOWN)));
+                }
 
                 var shortcut = new Shortcut(
                         new KeyCodeCombination(KeyCode.B, KeyCombination.SHIFT_DOWN),
@@ -156,6 +163,36 @@ final class GhosttyCanvasTest {
                 canvas.getShortcuts().add(shortcut);
                 assertTrue(canvas.getShortcuts().contains(shortcut));
                 assertThrows(NullPointerException.class, () -> canvas.setShortcuts(null));
+                return null;
+            });
+        }
+    }
+
+    @Test
+    void sendTextAndSendEscExposeShortcutActions() throws Exception {
+        var tempDirectory = Files.createTempDirectory("ghosttyfx-canvas-send-text-test-");
+        var pidFile = tempDirectory.resolve("shell.pid");
+        var shell = discoverShell(pidFile);
+
+        try (var canvas = GhosttyFx.create(shell.command(), tempDirectory, System.getenv())) {
+            runOnFxThread(() -> {
+                assertFalse(canvas.sendText(""));
+                assertTrue(canvas.sendText("A"));
+                assertTrue(canvas.sendEsc("b"));
+                assertThrows(NullPointerException.class, () -> canvas.sendText(null));
+                assertThrows(NullPointerException.class, () -> canvas.sendEsc(null));
+
+                var textShortcut = new KeyCodeCombination(KeyCode.B, KeyCombination.ALT_DOWN);
+                var sendTextShortcut = new Shortcut(textShortcut, () -> canvas.sendText("B"));
+                canvas.getShortcuts().add(sendTextShortcut);
+                assertTrue(canvas.getShortcuts().contains(sendTextShortcut));
+                assertTrue(sendTextShortcut.action().getAsBoolean());
+
+                var escShortcut = new KeyCodeCombination(KeyCode.F, KeyCombination.ALT_DOWN);
+                var sendEscShortcut = new Shortcut(escShortcut, () -> canvas.sendEsc("f"));
+                canvas.getShortcuts().add(sendEscShortcut);
+                assertTrue(canvas.getShortcuts().contains(sendEscShortcut));
+                assertTrue(sendEscShortcut.action().getAsBoolean());
                 return null;
             });
         }
@@ -360,7 +397,7 @@ final class GhosttyCanvasTest {
                 : new KeyCodeCombination(KeyCode.A, KeyCombination.CONTROL_DOWN, KeyCombination.SHIFT_DOWN);
     }
 
-    private static void fireShortcut(GhosttyCanvas canvas, KeyCombination shortcut) {
+    private static KeyEvent fireShortcut(GhosttyCanvas canvas, KeyCombination shortcut) {
         if (!(shortcut instanceof KeyCodeCombination combination)) {
             throw new IllegalArgumentException("Expected key-code shortcut, got: " + shortcut);
         }
@@ -375,6 +412,7 @@ final class GhosttyCanvasTest {
                 modifierDown(combination.getAlt()),
                 modifierDown(combination.getMeta()) || (shortcutDownOnCurrentPlatform(combination.getShortcut()) && isMac()));
         Event.fireEvent(canvas, event);
+        return event;
     }
 
     private static void dragSelection(GhosttyCanvas canvas, int fromColumn, int toColumn) {
