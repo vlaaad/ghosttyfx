@@ -14,12 +14,30 @@ Generated per-platform `jextract` bindings for `libghostty-vt`.
 - `ghostling`: pinned Git submodule for the upstream Ghostling reference app
 
 ## Next steps
-6. kitty graphics
-8. more shortcuts like pgup/pgdown
+
+### v1
+- More shortcuts:
+  - keyboard selection adjustment: `Shift+Arrow`, `Shift+PageUp/PageDown`, `Shift+Home/End`
+  - viewport scrolling: Linux/Windows `Shift+Home/End`, `Shift+PageUp/PageDown`; macOS `Cmd+Home/End`, `Cmd+PageUp/PageDown`
+  - shortcut injection: map shortcuts to PTY sequences; default macOS `Alt+Left/Right` -> `Esc+b/f`, `Meta+Left/Right/Backspace` -> `Ctrl+A/E/U`
 11. Blinking: cursor visibility is respected, but there is no blink timer for blinking cursor or blinking text attributes.
-14. Semantic prompt / shell integration UI (osc 133): libghostty parses semantic prompt data, but the canvas does not expose prompt navigation, command regions, or similar UI behavior.
-15. Search UI: Ghostty has search behavior at the app layer; this canvas has selection and copy, but no find/highlight navigation.
+15. Search UI:
+  - find/highlight navigation in scrollback
+  - search selection
+  - next/previous result shortcuts: macOS `Cmd+G`, `Cmd+Shift+G`
+  - end search shortcut: `Esc`; macOS also `Cmd+Shift+F`
 16. Rich font rendering: grapheme handling exists, but JavaFX fillText per cell means no full terminal-grade shaping/ligatures/fallback behavior like Ghostty’s renderer.
+17. URL handling:
+  - regex URL matching
+  - copy URL under cursor
+
+### v2
+6. kitty graphics
+14. Semantic prompt / shell integration UI (osc 133): libghostty parses semantic prompt data, but the canvas does not expose prompt navigation, command regions, or similar UI behavior.
+14.0. blocker: we need to implement shell injections first to make terminals emit osc 133/633 markers
+14.1. prompt-aware navigation (ctrl+up/down) to jump to prev/next prompts.
+14.2. region selection (quadruple-click to select region)
+14.3. prompt marks in left edge
 
 ## Local Build
 
