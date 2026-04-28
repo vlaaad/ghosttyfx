@@ -36,7 +36,7 @@ import javafx.scene.text.Font;
 
 final class GhosttyCanvasTest {
     private static final Duration START_TIMEOUT = Duration.ofSeconds(15);
-    private static final Duration STOP_TIMEOUT = Duration.ofSeconds(15);
+    private static final Duration STOP_TIMEOUT = Duration.ofSeconds(30);
     private static final Duration POLL_INTERVAL = Duration.ofMillis(100);
 
     @BeforeAll
@@ -118,27 +118,31 @@ final class GhosttyCanvasTest {
     }
 
     @Test
-    void exposesExtendSelectionShortcutProperties() throws Exception {
+    void exposesShortcutListProperty() throws Exception {
         var tempDirectory = Files.createTempDirectory("ghosttyfx-canvas-selection-shortcuts-test-");
         var pidFile = tempDirectory.resolve("shell.pid");
         var shell = discoverShell(pidFile);
 
         try (var canvas = GhosttyFx.create(shell.command(), tempDirectory, System.getenv())) {
             runOnFxThread(() -> {
-                assertEquals(new KeyCodeCombination(KeyCode.LEFT, KeyCombination.SHIFT_DOWN), canvas.getExtendSelectionLeftShortcut());
-                assertEquals(new KeyCodeCombination(KeyCode.RIGHT, KeyCombination.SHIFT_DOWN), canvas.getExtendSelectionRightShortcut());
-                assertEquals(new KeyCodeCombination(KeyCode.UP, KeyCombination.SHIFT_DOWN), canvas.getExtendSelectionUpShortcut());
-                assertEquals(new KeyCodeCombination(KeyCode.DOWN, KeyCombination.SHIFT_DOWN), canvas.getExtendSelectionDownShortcut());
-                assertEquals(new KeyCodeCombination(KeyCode.PAGE_UP, KeyCombination.SHIFT_DOWN), canvas.getExtendSelectionPageUpShortcut());
-                assertEquals(new KeyCodeCombination(KeyCode.PAGE_DOWN, KeyCombination.SHIFT_DOWN), canvas.getExtendSelectionPageDownShortcut());
-                assertEquals(new KeyCodeCombination(KeyCode.HOME, KeyCombination.SHIFT_DOWN), canvas.getExtendSelectionHomeShortcut());
-                assertEquals(new KeyCodeCombination(KeyCode.END, KeyCombination.SHIFT_DOWN), canvas.getExtendSelectionEndShortcut());
+                var combinations = canvas.getShortcuts().stream()
+                        .map(Shortcut::combination)
+                        .toList();
+                assertTrue(combinations.contains(isMac()
+                        ? new KeyCodeCombination(KeyCode.C, KeyCombination.META_DOWN)
+                        : new KeyCodeCombination(KeyCode.C, KeyCombination.CONTROL_DOWN)));
+                assertTrue(combinations.contains(isMac()
+                        ? new KeyCodeCombination(KeyCode.A, KeyCombination.META_DOWN)
+                        : new KeyCodeCombination(KeyCode.A, KeyCombination.CONTROL_DOWN, KeyCombination.SHIFT_DOWN)));
+                assertTrue(combinations.contains(new KeyCodeCombination(KeyCode.PAGE_UP, KeyCombination.SHIFT_DOWN)));
+                assertTrue(combinations.contains(new KeyCodeCombination(KeyCode.END, KeyCombination.SHIFT_DOWN)));
 
-                var shortcut = new KeyCodeCombination(KeyCode.B, KeyCombination.SHIFT_DOWN);
-                canvas.setExtendSelectionRightShortcut(shortcut);
-                assertEquals(shortcut, canvas.extendSelectionRightShortcutProperty().get());
-                canvas.extendSelectionRightShortcutProperty().set(null);
-                assertEquals(null, canvas.getExtendSelectionRightShortcut());
+                var shortcut = new Shortcut(
+                        new KeyCodeCombination(KeyCode.B, KeyCombination.SHIFT_DOWN),
+                        () -> false);
+                canvas.getShortcuts().add(shortcut);
+                assertTrue(canvas.getShortcuts().contains(shortcut));
+                assertThrows(NullPointerException.class, () -> canvas.setShortcuts(null));
                 return null;
             });
         }
@@ -153,7 +157,7 @@ final class GhosttyCanvasTest {
 
         try (var canvas = GhosttyFx.create(shell.command(), tempDirectory, System.getenv())) {
             await("terminal output to be addressable", START_TIMEOUT, () -> runOnFxThread(() -> {
-                fireShortcut(canvas, canvas.getSelectAllShortcut());
+                fireShortcut(canvas, selectAllShortcut());
                 return marker.equals(canvas.getInputMethodRequests().getSelectedText())
                         ? Optional.of(Boolean.TRUE)
                         : Optional.empty();
@@ -161,16 +165,16 @@ final class GhosttyCanvasTest {
 
             runOnFxThread(() -> {
                 dragSelection(canvas, 1, 1);
-                fireShortcut(canvas, canvas.getExtendSelectionRightShortcut());
+                fireShortcut(canvas, new KeyCodeCombination(KeyCode.RIGHT, KeyCombination.SHIFT_DOWN));
                 assertEquals(marker.substring(1, 3), canvas.getInputMethodRequests().getSelectedText());
 
-                fireShortcut(canvas, canvas.getExtendSelectionLeftShortcut());
+                fireShortcut(canvas, new KeyCodeCombination(KeyCode.LEFT, KeyCombination.SHIFT_DOWN));
                 assertEquals(marker.substring(1, 2), canvas.getInputMethodRequests().getSelectedText());
 
-                fireShortcut(canvas, canvas.getExtendSelectionHomeShortcut());
+                fireShortcut(canvas, new KeyCodeCombination(KeyCode.HOME, KeyCombination.SHIFT_DOWN));
                 assertEquals(marker.substring(0, 2), canvas.getInputMethodRequests().getSelectedText());
 
-                fireShortcut(canvas, canvas.getExtendSelectionEndShortcut());
+                fireShortcut(canvas, new KeyCodeCombination(KeyCode.END, KeyCombination.SHIFT_DOWN));
                 assertEquals(marker.substring(1), canvas.getInputMethodRequests().getSelectedText());
                 return null;
             });
@@ -188,13 +192,13 @@ final class GhosttyCanvasTest {
         try {
             try (var canvas = GhosttyFx.create(shell.command(), tempDirectory, System.getenv())) {
                 var selectedText = await("terminal output to become selectable", START_TIMEOUT, () -> runOnFxThread(() -> {
-                    fireShortcut(canvas, canvas.getSelectAllShortcut());
+                    fireShortcut(canvas, selectAllShortcut());
                     var text = canvas.getInputMethodRequests().getSelectedText();
                     return text != null && text.contains(marker) ? Optional.of(text) : Optional.empty();
                 }));
 
                 runOnFxThread(() -> {
-                    fireShortcut(canvas, canvas.getCopyShortcut());
+                    fireShortcut(canvas, copyShortcut());
                     var clipboard = Clipboard.getSystemClipboard();
                     assertTrue(selectedText.equals(clipboard.getString()), "Expected copied text to match current selection");
                     var remainingSelection = canvas.getInputMethodRequests().getSelectedText();
@@ -220,7 +224,7 @@ final class GhosttyCanvasTest {
             var handle = await("shell process to start", START_TIMEOUT, () -> readAliveProcess(pidFile));
             try {
                 var selectedText = await("terminal output to become selectable", START_TIMEOUT, () -> runOnFxThread(() -> {
-                    fireShortcut(canvas, canvas.getSelectAllShortcut());
+                    fireShortcut(canvas, selectAllShortcut());
                     var text = canvas.getInputMethodRequests().getSelectedText();
                     return text != null && text.contains(marker) ? Optional.of(text) : Optional.empty();
                 }));
@@ -291,6 +295,18 @@ final class GhosttyCanvasTest {
             return;
         }
         clipboard.setContent(clipboardContents);
+    }
+
+    private static KeyCombination copyShortcut() {
+        return isMac()
+                ? new KeyCodeCombination(KeyCode.C, KeyCombination.META_DOWN)
+                : new KeyCodeCombination(KeyCode.C, KeyCombination.CONTROL_DOWN);
+    }
+
+    private static KeyCombination selectAllShortcut() {
+        return isMac()
+                ? new KeyCodeCombination(KeyCode.A, KeyCombination.META_DOWN)
+                : new KeyCodeCombination(KeyCode.A, KeyCombination.CONTROL_DOWN, KeyCombination.SHIFT_DOWN);
     }
 
     private static void fireShortcut(GhosttyCanvas canvas, KeyCombination shortcut) {

@@ -16,13 +16,17 @@ import javafx.animation.AnimationTimer;
 import javafx.beans.binding.Bindings;
 import javafx.beans.binding.ObjectBinding;
 import javafx.beans.property.BooleanProperty;
+import javafx.beans.property.ListProperty;
 import javafx.beans.property.ObjectProperty;
 import javafx.beans.property.ReadOnlyBooleanProperty;
 import javafx.beans.property.ReadOnlyBooleanWrapper;
 import javafx.beans.property.SimpleBooleanProperty;
+import javafx.beans.property.SimpleListProperty;
 import javafx.beans.property.SimpleObjectProperty;
 import javafx.beans.property.SimpleStringProperty;
 import javafx.beans.property.StringProperty;
+import javafx.collections.FXCollections;
+import javafx.collections.ObservableList;
 import javafx.geometry.Point2D;
 import javafx.scene.Cursor;
 import javafx.scene.canvas.Canvas;
@@ -92,56 +96,35 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
                 Font.font(font.getFamily(), FontWeight.BOLD, FontPosture.ITALIC, font.getSize()));
     }, font);
     private final BooleanProperty macOptionAsAlt = new SimpleBooleanProperty(this, "macOptionAsAlt", false);
-    private final ObjectProperty<KeyCombination> copyShortcut = new SimpleObjectProperty<>(
-            this,
-            "copyShortcut",
-            inputPlatform == KeyInput.Platform.MACOS
-                    ? new KeyCodeCombination(KeyCode.C, KeyCombination.META_DOWN)
-                    : new KeyCodeCombination(KeyCode.C, KeyCombination.CONTROL_DOWN));
-    private final ObjectProperty<KeyCombination> pasteShortcut = new SimpleObjectProperty<>(
-            this,
-            "pasteShortcut",
-            inputPlatform == KeyInput.Platform.MACOS
-                    ? new KeyCodeCombination(KeyCode.V, KeyCombination.META_DOWN)
-                    : new KeyCodeCombination(KeyCode.V, KeyCombination.CONTROL_DOWN));
-    private final ObjectProperty<KeyCombination> selectAllShortcut = new SimpleObjectProperty<>(
-            this,
-            "selectAllShortcut",
-            inputPlatform == KeyInput.Platform.MACOS
-                    ? new KeyCodeCombination(KeyCode.A, KeyCombination.META_DOWN)
-                    : new KeyCodeCombination(KeyCode.A, KeyCombination.CONTROL_DOWN, KeyCombination.SHIFT_DOWN));
-    private final ObjectProperty<KeyCombination> extendSelectionLeftShortcut = new SimpleObjectProperty<>(
-            this,
-            "extendSelectionLeftShortcut",
-            new KeyCodeCombination(KeyCode.LEFT, KeyCombination.SHIFT_DOWN));
-    private final ObjectProperty<KeyCombination> extendSelectionRightShortcut = new SimpleObjectProperty<>(
-            this,
-            "extendSelectionRightShortcut",
-            new KeyCodeCombination(KeyCode.RIGHT, KeyCombination.SHIFT_DOWN));
-    private final ObjectProperty<KeyCombination> extendSelectionUpShortcut = new SimpleObjectProperty<>(
-            this,
-            "extendSelectionUpShortcut",
-            new KeyCodeCombination(KeyCode.UP, KeyCombination.SHIFT_DOWN));
-    private final ObjectProperty<KeyCombination> extendSelectionDownShortcut = new SimpleObjectProperty<>(
-            this,
-            "extendSelectionDownShortcut",
-            new KeyCodeCombination(KeyCode.DOWN, KeyCombination.SHIFT_DOWN));
-    private final ObjectProperty<KeyCombination> extendSelectionPageUpShortcut = new SimpleObjectProperty<>(
-            this,
-            "extendSelectionPageUpShortcut",
-            new KeyCodeCombination(KeyCode.PAGE_UP, KeyCombination.SHIFT_DOWN));
-    private final ObjectProperty<KeyCombination> extendSelectionPageDownShortcut = new SimpleObjectProperty<>(
-            this,
-            "extendSelectionPageDownShortcut",
-            new KeyCodeCombination(KeyCode.PAGE_DOWN, KeyCombination.SHIFT_DOWN));
-    private final ObjectProperty<KeyCombination> extendSelectionHomeShortcut = new SimpleObjectProperty<>(
-            this,
-            "extendSelectionHomeShortcut",
-            new KeyCodeCombination(KeyCode.HOME, KeyCombination.SHIFT_DOWN));
-    private final ObjectProperty<KeyCombination> extendSelectionEndShortcut = new SimpleObjectProperty<>(
-            this,
-            "extendSelectionEndShortcut",
-            new KeyCodeCombination(KeyCode.END, KeyCombination.SHIFT_DOWN));
+    private final ListProperty<Shortcut> shortcuts = new SimpleListProperty<>(this, "shortcuts", FXCollections.observableArrayList(List.of(
+            new Shortcut(
+                    inputPlatform == KeyInput.Platform.MACOS
+                            ? new KeyCodeCombination(KeyCode.C, KeyCombination.META_DOWN)
+                            : new KeyCodeCombination(KeyCode.C, KeyCombination.CONTROL_DOWN),
+                    this::copySelection),
+            new Shortcut(
+                    inputPlatform == KeyInput.Platform.MACOS
+                            ? new KeyCodeCombination(KeyCode.V, KeyCombination.META_DOWN)
+                            : new KeyCodeCombination(KeyCode.V, KeyCombination.CONTROL_DOWN),
+                    this::pasteClipboard),
+            new Shortcut(
+                    inputPlatform == KeyInput.Platform.MACOS
+                            ? new KeyCodeCombination(KeyCode.A, KeyCombination.META_DOWN)
+                            : new KeyCodeCombination(KeyCode.A, KeyCombination.CONTROL_DOWN, KeyCombination.SHIFT_DOWN),
+                    this::selectAll),
+            new Shortcut(new KeyCodeCombination(KeyCode.LEFT, KeyCombination.SHIFT_DOWN), this::extendSelectionLeft),
+            new Shortcut(new KeyCodeCombination(KeyCode.RIGHT, KeyCombination.SHIFT_DOWN), this::extendSelectionRight),
+            new Shortcut(new KeyCodeCombination(KeyCode.UP, KeyCombination.SHIFT_DOWN), this::extendSelectionUp),
+            new Shortcut(new KeyCodeCombination(KeyCode.DOWN, KeyCombination.SHIFT_DOWN), this::extendSelectionDown),
+            new Shortcut(new KeyCodeCombination(KeyCode.PAGE_UP, KeyCombination.SHIFT_DOWN), this::extendSelectionPageUp),
+            new Shortcut(new KeyCodeCombination(KeyCode.PAGE_DOWN, KeyCombination.SHIFT_DOWN), this::extendSelectionPageDown),
+            new Shortcut(new KeyCodeCombination(KeyCode.HOME, KeyCombination.SHIFT_DOWN), this::extendSelectionHome),
+            new Shortcut(new KeyCodeCombination(KeyCode.END, KeyCombination.SHIFT_DOWN), this::extendSelectionEnd)))) {
+        @Override
+        public void set(ObservableList<Shortcut> value) {
+            super.set(Objects.requireNonNull(value, "shortcuts"));
+        }
+    };
     private final ReadOnlyBooleanWrapper processExited = new ReadOnlyBooleanWrapper(this, "processExited", false);
 
     private final ObjectBinding<CellMetrics> cellMetrics = Bindings.createObjectBinding(() -> {
@@ -299,136 +282,16 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
         return macOptionAsAlt;
     }
 
-    public KeyCombination getCopyShortcut() {
-        return copyShortcut.get();
+    public ObservableList<Shortcut> getShortcuts() {
+        return shortcuts.get();
     }
 
-    public void setCopyShortcut(KeyCombination value) {
-        copyShortcut.set(value);
+    public void setShortcuts(ObservableList<Shortcut> value) {
+        shortcuts.set(value);
     }
 
-    public ObjectProperty<KeyCombination> copyShortcutProperty() {
-        return copyShortcut;
-    }
-
-    public KeyCombination getPasteShortcut() {
-        return pasteShortcut.get();
-    }
-
-    public void setPasteShortcut(KeyCombination value) {
-        pasteShortcut.set(value);
-    }
-
-    public ObjectProperty<KeyCombination> pasteShortcutProperty() {
-        return pasteShortcut;
-    }
-
-    public KeyCombination getSelectAllShortcut() {
-        return selectAllShortcut.get();
-    }
-
-    public void setSelectAllShortcut(KeyCombination value) {
-        selectAllShortcut.set(value);
-    }
-
-    public ObjectProperty<KeyCombination> selectAllShortcutProperty() {
-        return selectAllShortcut;
-    }
-
-    public KeyCombination getExtendSelectionLeftShortcut() {
-        return extendSelectionLeftShortcut.get();
-    }
-
-    public void setExtendSelectionLeftShortcut(KeyCombination value) {
-        extendSelectionLeftShortcut.set(value);
-    }
-
-    public ObjectProperty<KeyCombination> extendSelectionLeftShortcutProperty() {
-        return extendSelectionLeftShortcut;
-    }
-
-    public KeyCombination getExtendSelectionRightShortcut() {
-        return extendSelectionRightShortcut.get();
-    }
-
-    public void setExtendSelectionRightShortcut(KeyCombination value) {
-        extendSelectionRightShortcut.set(value);
-    }
-
-    public ObjectProperty<KeyCombination> extendSelectionRightShortcutProperty() {
-        return extendSelectionRightShortcut;
-    }
-
-    public KeyCombination getExtendSelectionUpShortcut() {
-        return extendSelectionUpShortcut.get();
-    }
-
-    public void setExtendSelectionUpShortcut(KeyCombination value) {
-        extendSelectionUpShortcut.set(value);
-    }
-
-    public ObjectProperty<KeyCombination> extendSelectionUpShortcutProperty() {
-        return extendSelectionUpShortcut;
-    }
-
-    public KeyCombination getExtendSelectionDownShortcut() {
-        return extendSelectionDownShortcut.get();
-    }
-
-    public void setExtendSelectionDownShortcut(KeyCombination value) {
-        extendSelectionDownShortcut.set(value);
-    }
-
-    public ObjectProperty<KeyCombination> extendSelectionDownShortcutProperty() {
-        return extendSelectionDownShortcut;
-    }
-
-    public KeyCombination getExtendSelectionPageUpShortcut() {
-        return extendSelectionPageUpShortcut.get();
-    }
-
-    public void setExtendSelectionPageUpShortcut(KeyCombination value) {
-        extendSelectionPageUpShortcut.set(value);
-    }
-
-    public ObjectProperty<KeyCombination> extendSelectionPageUpShortcutProperty() {
-        return extendSelectionPageUpShortcut;
-    }
-
-    public KeyCombination getExtendSelectionPageDownShortcut() {
-        return extendSelectionPageDownShortcut.get();
-    }
-
-    public void setExtendSelectionPageDownShortcut(KeyCombination value) {
-        extendSelectionPageDownShortcut.set(value);
-    }
-
-    public ObjectProperty<KeyCombination> extendSelectionPageDownShortcutProperty() {
-        return extendSelectionPageDownShortcut;
-    }
-
-    public KeyCombination getExtendSelectionHomeShortcut() {
-        return extendSelectionHomeShortcut.get();
-    }
-
-    public void setExtendSelectionHomeShortcut(KeyCombination value) {
-        extendSelectionHomeShortcut.set(value);
-    }
-
-    public ObjectProperty<KeyCombination> extendSelectionHomeShortcutProperty() {
-        return extendSelectionHomeShortcut;
-    }
-
-    public KeyCombination getExtendSelectionEndShortcut() {
-        return extendSelectionEndShortcut.get();
-    }
-
-    public void setExtendSelectionEndShortcut(KeyCombination value) {
-        extendSelectionEndShortcut.set(value);
-    }
-
-    public ObjectProperty<KeyCombination> extendSelectionEndShortcutProperty() {
-        return extendSelectionEndShortcut;
+    public ListProperty<Shortcut> shortcutsProperty() {
+        return shortcuts;
     }
 
     public String getTitle() {
@@ -1104,93 +967,102 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
     }
 
     private boolean handleShortcut(KeyEvent event) {
-        var copy = getCopyShortcut();
-        if (copy != null && copy.match(event) && !selection.isEmpty()) {
-            var content = new ClipboardContent();
-            content.putString(selectedText());
-            if (Clipboard.getSystemClipboard().setContent(content)) {
-                clearSelection();
+        for (var shortcut : getShortcuts()) {
+            if (shortcut.combination().match(event) && shortcut.action().getAsBoolean()) {
+                return true;
             }
-            return true;
-        }
-        var paste = getPasteShortcut();
-        if (paste != null && paste.match(event)) {
-            var text = Clipboard.getSystemClipboard().getString();
-            if (text == null || text.isEmpty()) {
-                return false;
-            }
-
-            writeBytes(terminalSession.encodePaste(text, terminalSession.readMode(BRACKETED_PASTE_MODE)));
-            clearSelection();
-            return true;
-        }
-        var selectAll = getSelectAllShortcut();
-        if (selectAll != null && selectAll.match(event)) {
-            var nextSelection = terminalSession.selectAllSelection();
-            if (!nextSelection.equals(selection)) {
-                clearHover(false);
-                selection = nextSelection;
-                redraw();
-            }
-            return true;
-        }
-        var extendSelectionLeft = getExtendSelectionLeftShortcut();
-        if (extendSelectionLeft != null && extendSelectionLeft.match(event)) {
-            if (selection.isEmpty()) {
-                return false;
-            }
-            if (terminalSession.columnCount() <= 0) {
-                return extendSelectionTo(selection.to());
-            }
-            if (selection.to().x() > 0) {
-                return extendSelectionTo(new Selection.ScreenPoint(selection.to().x() - 1, selection.to().y()));
-            }
-            if (selection.to().y() > 0) {
-                return extendSelectionTo(new Selection.ScreenPoint(terminalSession.columnCount() - 1, selection.to().y() - 1));
-            }
-            return extendSelectionTo(selection.to());
-        }
-        var extendSelectionRight = getExtendSelectionRightShortcut();
-        if (extendSelectionRight != null && extendSelectionRight.match(event)) {
-            if (selection.isEmpty()) {
-                return false;
-            }
-            if (terminalSession.columnCount() <= 0 || terminalSession.totalRowCount() <= 0) {
-                return extendSelectionTo(selection.to());
-            }
-            if (selection.to().x() + 1 < terminalSession.columnCount()) {
-                return extendSelectionTo(new Selection.ScreenPoint(selection.to().x() + 1, selection.to().y()));
-            }
-            if (selection.to().y() + 1 < terminalSession.totalRowCount()) {
-                return extendSelectionTo(new Selection.ScreenPoint(0, selection.to().y() + 1));
-            }
-            return extendSelectionTo(selection.to());
-        }
-        var extendSelectionUp = getExtendSelectionUpShortcut();
-        if (extendSelectionUp != null && extendSelectionUp.match(event)) {
-            return !selection.isEmpty() && extendSelectionTo(moveScreenPointRows(selection.to(), terminalSession.columnCount(), terminalSession.totalRowCount(), -1));
-        }
-        var extendSelectionDown = getExtendSelectionDownShortcut();
-        if (extendSelectionDown != null && extendSelectionDown.match(event)) {
-            return !selection.isEmpty() && extendSelectionTo(moveScreenPointRows(selection.to(), terminalSession.columnCount(), terminalSession.totalRowCount(), 1));
-        }
-        var extendSelectionPageUp = getExtendSelectionPageUpShortcut();
-        if (extendSelectionPageUp != null && extendSelectionPageUp.match(event)) {
-            return !selection.isEmpty() && extendSelectionTo(moveScreenPointRows(selection.to(), terminalSession.columnCount(), terminalSession.totalRowCount(), -viewportRowCount()));
-        }
-        var extendSelectionPageDown = getExtendSelectionPageDownShortcut();
-        if (extendSelectionPageDown != null && extendSelectionPageDown.match(event)) {
-            return !selection.isEmpty() && extendSelectionTo(moveScreenPointRows(selection.to(), terminalSession.columnCount(), terminalSession.totalRowCount(), viewportRowCount()));
-        }
-        var extendSelectionHome = getExtendSelectionHomeShortcut();
-        if (extendSelectionHome != null && extendSelectionHome.match(event)) {
-            return !selection.isEmpty() && extendSelectionTo(new Selection.ScreenPoint(0, selection.to().y()));
-        }
-        var extendSelectionEnd = getExtendSelectionEndShortcut();
-        if (extendSelectionEnd != null && extendSelectionEnd.match(event)) {
-            return !selection.isEmpty() && extendSelectionTo(new Selection.ScreenPoint(Math.max(0, terminalSession.columnCount() - 1), selection.to().y()));
         }
         return false;
+    }
+
+    public boolean copySelection() {
+        if (selection.isEmpty()) {
+            return false;
+        }
+
+        var content = new ClipboardContent();
+        content.putString(selectedText());
+        if (Clipboard.getSystemClipboard().setContent(content)) {
+            clearSelection();
+        }
+        return true;
+    }
+
+    public boolean pasteClipboard() {
+        var text = Clipboard.getSystemClipboard().getString();
+        if (text == null || text.isEmpty()) {
+            return false;
+        }
+
+        writeBytes(terminalSession.encodePaste(text, terminalSession.readMode(BRACKETED_PASTE_MODE)));
+        clearSelection();
+        return true;
+    }
+
+    public boolean selectAll() {
+        var nextSelection = terminalSession.selectAllSelection();
+        if (!nextSelection.equals(selection)) {
+            clearHover(false);
+            selection = nextSelection;
+            redraw();
+        }
+        return true;
+    }
+
+    public boolean extendSelectionLeft() {
+        if (selection.isEmpty()) {
+            return false;
+        }
+        if (terminalSession.columnCount() <= 0) {
+            return extendSelectionTo(selection.to());
+        }
+        if (selection.to().x() > 0) {
+            return extendSelectionTo(new Selection.ScreenPoint(selection.to().x() - 1, selection.to().y()));
+        }
+        if (selection.to().y() > 0) {
+            return extendSelectionTo(new Selection.ScreenPoint(terminalSession.columnCount() - 1, selection.to().y() - 1));
+        }
+        return extendSelectionTo(selection.to());
+    }
+
+    public boolean extendSelectionRight() {
+        if (selection.isEmpty()) {
+            return false;
+        }
+        if (terminalSession.columnCount() <= 0 || terminalSession.totalRowCount() <= 0) {
+            return extendSelectionTo(selection.to());
+        }
+        if (selection.to().x() + 1 < terminalSession.columnCount()) {
+            return extendSelectionTo(new Selection.ScreenPoint(selection.to().x() + 1, selection.to().y()));
+        }
+        if (selection.to().y() + 1 < terminalSession.totalRowCount()) {
+            return extendSelectionTo(new Selection.ScreenPoint(0, selection.to().y() + 1));
+        }
+        return extendSelectionTo(selection.to());
+    }
+
+    public boolean extendSelectionUp() {
+        return !selection.isEmpty() && extendSelectionTo(moveScreenPointRows(selection.to(), terminalSession.columnCount(), terminalSession.totalRowCount(), -1));
+    }
+
+    public boolean extendSelectionDown() {
+        return !selection.isEmpty() && extendSelectionTo(moveScreenPointRows(selection.to(), terminalSession.columnCount(), terminalSession.totalRowCount(), 1));
+    }
+
+    public boolean extendSelectionPageUp() {
+        return !selection.isEmpty() && extendSelectionTo(moveScreenPointRows(selection.to(), terminalSession.columnCount(), terminalSession.totalRowCount(), -viewportRowCount()));
+    }
+
+    public boolean extendSelectionPageDown() {
+        return !selection.isEmpty() && extendSelectionTo(moveScreenPointRows(selection.to(), terminalSession.columnCount(), terminalSession.totalRowCount(), viewportRowCount()));
+    }
+
+    public boolean extendSelectionHome() {
+        return !selection.isEmpty() && extendSelectionTo(new Selection.ScreenPoint(0, selection.to().y()));
+    }
+
+    public boolean extendSelectionEnd() {
+        return !selection.isEmpty() && extendSelectionTo(new Selection.ScreenPoint(Math.max(0, terminalSession.columnCount() - 1), selection.to().y()));
     }
 
     private boolean extendSelectionTo(Selection.ScreenPoint nextFocus) {
