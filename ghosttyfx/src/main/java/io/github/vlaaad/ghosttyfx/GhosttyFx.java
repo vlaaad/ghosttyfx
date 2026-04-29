@@ -1,7 +1,5 @@
 package io.github.vlaaad.ghosttyfx;
 
-import io.github.vlaaad.ghostty.bindings.GhosttyString;
-import io.github.vlaaad.ghostty.bindings.ghostty_vt_h;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.lang.foreign.Arena;
@@ -14,26 +12,29 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
+import io.github.vlaaad.ghostty.bindings.GhosttyString;
+import io.github.vlaaad.ghostty.bindings.ghostty_vt_h;
+
 public final class GhosttyFx {
     private static final int GHOSTTY_SUCCESS = 0;
     private static final Path DEFAULT_CWD = Path.of(System.getProperty("user.dir", "."));
 
     private GhosttyFx() {}
 
-    public static GhosttyCanvas create(List<String> command) {
+    public static TerminalView create(List<String> command) {
         return create(command, DEFAULT_CWD, System.getenv());
     }
 
-    public static GhosttyCanvas create(List<String> command, Path cwd) {
+    public static TerminalView create(List<String> command, Path cwd) {
         return create(command, cwd, System.getenv());
     }
 
-    public static GhosttyCanvas create(List<String> command, Path cwd, Map<String, String> environment) {
+    public static TerminalView create(List<String> command, Path cwd, Map<String, String> environment) {
         var copiedCommand = List.copyOf(command);
         if (copiedCommand.isEmpty()) {
             throw new IllegalArgumentException("command must not be empty");
         }
-        return new GhosttyCanvas(copiedCommand, cwd, Map.copyOf(environment));
+        return new TerminalView(copiedCommand, cwd, Map.copyOf(environment));
     }
 
     public static String version() {

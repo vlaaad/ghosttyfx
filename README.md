@@ -29,7 +29,7 @@ Generated per-platform `jextract` bindings for `libghostty-vt`.
 
 ### v2
 6. kitty graphics
-14. Semantic prompt / shell integration UI (osc 133): libghostty parses semantic prompt data, but the canvas does not expose prompt navigation, command regions, or similar UI behavior.
+14. Semantic prompt / shell integration UI (osc 133): libghostty parses semantic prompt data, but the view does not expose prompt navigation, command regions, or similar UI behavior.
 14.0. blocker: we need to implement shell injections first to make terminals emit osc 133/633 markers
 14.1. prompt-aware navigation (ctrl+up/down) to jump to prev/next prompts.
 14.2. region selection (quadruple-click to select region)

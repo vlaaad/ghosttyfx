@@ -76,12 +76,12 @@ final class TerminalSession implements AutoCloseable {
     private final Consumer<String> titleChanged;
     private final Runnable bell;
     private Size size;
-    private GhosttyCanvas.CellMetrics cellMetrics;
+    private TerminalView.CellMetrics cellMetrics;
 
     TerminalSession(
             int initialColumns,
             int initialRows,
-            GhosttyCanvas.CellMetrics initialCellMetrics,
+            TerminalView.CellMetrics initialCellMetrics,
             PtySession ptySession,
             Consumer<String> titleChanged,
             Runnable bell) {
@@ -314,7 +314,7 @@ final class TerminalSession implements AutoCloseable {
         }
     }
 
-    Size resize(double widthPx, double heightPx, GhosttyCanvas.CellMetrics metrics, double scrollbarReservedWidthPx) {
+    Size resize(double widthPx, double heightPx, TerminalView.CellMetrics metrics, double scrollbarReservedWidthPx) {
         if (widthPx <= 0 || heightPx <= 0) {
             return null;
         }
@@ -412,7 +412,7 @@ final class TerminalSession implements AutoCloseable {
             short mods,
             double widthPx,
             double heightPx,
-            GhosttyCanvas.CellMetrics metrics,
+            TerminalView.CellMetrics metrics,
             double scrollbarReservedWidthPx,
             boolean anyButtonPressed) {
         refreshMouseEncoder(anyButtonPressed, widthPx, heightPx, metrics, scrollbarReservedWidthPx);
@@ -426,7 +426,7 @@ final class TerminalSession implements AutoCloseable {
             short mods,
             double widthPx,
             double heightPx,
-            GhosttyCanvas.CellMetrics metrics,
+            TerminalView.CellMetrics metrics,
             double scrollbarReservedWidthPx,
             boolean anyButtonPressed) {
         refreshMouseEncoder(anyButtonPressed, widthPx, heightPx, metrics, scrollbarReservedWidthPx);
@@ -440,7 +440,7 @@ final class TerminalSession implements AutoCloseable {
             short mods,
             double widthPx,
             double heightPx,
-            GhosttyCanvas.CellMetrics metrics,
+            TerminalView.CellMetrics metrics,
             double scrollbarReservedWidthPx,
             boolean anyButtonPressed) {
         refreshMouseEncoder(anyButtonPressed, widthPx, heightPx, metrics, scrollbarReservedWidthPx);
@@ -454,7 +454,7 @@ final class TerminalSession implements AutoCloseable {
             short mods,
             double widthPx,
             double heightPx,
-            GhosttyCanvas.CellMetrics metrics,
+            TerminalView.CellMetrics metrics,
             double scrollbarReservedWidthPx) {
         var button = lineDelta > 0
                 ? ghostty_vt_h.GHOSTTY_MOUSE_BUTTON_FOUR()
@@ -641,7 +641,7 @@ final class TerminalSession implements AutoCloseable {
             double y,
             double widthPx,
             double heightPx,
-            GhosttyCanvas.CellMetrics metrics,
+            TerminalView.CellMetrics metrics,
             double scrollbarReservedWidthPx) {
         var contentWidth = Math.max(0, widthPx - scrollbarReservedWidthPx);
         if (x < 0 || y < 0 || x >= contentWidth || y >= heightPx) {
@@ -879,8 +879,8 @@ final class TerminalSession implements AutoCloseable {
             GraphicsContext graphics,
             double width,
             double height,
-            GhosttyCanvas.TerminalFonts fonts,
-            GhosttyCanvas.CellMetrics metrics,
+            TerminalView.TerminalFonts fonts,
+            TerminalView.CellMetrics metrics,
             KeyInput.Preedit preedit,
             Selection selection,
             Selection hoveredHyperlink,
@@ -1080,7 +1080,7 @@ final class TerminalSession implements AutoCloseable {
         }
     }
 
-    GhosttyCanvas.CursorLocation currentCursorLocation(GhosttyCanvas.CellMetrics metrics) {
+    TerminalView.CursorLocation currentCursorLocation(TerminalView.CellMetrics metrics) {
         try (var arena = Arena.ofConfined()) {
             var cursorVisible = arena.allocate(ValueLayout.JAVA_BOOLEAN);
             if (ghostty_vt_h.ghostty_render_state_get(
@@ -1115,7 +1115,7 @@ final class TerminalSession implements AutoCloseable {
 
             var cellX = Short.toUnsignedInt(cursorX.get(ValueLayout.JAVA_SHORT, 0));
             var cellY = Short.toUnsignedInt(cursorY.get(ValueLayout.JAVA_SHORT, 0));
-            return new GhosttyCanvas.CursorLocation(
+            return new TerminalView.CursorLocation(
                     cellX,
                     cellY,
                     cellX * (double) metrics.cellWidthPx(),
@@ -1168,7 +1168,7 @@ final class TerminalSession implements AutoCloseable {
             boolean anyButtonPressed,
             double widthPx,
             double heightPx,
-            GhosttyCanvas.CellMetrics metrics,
+            TerminalView.CellMetrics metrics,
             double scrollbarReservedWidthPx) {
         ghostty_vt_h.ghostty_mouse_encoder_setopt_from_terminal(mouseEncoder, terminal);
         try (var arena = Arena.ofConfined()) {
@@ -1467,7 +1467,7 @@ final class TerminalSession implements AutoCloseable {
             GraphicsContext graphics,
             double x,
             double y,
-            GhosttyCanvas.CellMetrics metrics) {
+            TerminalView.CellMetrics metrics) {
         graphics.setLineWidth(1.0);
         var underlineY = y + metrics.cellHeightPx() - 2.5;
         graphics.strokeLine(x, underlineY, x + metrics.cellWidthPx(), underlineY);
@@ -1478,7 +1478,7 @@ final class TerminalSession implements AutoCloseable {
             GraphicsContext graphics,
             double x,
             double y,
-            GhosttyCanvas.CellMetrics metrics,
+            TerminalView.CellMetrics metrics,
             MemorySegment style,
             boolean selected,
             Color baseTextColor,
@@ -1574,8 +1574,8 @@ final class TerminalSession implements AutoCloseable {
 
     private void renderPreedit(
             GraphicsContext graphics,
-            GhosttyCanvas.CellMetrics metrics,
-            GhosttyCanvas.TerminalFonts fonts,
+            TerminalView.CellMetrics metrics,
+            TerminalView.TerminalFonts fonts,
             KeyInput.Preedit preedit,
             CursorInfo cursor,
             TerminalTheme theme) {
@@ -1605,8 +1605,8 @@ final class TerminalSession implements AutoCloseable {
 
     private void renderCursor(
             GraphicsContext graphics,
-            GhosttyCanvas.CellMetrics metrics,
-            GhosttyCanvas.TerminalFonts fonts,
+            TerminalView.CellMetrics metrics,
+            TerminalView.TerminalFonts fonts,
             MemorySegment colors,
             boolean focused,
             TerminalTheme theme,

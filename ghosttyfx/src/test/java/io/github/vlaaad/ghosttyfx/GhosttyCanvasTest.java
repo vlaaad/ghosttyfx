@@ -35,7 +35,7 @@ import org.junit.jupiter.api.BeforeAll;
 import javafx.scene.paint.Color;
 import javafx.scene.text.Font;
 
-final class GhosttyCanvasTest {
+final class TerminalViewTest {
     private static final Duration START_TIMEOUT = Duration.ofSeconds(15);
     private static final Duration STOP_TIMEOUT = Duration.ofSeconds(30);
     private static final Duration POLL_INTERVAL = Duration.ofMillis(100);
@@ -56,7 +56,7 @@ final class GhosttyCanvasTest {
 
     @Test
     void startsProcessAndStopsItOnClose() throws Exception {
-        var tempDirectory = Files.createTempDirectory("ghosttyfx-canvas-test-");
+        var tempDirectory = Files.createTempDirectory("ghosttyfx-test-");
         var pidFile = tempDirectory.resolve("shell.pid");
         var shell = discoverShell(pidFile);
         ProcessHandle handle;
@@ -76,28 +76,27 @@ final class GhosttyCanvasTest {
     }
 
     void updatesPreferredSizeWhenFontChanges() throws Exception {
-        var tempDirectory = Files.createTempDirectory("ghosttyfx-canvas-font-test-");
+        var tempDirectory = Files.createTempDirectory("ghosttyfx-font-test-");
         var pidFile = tempDirectory.resolve("shell.pid");
         var shell = discoverShell(pidFile);
 
-        try (var canvas = GhosttyFx.create(shell.command(), tempDirectory, System.getenv())) {
-            var initialPrefWidth = canvas.prefWidth(-1);
-            var initialPrefHeight = canvas.prefHeight(-1);
-            canvas.fontProperty().set(Font.font("Monospaced", canvas.fontProperty().get().getSize() + 6));
-            assertTrue(
-                    canvas.prefWidth(-1) != initialPrefWidth || canvas.prefHeight(-1) != initialPrefHeight,
+        try (var view = GhosttyFx.create(shell.command(), tempDirectory, System.getenv())) {
+            var initialPrefWidth = view.prefWidth(-1);
+            var initialPrefHeight = view.prefHeight(-1);
+            view.fontProperty().set(Font.font("Monospaced", view.fontProperty().get().getSize() + 6));
+            assertTrue(view.prefWidth(-1) != initialPrefWidth || view.prefHeight(-1) != initialPrefHeight,
                     "Expected font change to update preferred size");
-            assertThrows(NullPointerException.class, () -> canvas.fontProperty().set(null));
+            assertThrows(NullPointerException.class, () -> view.fontProperty().set(null));
         }
     }
 
     @Test
     void themePropertyRejectsNullAndStoresTheme() throws Exception {
-        var tempDirectory = Files.createTempDirectory("ghosttyfx-canvas-theme-test-");
+        var tempDirectory = Files.createTempDirectory("ghosttyfx-theme-test-");
         var pidFile = tempDirectory.resolve("shell.pid");
         var shell = discoverShell(pidFile);
 
-        try (var canvas = GhosttyFx.create(shell.command(), tempDirectory, System.getenv())) {
+        try (var view = GhosttyFx.create(shell.command(), tempDirectory, System.getenv())) {
             var theme = new TerminalTheme(
                     Color.WHITE,
                     Color.BLACK,
@@ -109,10 +108,10 @@ final class GhosttyCanvasTest {
                     0.5,
                     Color.gray(0.25));
             runOnFxThread(() -> {
-                canvas.setTheme(theme);
-                assertEquals(theme, canvas.getTheme());
-                assertThrows(NullPointerException.class, () -> canvas.setTheme(null));
-                assertThrows(NullPointerException.class, () -> canvas.themeProperty().set(null));
+                view.setTheme(theme);
+                assertEquals(theme, view.getTheme());
+                assertThrows(NullPointerException.class, () -> view.setTheme(null));
+                assertThrows(NullPointerException.class, () -> view.themeProperty().set(null));
                 return null;
             });
         }
@@ -120,13 +119,13 @@ final class GhosttyCanvasTest {
 
     @Test
     void exposesShortcutListProperty() throws Exception {
-        var tempDirectory = Files.createTempDirectory("ghosttyfx-canvas-selection-shortcuts-test-");
+        var tempDirectory = Files.createTempDirectory("ghosttyfx-selection-shortcuts-test-");
         var pidFile = tempDirectory.resolve("shell.pid");
         var shell = discoverShell(pidFile);
 
-        try (var canvas = GhosttyFx.create(shell.command(), tempDirectory, System.getenv())) {
+        try (var view = GhosttyFx.create(shell.command(), tempDirectory, System.getenv())) {
             runOnFxThread(() -> {
-                var combinations = canvas.getShortcuts().stream()
+                var combinations = view.getShortcuts().stream()
                         .map(Shortcut::combination)
                         .toList();
                 assertTrue(combinations.contains(isMac()
@@ -160,9 +159,9 @@ final class GhosttyCanvasTest {
                 var shortcut = new Shortcut(
                         new KeyCodeCombination(KeyCode.B, KeyCombination.SHIFT_DOWN),
                         () -> false);
-                canvas.getShortcuts().add(shortcut);
-                assertTrue(canvas.getShortcuts().contains(shortcut));
-                assertThrows(NullPointerException.class, () -> canvas.setShortcuts(null));
+                view.getShortcuts().add(shortcut);
+                assertTrue(view.getShortcuts().contains(shortcut));
+                assertThrows(NullPointerException.class, () -> view.setShortcuts(null));
                 return null;
             });
         }
@@ -170,28 +169,28 @@ final class GhosttyCanvasTest {
 
     @Test
     void sendTextAndSendEscExposeShortcutActions() throws Exception {
-        var tempDirectory = Files.createTempDirectory("ghosttyfx-canvas-send-text-test-");
+        var tempDirectory = Files.createTempDirectory("ghosttyfx-send-text-test-");
         var pidFile = tempDirectory.resolve("shell.pid");
         var shell = discoverShell(pidFile);
 
-        try (var canvas = GhosttyFx.create(shell.command(), tempDirectory, System.getenv())) {
+        try (var view = GhosttyFx.create(shell.command(), tempDirectory, System.getenv())) {
             runOnFxThread(() -> {
-                assertFalse(canvas.sendText(""));
-                assertTrue(canvas.sendText("A"));
-                assertTrue(canvas.sendEsc("b"));
-                assertThrows(NullPointerException.class, () -> canvas.sendText(null));
-                assertThrows(NullPointerException.class, () -> canvas.sendEsc(null));
+                assertFalse(view.sendText(""));
+                assertTrue(view.sendText("A"));
+                assertTrue(view.sendEsc("b"));
+                assertThrows(NullPointerException.class, () -> view.sendText(null));
+                assertThrows(NullPointerException.class, () -> view.sendEsc(null));
 
                 var textShortcut = new KeyCodeCombination(KeyCode.B, KeyCombination.ALT_DOWN);
-                var sendTextShortcut = new Shortcut(textShortcut, () -> canvas.sendText("B"));
-                canvas.getShortcuts().add(sendTextShortcut);
-                assertTrue(canvas.getShortcuts().contains(sendTextShortcut));
+                var sendTextShortcut = new Shortcut(textShortcut, () -> view.sendText("B"));
+                view.getShortcuts().add(sendTextShortcut);
+                assertTrue(view.getShortcuts().contains(sendTextShortcut));
                 assertTrue(sendTextShortcut.action().getAsBoolean());
 
                 var escShortcut = new KeyCodeCombination(KeyCode.F, KeyCombination.ALT_DOWN);
-                var sendEscShortcut = new Shortcut(escShortcut, () -> canvas.sendEsc("f"));
-                canvas.getShortcuts().add(sendEscShortcut);
-                assertTrue(canvas.getShortcuts().contains(sendEscShortcut));
+                var sendEscShortcut = new Shortcut(escShortcut, () -> view.sendEsc("f"));
+                view.getShortcuts().add(sendEscShortcut);
+                assertTrue(view.getShortcuts().contains(sendEscShortcut));
                 assertTrue(sendEscShortcut.action().getAsBoolean());
                 return null;
             });
@@ -201,31 +200,31 @@ final class GhosttyCanvasTest {
     @Test
     void shiftArrowShortcutsExtendExistingSelection() throws Exception {
         var marker = "ghosttyfx-selection";
-        var tempDirectory = Files.createTempDirectory("ghosttyfx-canvas-selection-test-");
+        var tempDirectory = Files.createTempDirectory("ghosttyfx-selection-test-");
         var pidFile = tempDirectory.resolve("shell.pid");
         var shell = discoverOutputShell(pidFile, marker);
 
-        try (var canvas = GhosttyFx.create(shell.command(), tempDirectory, System.getenv())) {
+        try (var view = GhosttyFx.create(shell.command(), tempDirectory, System.getenv())) {
             await("terminal output to be addressable", START_TIMEOUT, () -> runOnFxThread(() -> {
-                fireShortcut(canvas, selectAllShortcut());
-                return marker.equals(canvas.getInputMethodRequests().getSelectedText())
+                fireShortcut(view, selectAllShortcut());
+                return marker.equals(view.getInputMethodRequests().getSelectedText())
                         ? Optional.of(Boolean.TRUE)
                         : Optional.empty();
             }));
 
             runOnFxThread(() -> {
-                dragSelection(canvas, 1, 1);
-                fireShortcut(canvas, new KeyCodeCombination(KeyCode.RIGHT, KeyCombination.SHIFT_DOWN));
-                assertEquals(marker.substring(1, 3), canvas.getInputMethodRequests().getSelectedText());
+                dragSelection(view, 1, 1);
+                fireShortcut(view, new KeyCodeCombination(KeyCode.RIGHT, KeyCombination.SHIFT_DOWN));
+                assertEquals(marker.substring(1, 3), view.getInputMethodRequests().getSelectedText());
 
-                fireShortcut(canvas, new KeyCodeCombination(KeyCode.LEFT, KeyCombination.SHIFT_DOWN));
-                assertEquals(marker.substring(1, 2), canvas.getInputMethodRequests().getSelectedText());
+                fireShortcut(view, new KeyCodeCombination(KeyCode.LEFT, KeyCombination.SHIFT_DOWN));
+                assertEquals(marker.substring(1, 2), view.getInputMethodRequests().getSelectedText());
 
-                fireShortcut(canvas, new KeyCodeCombination(KeyCode.HOME, KeyCombination.SHIFT_DOWN));
-                assertEquals(marker.substring(0, 2), canvas.getInputMethodRequests().getSelectedText());
+                fireShortcut(view, new KeyCodeCombination(KeyCode.HOME, KeyCombination.SHIFT_DOWN));
+                assertEquals(marker.substring(0, 2), view.getInputMethodRequests().getSelectedText());
 
-                fireShortcut(canvas, new KeyCodeCombination(KeyCode.END, KeyCombination.SHIFT_DOWN));
-                assertEquals(marker.substring(1), canvas.getInputMethodRequests().getSelectedText());
+                fireShortcut(view, new KeyCodeCombination(KeyCode.END, KeyCombination.SHIFT_DOWN));
+                assertEquals(marker.substring(1), view.getInputMethodRequests().getSelectedText());
                 return null;
             });
         }
@@ -233,16 +232,16 @@ final class GhosttyCanvasTest {
 
     @Test
     void viewportScrollShortcutsReportUnavailableWithoutScrollableViewport() throws Exception {
-        var tempDirectory = Files.createTempDirectory("ghosttyfx-canvas-viewport-scroll-shortcuts-test-");
+        var tempDirectory = Files.createTempDirectory("ghosttyfx-viewport-scroll-shortcuts-test-");
         var pidFile = tempDirectory.resolve("shell.pid");
         var shell = discoverShell(pidFile);
 
-        try (var canvas = GhosttyFx.create(shell.command(), tempDirectory, System.getenv())) {
+        try (var view = GhosttyFx.create(shell.command(), tempDirectory, System.getenv())) {
             runOnFxThread(() -> {
-                assertFalse(canvas.scrollViewportPageUp());
-                assertFalse(canvas.scrollViewportPageDown());
-                assertFalse(canvas.scrollViewportToTop());
-                assertFalse(canvas.scrollViewportToBottom());
+                assertFalse(view.scrollViewportPageUp());
+                assertFalse(view.scrollViewportPageDown());
+                assertFalse(view.scrollViewportToTop());
+                assertFalse(view.scrollViewportToBottom());
                 return null;
             });
         }
@@ -250,20 +249,20 @@ final class GhosttyCanvasTest {
 
     @Test
     void viewportScrollShortcutsConsumeAtScrollableBoundaries() throws Exception {
-        var tempDirectory = Files.createTempDirectory("ghosttyfx-canvas-viewport-scroll-boundary-shortcuts-test-");
+        var tempDirectory = Files.createTempDirectory("ghosttyfx-viewport-scroll-boundary-shortcuts-test-");
         var pidFile = tempDirectory.resolve("shell.pid");
         var shell = discoverOutputShell(pidFile, lineOutput(80));
 
-        try (var canvas = GhosttyFx.create(shell.command(), tempDirectory, System.getenv())) {
+        try (var view = GhosttyFx.create(shell.command(), tempDirectory, System.getenv())) {
             await("scrollable terminal output", START_TIMEOUT, () -> runOnFxThread(() ->
-                    canvas.scrollViewportToTop() ? Optional.of(Boolean.TRUE) : Optional.empty()));
+                    view.scrollViewportToTop() ? Optional.of(Boolean.TRUE) : Optional.empty()));
 
             runOnFxThread(() -> {
-                assertTrue(canvas.scrollViewportPageUp());
-                assertTrue(canvas.scrollViewportToTop());
-                assertTrue(canvas.scrollViewportToBottom());
-                assertTrue(canvas.scrollViewportPageDown());
-                assertTrue(canvas.scrollViewportToBottom());
+                assertTrue(view.scrollViewportPageUp());
+                assertTrue(view.scrollViewportToTop());
+                assertTrue(view.scrollViewportToBottom());
+                assertTrue(view.scrollViewportPageDown());
+                assertTrue(view.scrollViewportToBottom());
                 return null;
             });
         }
@@ -272,24 +271,24 @@ final class GhosttyCanvasTest {
     @Test
     void ctrlCCopyClearsSelection() throws Exception {
         var marker = "ghosttyfx-copy-shortcut";
-        var tempDirectory = Files.createTempDirectory("ghosttyfx-canvas-copy-test-");
+        var tempDirectory = Files.createTempDirectory("ghosttyfx-copy-test-");
         var pidFile = tempDirectory.resolve("shell.pid");
         var shell = discoverOutputShell(pidFile, marker);
-        var clipboardContents = runOnFxThread(GhosttyCanvasTest::snapshotClipboardContents);
+        var clipboardContents = runOnFxThread(TerminalViewTest::snapshotClipboardContents);
 
         try {
-            try (var canvas = GhosttyFx.create(shell.command(), tempDirectory, System.getenv())) {
+            try (var view = GhosttyFx.create(shell.command(), tempDirectory, System.getenv())) {
                 var selectedText = await("terminal output to become selectable", START_TIMEOUT, () -> runOnFxThread(() -> {
-                    fireShortcut(canvas, selectAllShortcut());
-                    var text = canvas.getInputMethodRequests().getSelectedText();
+                    fireShortcut(view, selectAllShortcut());
+                    var text = view.getInputMethodRequests().getSelectedText();
                     return text != null && text.contains(marker) ? Optional.of(text) : Optional.empty();
                 }));
 
                 runOnFxThread(() -> {
-                    fireShortcut(canvas, copyShortcut());
+                    fireShortcut(view, copyShortcut());
                     var clipboard = Clipboard.getSystemClipboard();
                     assertTrue(selectedText.equals(clipboard.getString()), "Expected copied text to match current selection");
-                    var remainingSelection = canvas.getInputMethodRequests().getSelectedText();
+                    var remainingSelection = view.getInputMethodRequests().getSelectedText();
                     assertTrue(remainingSelection == null || remainingSelection.isEmpty(), "Expected copy to clear selection");
                     return null;
                 });
@@ -305,21 +304,21 @@ final class GhosttyCanvasTest {
     @Test
     void closeStopsProcessButKeepsTerminalViewReadable() throws Exception {
         var marker = "ghosttyfx-close-keeps-view";
-        var tempDirectory = Files.createTempDirectory("ghosttyfx-canvas-close-test-");
+        var tempDirectory = Files.createTempDirectory("ghosttyfx-close-test-");
         var pidFile = tempDirectory.resolve("shell.pid");
         var shell = discoverOutputShell(pidFile, marker);
-        try (var canvas = GhosttyFx.create(shell.command(), tempDirectory, System.getenv())) {
+        try (var view = GhosttyFx.create(shell.command(), tempDirectory, System.getenv())) {
             var handle = await("shell process to start", START_TIMEOUT, () -> readAliveProcess(pidFile));
             try {
                 var selectedText = await("terminal output to become selectable", START_TIMEOUT, () -> runOnFxThread(() -> {
-                    fireShortcut(canvas, selectAllShortcut());
-                    var text = canvas.getInputMethodRequests().getSelectedText();
+                    fireShortcut(view, selectAllShortcut());
+                    var text = view.getInputMethodRequests().getSelectedText();
                     return text != null && text.contains(marker) ? Optional.of(text) : Optional.empty();
                 }));
 
-                canvas.close();
+                view.close();
 
-                var remainingSelection = runOnFxThread(() -> canvas.getInputMethodRequests().getSelectedText());
+                var remainingSelection = runOnFxThread(() -> view.getInputMethodRequests().getSelectedText());
                 assertTrue(selectedText.equals(remainingSelection), "Expected terminal contents to remain readable after close()");
                 awaitProcessStop(handle);
             } finally {
@@ -397,7 +396,7 @@ final class GhosttyCanvasTest {
                 : new KeyCodeCombination(KeyCode.A, KeyCombination.CONTROL_DOWN, KeyCombination.SHIFT_DOWN);
     }
 
-    private static KeyEvent fireShortcut(GhosttyCanvas canvas, KeyCombination shortcut) {
+    private static KeyEvent fireShortcut(TerminalView view, KeyCombination shortcut) {
         if (!(shortcut instanceof KeyCodeCombination combination)) {
             throw new IllegalArgumentException("Expected key-code shortcut, got: " + shortcut);
         }
@@ -411,19 +410,19 @@ final class GhosttyCanvasTest {
                 modifierDown(combination.getControl()) || (shortcutDownOnCurrentPlatform(combination.getShortcut()) && !isMac()),
                 modifierDown(combination.getAlt()),
                 modifierDown(combination.getMeta()) || (shortcutDownOnCurrentPlatform(combination.getShortcut()) && isMac()));
-        Event.fireEvent(canvas, event);
+        Event.fireEvent(view, event);
         return event;
     }
 
-    private static void dragSelection(GhosttyCanvas canvas, int fromColumn, int toColumn) {
-        var cellWidth = (canvas.prefWidth(-1) - 10) / 80;
-        var cellHeight = canvas.prefHeight(-1) / 24;
+    private static void dragSelection(TerminalView view, int fromColumn, int toColumn) {
+        var cellWidth = (view.prefWidth(-1) - 10) / 80;
+        var cellHeight = view.prefHeight(-1) / 24;
         var fromX = fromColumn * cellWidth + cellWidth * 0.1;
         var toX = toColumn * cellWidth + cellWidth * 0.8;
         var y = cellHeight * 0.5;
-        Event.fireEvent(canvas, mouseEvent(MouseEvent.MOUSE_PRESSED, fromX, y, true));
-        Event.fireEvent(canvas, mouseEvent(MouseEvent.MOUSE_DRAGGED, toX, y, true));
-        Event.fireEvent(canvas, mouseEvent(MouseEvent.MOUSE_RELEASED, toX, y, false));
+        Event.fireEvent(view, mouseEvent(MouseEvent.MOUSE_PRESSED, fromX, y, true));
+        Event.fireEvent(view, mouseEvent(MouseEvent.MOUSE_DRAGGED, toX, y, true));
+        Event.fireEvent(view, mouseEvent(MouseEvent.MOUSE_RELEASED, toX, y, false));
     }
 
     private static MouseEvent mouseEvent(EventType<MouseEvent> eventType, double x, double y, boolean primaryButtonDown) {

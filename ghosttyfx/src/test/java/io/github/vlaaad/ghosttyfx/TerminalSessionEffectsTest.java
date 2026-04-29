@@ -101,7 +101,7 @@ final class TerminalSessionEffectsTest {
             PtySession ptySession,
             java.util.function.Consumer<String> titleChanged,
             Runnable bell) {
-        return new TerminalSession(80, 24, new GhosttyCanvas.CellMetrics(9, 18, 13), ptySession, titleChanged, bell);
+        return new TerminalSession(80, 24, new TerminalView.CellMetrics(9, 18, 13), ptySession, titleChanged, bell);
     }
 
     private static Object invoke(TerminalSession session, String methodName, Object... arguments) throws Exception {

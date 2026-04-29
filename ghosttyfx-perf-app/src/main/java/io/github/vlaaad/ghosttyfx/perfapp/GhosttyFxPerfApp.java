@@ -1,6 +1,6 @@
 package io.github.vlaaad.ghosttyfx.perfapp;
 
-import io.github.vlaaad.ghosttyfx.GhosttyCanvas;
+import io.github.vlaaad.ghosttyfx.TerminalView;
 import io.github.vlaaad.ghosttyfx.GhosttyFx;
 import java.io.File;
 import java.io.IOException;
@@ -55,26 +55,26 @@ public final class GhosttyFxPerfApp {
         statusLog.write("startup");
         var terminal = detectTerminal();
         statusLog.write("terminal=" + terminal.label());
-        var canvas = GhosttyFx.create(terminal.command(), config.cwd(), System.getenv());
-        var root = new BorderPane(canvas);
+        var view = GhosttyFx.create(terminal.command(), config.cwd(), System.getenv());
+        var root = new BorderPane(view);
         var scene = new Scene(root, config.width(), config.height());
         var stage = new Stage();
         stage.setTitle("GhosttyFX Perf App");
         stage.setScene(scene);
-        stage.setOnCloseRequest(_ -> closeCanvas(canvas));
+        stage.setOnCloseRequest(_ -> closeView(view));
         stage.show();
         statusLog.write("stage-shown");
-        canvas.requestFocus();
+        view.requestFocus();
 
         var recorder = new Recorder();
-        var controller = new Controller(stage, canvas, config, terminal, recorder, completion, statusLog);
+        var controller = new Controller(stage, view, config, terminal, recorder, completion, statusLog);
         statusLog.write("controller-start");
         controller.start();
     }
 
-    private static void closeCanvas(GhosttyCanvas canvas) {
+    private static void closeView(TerminalView view) {
         try {
-            canvas.close();
+            view.close();
         } catch (RuntimeException ignored) {
         }
     }
@@ -225,27 +225,27 @@ public final class GhosttyFxPerfApp {
         return new KeyEvent(KeyEvent.KEY_RELEASED, "", "", config.repeatKeyCode(), false, false, false, false);
     }
 
-    private static long dispatch(GhosttyCanvas canvas, KeyEvent event) {
+    private static long dispatch(TerminalView view, KeyEvent event) {
         var start = System.nanoTime();
-        canvas.fireEvent(event);
+        view.fireEvent(event);
         return System.nanoTime() - start;
     }
 
-    private static void dispatchText(GhosttyCanvas canvas, Recorder recorder, String text) {
+    private static void dispatchText(TerminalView view, Recorder recorder, String text) {
         text.codePoints()
                 .mapToObj(codePoint -> new String(Character.toChars(codePoint)))
-                .forEach(grapheme -> recorder.recordDispatch(DispatchKind.TEXT, dispatch(canvas, keyTyped(grapheme))));
+                .forEach(grapheme -> recorder.recordDispatch(DispatchKind.TEXT, dispatch(view, keyTyped(grapheme))));
     }
 
     private static void writeReport(
             PerfConfig config,
             TerminalOption terminal,
             Recorder recorder,
-            double canvasWidth,
-            double canvasHeight) {
+            double viewWidth,
+            double viewHeight) {
         try {
             Files.createDirectories(config.outputDirectory());
-            writeSummary(config, terminal, recorder, canvasWidth, canvasHeight);
+            writeSummary(config, terminal, recorder, viewWidth, viewHeight);
             writeSamples(config.outputDirectory().resolve("dispatch-samples.csv"), recorder.dispatchSamples());
             writeSamples(config.outputDirectory().resolve("pulse-samples.csv"), recorder.pulseSamples());
         } catch (IOException e) {
@@ -257,8 +257,8 @@ public final class GhosttyFxPerfApp {
             PerfConfig config,
             TerminalOption terminal,
             Recorder recorder,
-            double canvasWidth,
-            double canvasHeight) throws IOException {
+            double viewWidth,
+            double viewHeight) throws IOException {
         var report = new ArrayList<String>();
         var runSeconds = recorder.runDurationNs() / 1_000_000_000d;
         var repeatThroughput = runSeconds == 0 ? 0 : config.repeatCount() / runSeconds;
@@ -274,7 +274,7 @@ public final class GhosttyFxPerfApp {
         report.add("- Terminal: " + terminal.label());
         report.add("- Command: `" + terminal.command().stream().map(GhosttyFxPerfApp::escapeBackticks).collect(Collectors.joining(" ")) + "`");
         report.add("- Working directory: `" + escapeBackticks(config.cwd().toString()) + "`");
-        report.add("- Canvas size: " + Math.round(canvasWidth) + "x" + Math.round(canvasHeight));
+        report.add("- View size: " + Math.round(viewWidth) + "x" + Math.round(viewHeight));
         report.add("- Scenario: type `" + escapeBackticks(config.preludeText()) + "` then hold `" + config.repeatKeyCode() + "`");
         report.add("- Repeats: " + config.repeatCount());
         report.add("- Batch size per pulse: " + config.batchSize());
@@ -563,7 +563,7 @@ public final class GhosttyFxPerfApp {
 
     private static final class Controller extends AnimationTimer {
         private final Stage stage;
-        private final GhosttyCanvas canvas;
+        private final TerminalView view;
         private final PerfConfig config;
         private final TerminalOption terminal;
         private final Recorder recorder;
@@ -577,14 +577,14 @@ public final class GhosttyFxPerfApp {
 
         private Controller(
                 Stage stage,
-                GhosttyCanvas canvas,
+                TerminalView view,
                 PerfConfig config,
                 TerminalOption terminal,
                 Recorder recorder,
                 Completion completion,
                 StatusLog statusLog) {
             this.stage = stage;
-            this.canvas = canvas;
+            this.view = view;
             this.config = config;
             this.terminal = terminal;
             this.recorder = recorder;
@@ -617,7 +617,7 @@ public final class GhosttyFxPerfApp {
         }
 
         private void handleStartup(long now) {
-            canvas.requestFocus();
+            view.requestFocus();
             if (now - phaseStartedNs >= config.startupDelay().toNanos()) {
                 switchPhase(Phase.BASELINE, now);
             }
@@ -631,7 +631,7 @@ public final class GhosttyFxPerfApp {
 
         private void handlePrelude(long now) {
             statusLog.write("prelude=" + config.preludeText());
-            dispatchText(canvas, recorder, config.preludeText());
+            dispatchText(view, recorder, config.preludeText());
             switchPhase(Phase.SETTLE, now);
         }
 
@@ -649,7 +649,7 @@ public final class GhosttyFxPerfApp {
 
             var batch = Math.min(config.batchSize(), config.repeatCount() - repeatsSent);
             for (var i = 0; i < batch; i++) {
-                recorder.recordDispatch(DispatchKind.REPEAT, dispatch(canvas, keyPressed(config)));
+                recorder.recordDispatch(DispatchKind.REPEAT, dispatch(view, keyPressed(config)));
                 repeatsSent++;
                 if (repeatsSent == 1 || repeatsSent == config.repeatCount() || repeatsSent % 100 == 0) {
                     statusLog.write("repeats=" + repeatsSent);
@@ -657,7 +657,7 @@ public final class GhosttyFxPerfApp {
             }
 
             if (repeatsSent == config.repeatCount()) {
-                recorder.recordDispatch(DispatchKind.RELEASE, dispatch(canvas, keyReleased(config)));
+                recorder.recordDispatch(DispatchKind.RELEASE, dispatch(view, keyReleased(config)));
                 recorder.markRunEnd();
                 switchPhase(Phase.COOLDOWN, lastPulseNs);
             }
@@ -683,8 +683,8 @@ public final class GhosttyFxPerfApp {
             stop();
             try {
                 statusLog.write("writing-report");
-                writeReport(config, terminal, recorder, canvas.getWidth(), canvas.getHeight());
-                closeCanvas(canvas);
+                writeReport(config, terminal, recorder, view.getWidth(), view.getHeight());
+                closeView(view);
                 stage.close();
                 statusLog.write("success");
                 completion.succeed();
@@ -702,7 +702,7 @@ public final class GhosttyFxPerfApp {
             completed = true;
             stop();
             statusLog.write("failure=" + t.getClass().getName() + ":" + t.getMessage());
-            closeCanvas(canvas);
+            closeView(view);
             stage.close();
             completion.fail(t);
             Platform.exit();

@@ -1,6 +1,6 @@
 package io.github.vlaaad.ghosttyfx.manualapp;
 
-import io.github.vlaaad.ghosttyfx.GhosttyCanvas;
+import io.github.vlaaad.ghosttyfx.TerminalView;
 import io.github.vlaaad.ghosttyfx.GhosttyFx;
 import io.github.vlaaad.ghosttyfx.TerminalTheme;
 import java.io.File;
@@ -103,11 +103,11 @@ public final class GhosttyFxManualApp {
                 }
                 var theme = themePicker.getValue();
 
-                final GhosttyCanvas canvas;
+                final TerminalView view;
                 try {
-                    canvas = GhosttyFx.create(terminal.command(), cwd, System.getenv());
+                    view = GhosttyFx.create(terminal.command(), cwd, System.getenv());
                     if (theme != null) {
-                        canvas.setTheme(theme.theme());
+                        view.setTheme(theme.theme());
                     }
                 } catch (RuntimeException e) {
                     var alert = new Alert(Alert.AlertType.ERROR);
@@ -119,23 +119,23 @@ public final class GhosttyFxManualApp {
                 }
 
                 var tab = new Tab();
-                tab.textProperty().bind(canvas.titleProperty());
-                tab.setContent(canvas);
+                tab.textProperty().bind(view.titleProperty());
+                tab.setContent(view);
                 tab.setClosable(true);
-                canvas.setOnBell(bellSound::play);
-                tab.setOnClosed(_2 -> Thread.ofVirtual().name("ghosttyfx-tab-close").start(canvas::close));
+                view.setOnBell(bellSound::play);
+                tab.setOnClosed(_2 -> Thread.ofVirtual().name("ghosttyfx-tab-close").start(view::close));
                 tabs.getTabs().add(tab);
                 tabs.getSelectionModel().select(tab);
-                canvas.requestFocus();
-                canvas.processExitedProperty().addListener((_, _, _) -> tabs.getTabs().remove(tab));
+                view.requestFocus();
+                view.processExitedProperty().addListener((_, _, _) -> tabs.getTabs().remove(tab));
             });
             themePicker.valueProperty().addListener((_, _, theme) -> {
                 if (theme == null) {
                     return;
                 }
                 for (var tab : tabs.getTabs()) {
-                    if (tab.getContent() instanceof GhosttyCanvas canvas) {
-                        canvas.setTheme(theme.theme());
+                    if (tab.getContent() instanceof TerminalView view) {
+                        view.setTheme(theme.theme());
                     }
                 }
             });
@@ -154,9 +154,9 @@ public final class GhosttyFxManualApp {
             stage.setOnCloseRequest(_ -> tabs.getTabs()
                     .stream()
                     .map(Tab::getContent)
-                    .filter(GhosttyCanvas.class::isInstance)
-                    .map(GhosttyCanvas.class::cast)
-                    .forEach(canvas -> Thread.ofVirtual().name("ghosttyfx-stage-close").start(canvas::close)));
+                    .filter(TerminalView.class::isInstance)
+                    .map(TerminalView.class::cast)
+                    .forEach(view -> Thread.ofVirtual().name("ghosttyfx-stage-close").start(view::close)));
             stage.show();
         });
     }

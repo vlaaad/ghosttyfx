@@ -1,7 +1,5 @@
 package io.github.vlaaad.ghosttyfx;
 
-import io.github.vlaaad.ghostty.bindings.ghostty_vt_h;
-
 import java.awt.Desktop;
 import java.lang.ref.Cleaner;
 import java.lang.ref.WeakReference;
@@ -12,6 +10,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
+import io.github.vlaaad.ghostty.bindings.ghostty_vt_h;
 import javafx.animation.AnimationTimer;
 import javafx.beans.binding.Bindings;
 import javafx.beans.binding.ObjectBinding;
@@ -48,7 +47,7 @@ import javafx.scene.text.FontWeight;
 import javafx.scene.text.Text;
 import javafx.scene.text.TextBoundsType;
 
-public final class GhosttyCanvas extends Canvas implements AutoCloseable {
+public final class TerminalView extends Canvas implements AutoCloseable {
 
     private static final Cleaner CLEANER = Cleaner.create();
     private static final int INITIAL_COLUMNS = 80;
@@ -124,7 +123,7 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
         return new CellMetrics(cellWidthPx, cellHeightPx, baselineOffsetPx);
     }, font);
 
-    GhosttyCanvas(List<String> command, Path cwd, Map<String, String> environment) {
+    TerminalView(List<String> command, Path cwd, Map<String, String> environment) {
         title = new SimpleStringProperty(this, "title", command.getFirst());
         ptySession = new PtySession(command, cwd, environment, INITIAL_COLUMNS, INITIAL_ROWS);
         processOutputDrain = new ProcessOutputDrain(this);
@@ -197,14 +196,14 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
         setFocusTraversable(true);
         setWidth(prefWidth(-1));
         setHeight(prefHeight(-1));
-        cellMetrics.addListener((_, _, _) -> handleCanvasResize());
+        cellMetrics.addListener((_, _, _) -> handleResize());
         terminalFonts.addListener((_, _, _) -> redraw());
         theme.addListener((_, _, value) -> {
             terminalSession.applyTheme(value);
             redraw();
         });
-        widthProperty().addListener((_, _, _) -> handleCanvasResize());
-        heightProperty().addListener((_, _, _) -> handleCanvasResize());
+        widthProperty().addListener((_, _, _) -> handleResize());
+        heightProperty().addListener((_, _, _) -> handleResize());
         focusedProperty().addListener((_, _, focused) -> handleFocusChange(focused));
         setOnMousePressed(this::handleMousePressed);
         setOnMouseDragged(this::handleMouseDragged);
@@ -219,13 +218,13 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
         setOnKeyReleased(this::handleKeyReleased);
         setOnKeyTyped(this::handleKeyTyped);
         setOnInputMethodTextChanged(this::handleInputMethodTextChanged);
-        setInputMethodRequests(new CanvasInputMethodRequests());
+        setInputMethodRequests(new TerminalInputMethodRequests());
         setCursor(Cursor.DEFAULT);
         terminalSession.applyTheme(getTheme());
         redraw();
         processOutputDrain.start();
 
-        // The canvas only owns the process lifecycle directly. Native terminal resources stay alive as long as the
+        // The view only owns the process lifecycle directly. Native terminal resources stay alive as long as the
         // terminal session is reachable so an already-rendered view can still be queried or shown after close().
         CLEANER.register(terminalSession, () -> {
             try (terminalSession) {
@@ -353,12 +352,12 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
 
     @Override
     public void close() {
-        // Closing the canvas is a process-lifecycle operation only. Native terminal state stays available until the
-        // canvas itself becomes unreachable so the last rendered view can still be queried or shown.
+        // Closing the view is a process-lifecycle operation only. Native terminal state stays available until the
+        // view itself becomes unreachable so the last rendered view can still be queried or shown.
         ptySession.close();
     }
 
-    private void handleCanvasResize() {
+    private void handleResize() {
         var metrics = cellMetrics.get();
         var size = terminalSession.resize(getWidth(), getHeight(), metrics, scrollbarReservedWidthPx());
         if (size == null) {
@@ -1275,12 +1274,12 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
 
     private static final class ProcessOutputDrain extends AnimationTimer {
 
-        private final WeakReference<GhosttyCanvas> canvasRef;
+        private final WeakReference<TerminalView> terminalRef;
         private final PtySession ptySession;
 
-        private ProcessOutputDrain(GhosttyCanvas canvas) {
-            canvasRef = new WeakReference<>(canvas);
-            ptySession = canvas.ptySession;
+        private ProcessOutputDrain(TerminalView terminal) {
+            terminalRef = new WeakReference<>(terminal);
+            ptySession = terminal.ptySession;
         }
 
         @Override
@@ -1290,8 +1289,8 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
                 return;
             }
 
-            var canvas = canvasRef.get();
-            if (canvas != null) {
+            var terminal = terminalRef.get();
+            if (terminal != null) {
                 var totalBytes = 0;
                 for (var output : outputs) {
                     if (output instanceof PtySession.Chunk(var bytes)) {
@@ -1309,14 +1308,14 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
                 }
 
                 if (bytes.length != 0) {
-                    canvas.terminalSession.writeToTerminal(bytes);
-                    canvas.redraw();
+                    terminal.terminalSession.writeToTerminal(bytes);
+                    terminal.redraw();
                 }
             }
             if (outputs.get(outputs.size() - 1) instanceof PtySession.Closed) {
                 stop();
-                if (canvas != null) {
-                    canvas.processExited.set(true);
+                if (terminal != null) {
+                    terminal.processExited.set(true);
                 }
             }
         }
@@ -1330,7 +1329,7 @@ public final class GhosttyCanvas extends Canvas implements AutoCloseable {
         }
     }
 
-    private final class CanvasInputMethodRequests implements InputMethodRequests {
+    private final class TerminalInputMethodRequests implements InputMethodRequests {
 
         @Override
         public Point2D getTextLocation(int offset) {
