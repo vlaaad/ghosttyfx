@@ -9,6 +9,7 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.function.DoubleSupplier;
 
 import io.github.vlaaad.ghostty.bindings.ghostty_vt_h;
 import javafx.animation.AnimationTimer;
@@ -41,13 +42,14 @@ import javafx.scene.input.MouseButton;
 import javafx.scene.input.MouseEvent;
 import javafx.scene.input.ScrollEvent;
 import javafx.scene.input.ScrollEvent.VerticalTextScrollUnits;
+import javafx.scene.layout.AnchorPane;
 import javafx.scene.text.Font;
 import javafx.scene.text.FontPosture;
 import javafx.scene.text.FontWeight;
 import javafx.scene.text.Text;
 import javafx.scene.text.TextBoundsType;
 
-public final class TerminalView extends Canvas implements AutoCloseable {
+public final class TerminalView extends AnchorPane implements AutoCloseable {
 
     private static final Cleaner CLEANER = Cleaner.create();
     private static final int INITIAL_COLUMNS = 80;
@@ -122,6 +124,9 @@ public final class TerminalView extends Canvas implements AutoCloseable {
         baselineOffsetPx = Math.max(0, Math.min(cellHeightPx, baselineOffsetPx));
         return new CellMetrics(cellWidthPx, cellHeightPx, baselineOffsetPx);
     }, font);
+    private final Canvas canvas = new ResizableCanvas(
+            () -> INITIAL_COLUMNS * cellMetrics.get().cellWidthPx() + scrollbarReservedWidthPx(),
+            () -> INITIAL_ROWS * cellMetrics.get().cellHeightPx());
 
     TerminalView(List<String> command, Path cwd, Map<String, String> environment) {
         title = new SimpleStringProperty(this, "title", command.getFirst());
@@ -194,16 +199,20 @@ public final class TerminalView extends Canvas implements AutoCloseable {
         }
 
         setFocusTraversable(true);
-        setWidth(prefWidth(-1));
-        setHeight(prefHeight(-1));
+        getChildren().add(canvas);
+        AnchorPane.setTopAnchor(canvas, 0.0);
+        AnchorPane.setRightAnchor(canvas, 0.0);
+        AnchorPane.setBottomAnchor(canvas, 0.0);
+        AnchorPane.setLeftAnchor(canvas, 0.0);
+        widthProperty().addListener((_, _, _) -> handleResize());
+        heightProperty().addListener((_, _, _) -> handleResize());
+        resize(prefWidth(-1), prefHeight(-1));
         cellMetrics.addListener((_, _, _) -> handleResize());
         terminalFonts.addListener((_, _, _) -> redraw());
         theme.addListener((_, _, value) -> {
             terminalSession.applyTheme(value);
             redraw();
         });
-        widthProperty().addListener((_, _, _) -> handleResize());
-        heightProperty().addListener((_, _, _) -> handleResize());
         focusedProperty().addListener((_, _, focused) -> handleFocusChange(focused));
         setOnMousePressed(this::handleMousePressed);
         setOnMouseDragged(this::handleMouseDragged);
@@ -231,47 +240,6 @@ public final class TerminalView extends Canvas implements AutoCloseable {
                 ptySession.close();
             }
         });
-    }
-
-    @Override
-    public boolean isResizable() {
-        return true;
-    }
-
-    @Override
-    public double prefWidth(double height) {
-        return INITIAL_COLUMNS * cellMetrics.get().cellWidthPx() + scrollbarReservedWidthPx();
-    }
-
-    @Override
-    public double minWidth(double height) {
-        return 0;
-    }
-
-    @Override
-    public double maxWidth(double height) {
-        return Double.MAX_VALUE;
-    }
-
-    @Override
-    public double prefHeight(double width) {
-        return INITIAL_ROWS * cellMetrics.get().cellHeightPx();
-    }
-
-    @Override
-    public double minHeight(double width) {
-        return 0;
-    }
-
-    @Override
-    public double maxHeight(double width) {
-        return Double.MAX_VALUE;
-    }
-
-    @Override
-    public void resize(double width, double height) {
-        setWidth(width);
-        setHeight(height);
     }
 
     public Font getFont() {
@@ -1252,9 +1220,10 @@ public final class TerminalView extends Canvas implements AutoCloseable {
         if (width <= 0 || height <= 0) {
             return;
         }
+        canvas.resize(width, height);
 
         terminalSession.render(
-                getGraphicsContext2D(),
+                canvas.getGraphicsContext2D(),
                 width,
                 height,
                 terminalFonts.get(),
@@ -1390,6 +1359,59 @@ public final class TerminalView extends Canvas implements AutoCloseable {
                 return this.bold;
             }
             return italic ? this.italic : regular;
+        }
+
+    }
+
+    private static final class ResizableCanvas extends Canvas {
+
+        private final DoubleSupplier prefWidth;
+        private final DoubleSupplier prefHeight;
+
+        private ResizableCanvas(DoubleSupplier prefWidth, DoubleSupplier prefHeight) {
+            this.prefWidth = prefWidth;
+            this.prefHeight = prefHeight;
+        }
+
+        @Override
+        public boolean isResizable() {
+            return true;
+        }
+
+        @Override
+        public double prefWidth(double height) {
+            return prefWidth.getAsDouble();
+        }
+
+        @Override
+        public double minWidth(double height) {
+            return 0;
+        }
+
+        @Override
+        public double maxWidth(double height) {
+            return Double.MAX_VALUE;
+        }
+
+        @Override
+        public double prefHeight(double width) {
+            return prefHeight.getAsDouble();
+        }
+
+        @Override
+        public double minHeight(double width) {
+            return 0;
+        }
+
+        @Override
+        public double maxHeight(double width) {
+            return Double.MAX_VALUE;
+        }
+
+        @Override
+        public void resize(double width, double height) {
+            setWidth(width);
+            setHeight(height);
         }
 
     }
