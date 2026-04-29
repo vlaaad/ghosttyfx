@@ -12,7 +12,10 @@ import java.util.Objects;
 import java.util.function.DoubleSupplier;
 
 import io.github.vlaaad.ghostty.bindings.ghostty_vt_h;
+import javafx.animation.Animation;
 import javafx.animation.AnimationTimer;
+import javafx.animation.KeyFrame;
+import javafx.animation.Timeline;
 import javafx.beans.binding.Bindings;
 import javafx.beans.binding.ObjectBinding;
 import javafx.beans.property.BooleanProperty;
@@ -48,6 +51,7 @@ import javafx.scene.text.FontPosture;
 import javafx.scene.text.FontWeight;
 import javafx.scene.text.Text;
 import javafx.scene.text.TextBoundsType;
+import javafx.util.Duration;
 
 public final class TerminalView extends AnchorPane implements AutoCloseable {
 
@@ -62,17 +66,23 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
     private static final double SCROLLBAR_MARGIN_PX = 2;
     private static final double MIN_SCROLLBAR_HEIGHT_PX = 10;
     private static final double SCROLL_TOTAL_DELTA_EPSILON = 1e-6;
+    private static final Duration BLINK_INTERVAL = Duration.millis(600);
     private static final Font DEFAULT_FONT = Font.font("Monospaced", 14);
 
     private final TerminalSession terminalSession;
     private final PtySession ptySession;
     private final AnimationTimer processOutputDrain;
+    private final Timeline cursorBlinkTimeline;
+    private final Timeline textBlinkTimeline;
     private final KeyInput.Platform inputPlatform = KeyInput.Platform.current();
 
     private KeyInput.State keyInputState = KeyInput.initialState();
     private MouseInput.State mouseInputState = MouseInput.initialState();
     private Selection selection = Selection.empty();
     private Selection hoveredHyperlink = Selection.empty();
+    private boolean cursorBlinkVisible = true;
+    private boolean textBlinkVisible = true;
+    private TerminalSession.BlinkState blinkState = TerminalSession.BlinkState.none();
     private final SearchUi searchUi;
     private final StringProperty title;
     private final ObjectProperty<Runnable> onBell = new SimpleObjectProperty<>(this, "onBell");
@@ -139,6 +149,10 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
         title = new SimpleStringProperty(this, "title", command.getFirst());
         ptySession = new PtySession(command, cwd, environment, INITIAL_COLUMNS, INITIAL_ROWS);
         processOutputDrain = new ProcessOutputDrain(this);
+        cursorBlinkTimeline = new Timeline(new KeyFrame(BLINK_INTERVAL, _ -> tickCursorBlink()));
+        cursorBlinkTimeline.setCycleCount(Animation.INDEFINITE);
+        textBlinkTimeline = new Timeline(new KeyFrame(BLINK_INTERVAL, _ -> tickTextBlink()));
+        textBlinkTimeline.setCycleCount(Animation.INDEFINITE);
         var initialCellMetrics = cellMetrics.get();
         terminalSession = new TerminalSession(
                 INITIAL_COLUMNS,
@@ -258,6 +272,8 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
         terminalSession.applyTheme(getTheme());
         redraw();
         processOutputDrain.start();
+        cursorBlinkTimeline.play();
+        textBlinkTimeline.play();
 
         // The view only owns the process lifecycle directly. Native terminal resources stay alive as long as the
         // terminal session is reachable so an already-rendered view can still be queried or shown after close().
@@ -361,6 +377,8 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
         // Closing the view is a process-lifecycle operation only. Native terminal state stays available until the
         // view itself becomes unreachable so the last rendered view can still be queried or shown.
         searchUi.cancel();
+        cursorBlinkTimeline.stop();
+        textBlinkTimeline.stop();
         ptySession.close();
     }
 
@@ -1320,6 +1338,7 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
         }
 
         if (wroteToPty) {
+            resetCursorBlink();
             terminalSession.scrollViewportToBottom();
         }
 
@@ -1349,7 +1368,7 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
         }
         canvas.resize(width, height);
 
-        terminalSession.render(
+        blinkState = terminalSession.render(
                 canvas.getGraphicsContext2D(),
                 width,
                 height,
@@ -1362,8 +1381,41 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
                 searchUi.visible() ? searchUi.selectedMatch() : -1,
                 isFocused(),
                 getTheme(),
+                cursorBlinkVisible,
+                textBlinkVisible,
                 scrollbarReservedWidthPx(),
                 MIN_SCROLLBAR_HEIGHT_PX);
+    }
+
+    private void resetCursorBlink() {
+        cursorBlinkVisible = true;
+        cursorBlinkTimeline.playFromStart();
+    }
+
+    private void tickCursorBlink() {
+        if (!blinkState.cursor()) {
+            if (!cursorBlinkVisible) {
+                cursorBlinkVisible = true;
+                redraw();
+            }
+            return;
+        }
+
+        cursorBlinkVisible = !cursorBlinkVisible;
+        redraw();
+    }
+
+    private void tickTextBlink() {
+        if (!blinkState.text()) {
+            if (!textBlinkVisible) {
+                textBlinkVisible = true;
+                redraw();
+            }
+            return;
+        }
+
+        textBlinkVisible = !textBlinkVisible;
+        redraw();
     }
 
     private CursorLocation currentCursorLocation() {
@@ -1406,6 +1458,7 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
                 }
 
                 if (bytes.length != 0) {
+                    terminal.resetCursorBlink();
                     terminal.terminalSession.writeToTerminal(bytes);
                     if (terminal.searchUi.visible()) {
                         terminal.searchUi.refresh();

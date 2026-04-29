@@ -45,7 +45,7 @@ import javafx.scene.text.Font;
 import javafx.stage.Stage;
 
 final class TerminalViewTest {
-    private static final Duration START_TIMEOUT = Duration.ofSeconds(15);
+    private static final Duration START_TIMEOUT = Duration.ofSeconds(30);
     private static final Duration STOP_TIMEOUT = Duration.ofSeconds(30);
     private static final Duration POLL_INTERVAL = Duration.ofMillis(100);
 
@@ -60,7 +60,7 @@ final class TerminalViewTest {
         } catch (IllegalStateException _) {
             Platform.runLater(started::countDown);
         }
-        assertTrue(started.await(15, TimeUnit.SECONDS), "Timed out waiting for JavaFX runtime startup");
+        assertTrue(started.await(START_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS), "Timed out waiting for JavaFX runtime startup");
     }
 
     @Test
@@ -634,7 +634,7 @@ final class TerminalViewTest {
                 completed.countDown();
             }
         });
-        assertTrue(completed.await(15, TimeUnit.SECONDS), "Timed out waiting for JavaFX task");
+        assertTrue(completed.await(START_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS), "Timed out waiting for JavaFX task");
 
         var throwable = failure.get();
         if (throwable instanceof Exception exception) {

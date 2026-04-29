@@ -59,6 +59,7 @@ final class TerminalSession implements AutoCloseable {
     private static final int CURSOR_STYLE_BLOCK_HOLLOW = 3;
     private static final int PALETTE_SIZE = 256;
     private static final int MAX_GHOSTTY_DIMENSION = 0xFFFF;
+    private static final short CURSOR_BLINKING_MODE = 12;
     private static final long INITIAL_MAX_SCROLLBACK = 1_000;
     private static final double BLOCK_CURSOR_ALPHA = 0.5;
     private static final byte[] XTVERSION_BYTES = "ghosttyfx".getBytes(StandardCharsets.UTF_8);
@@ -126,6 +127,9 @@ final class TerminalSession implements AutoCloseable {
                             initialCellMetrics.cellWidthPx(),
                             initialCellMetrics.cellHeightPx()),
                     "ghostty_terminal_resize");
+            requireGhosttySuccess(
+                    ghostty_vt_h.ghostty_terminal_mode_set(terminal, CURSOR_BLINKING_MODE, true),
+                    "ghostty_terminal_mode_set(cursor_blinking)");
             var palette = GhosttyColorRgb.allocateArray(PALETTE_SIZE, arena);
             requireGhosttySuccess(
                     ghostty_vt_h.ghostty_terminal_get(
@@ -933,7 +937,7 @@ final class TerminalSession implements AutoCloseable {
         }
     }
 
-    void render(
+    BlinkState render(
             GraphicsContext graphics,
             double width,
             double height,
@@ -946,6 +950,8 @@ final class TerminalSession implements AutoCloseable {
             int selectedSearchMatch,
             boolean focused,
             TerminalTheme theme,
+            boolean cursorBlinkVisible,
+            boolean textBlinkVisible,
             double scrollbarWidthPx,
             double minScrollbarHeightPx) {
         graphics.setFont(fonts.regular());
@@ -992,6 +998,8 @@ final class TerminalSession implements AutoCloseable {
             var cursorText = "";
             var cursorBold = false;
             var cursorItalic = false;
+            var hasCursorBlink = focused && cursor != null && cursor.blinking();
+            var hasTextBlink = false;
 
             while (ghostty_vt_h.ghostty_render_state_row_iterator_next(rowIterator)) {
                 requireGhosttySuccess(
@@ -1101,9 +1109,13 @@ final class TerminalSession implements AutoCloseable {
                         graphics.fillRect(x, y, metrics.cellWidthPx(), metrics.cellHeightPx());
                     }
 
-                    var faintFactor = GhosttyStyle.faint(style) ? theme.faintOpacity() : 1.0;
+                    var faint = GhosttyStyle.faint(style);
+                    var textBlinking = !GhosttyStyle.invisible(style) && GhosttyStyle.blink(style);
+                    hasTextBlink |= textBlinking;
+                    var textBlinkHidden = textBlinking && !textBlinkVisible && faint;
+                    var faintFactor = faint || (textBlinking && !textBlinkVisible) ? theme.faintOpacity() : 1.0;
 
-                    if (!GhosttyStyle.invisible(style)) {
+                    if (!GhosttyStyle.invisible(style) && !textBlinkHidden) {
                         text.setLength(0);
                         for (var i = 0; i < codePointCount; i++) {
                             var codePoint = codepoints.get(ValueLayout.JAVA_INT, (long) i * Integer.BYTES);
@@ -1139,7 +1151,7 @@ final class TerminalSession implements AutoCloseable {
                 viewportY++;
             }
 
-            renderCursor(graphics, metrics, fonts, colors, focused, theme, cursor, cursorText, cursorBold, cursorItalic);
+            renderCursor(graphics, metrics, fonts, colors, focused, theme, cursorBlinkVisible, cursor, cursorText, cursorBold, cursorItalic);
             graphics.setFont(fonts.regular());
             renderPreedit(graphics, metrics, fonts, preedit, cursor, theme);
 
@@ -1148,6 +1160,7 @@ final class TerminalSession implements AutoCloseable {
                 graphics.setFill(theme.scrollbarColor());
                 graphics.fillRect(scrollbarInfo.thumbX(), scrollbarInfo.thumbY(), scrollbarWidthPx, scrollbarInfo.thumbHeight());
             }
+            return new BlinkState(hasCursorBlink, hasTextBlink);
         }
     }
 
@@ -1782,16 +1795,6 @@ final class TerminalSession implements AutoCloseable {
             return EMPTY;
         }
 
-        static SearchResult of(List<Selection> matches, int columns) {
-            if (matches.isEmpty()) {
-                return empty();
-            }
-
-            var rows = new HashMap<Integer, List<SearchSpan>>();
-            appendRows(rows, matches, 0, columns);
-            return new SearchResult(List.copyOf(matches), rows);
-        }
-
         static SearchResult append(SearchResult result, List<Selection> matches, int columns) {
             if (matches.isEmpty()) {
                 return result;
@@ -1907,11 +1910,15 @@ final class TerminalSession implements AutoCloseable {
             MemorySegment colors,
             boolean focused,
             TerminalTheme theme,
+            boolean blinkVisible,
             CursorInfo cursor,
             String cursorText,
             boolean cursorBold,
             boolean cursorItalic) {
         if (cursor == null) {
+            return;
+        }
+        if (focused && cursor.blinking() && !blinkVisible) {
             return;
         }
 
@@ -1989,6 +1996,7 @@ final class TerminalSession implements AutoCloseable {
         var cursorX = arena.allocate(ValueLayout.JAVA_SHORT);
         var cursorY = arena.allocate(ValueLayout.JAVA_SHORT);
         var cursorStyle = arena.allocate(ValueLayout.JAVA_INT);
+        var cursorBlinking = arena.allocate(ValueLayout.JAVA_BOOLEAN);
         requireGhosttySuccess(
                 ghostty_vt_h.ghostty_render_state_get(
                         renderState,
@@ -2007,10 +2015,17 @@ final class TerminalSession implements AutoCloseable {
                         ghostty_vt_h.GHOSTTY_RENDER_STATE_DATA_CURSOR_VISUAL_STYLE(),
                         cursorStyle),
                 "ghostty_render_state_get(cursor_visual_style)");
+        requireGhosttySuccess(
+                ghostty_vt_h.ghostty_render_state_get(
+                        renderState,
+                        ghostty_vt_h.GHOSTTY_RENDER_STATE_DATA_CURSOR_BLINKING(),
+                        cursorBlinking),
+                "ghostty_render_state_get(cursor_blinking)");
         return new CursorInfo(
                 Short.toUnsignedInt(cursorX.get(ValueLayout.JAVA_SHORT, 0)),
                 Short.toUnsignedInt(cursorY.get(ValueLayout.JAVA_SHORT, 0)),
-                cursorStyle.get(ValueLayout.JAVA_INT, 0));
+                cursorStyle.get(ValueLayout.JAVA_INT, 0),
+                cursorBlinking.get(ValueLayout.JAVA_BOOLEAN, 0));
     }
 
     private static MemorySegment newAddress(Arena arena, String operation, Allocator allocator) {
@@ -2155,7 +2170,15 @@ final class TerminalSession implements AutoCloseable {
         SYMBOL
     }
 
-    private record CursorInfo(int x, int y, int style) {
+    record BlinkState(boolean cursor, boolean text) {
+
+        static BlinkState none() {
+            return new BlinkState(false, false);
+        }
+
+    }
+
+    private record CursorInfo(int x, int y, int style, boolean blinking) {
 
     }
 
