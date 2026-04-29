@@ -73,6 +73,7 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
     private MouseInput.State mouseInputState = MouseInput.initialState();
     private Selection selection = Selection.empty();
     private Selection hoveredHyperlink = Selection.empty();
+    private final SearchUi searchUi;
     private final StringProperty title;
     private final ObjectProperty<Runnable> onBell = new SimpleObjectProperty<>(this, "onBell");
     private final ObjectProperty<TerminalTheme> theme = new SimpleObjectProperty<>(this, "theme", TerminalTheme.defaults()) {
@@ -86,6 +87,12 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
         @Override
         public void set(Font value) {
             super.set(java.util.Objects.requireNonNull(value, "font"));
+        }
+    };
+    private final StringProperty searchPromptText = new SimpleStringProperty(this, "searchPromptText", "Type to search...") {
+        @Override
+        public void set(String value) {
+            super.set(Objects.requireNonNull(value, "searchPromptText"));
         }
     };
     private final ObjectBinding<TerminalFonts> terminalFonts = Bindings.createObjectBinding(() -> {
@@ -161,6 +168,11 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
                                 ? new KeyCodeCombination(KeyCode.A, KeyCombination.META_DOWN)
                                 : new KeyCodeCombination(KeyCode.A, KeyCombination.CONTROL_DOWN, KeyCombination.SHIFT_DOWN),
                         this::selectAll),
+                new Shortcut(
+                        inputPlatform == KeyInput.Platform.MACOS
+                                ? new KeyCodeCombination(KeyCode.F, KeyCombination.META_DOWN)
+                                : new KeyCodeCombination(KeyCode.F, KeyCombination.CONTROL_DOWN, KeyCombination.SHIFT_DOWN),
+                        this::toggleSearch),
                 new Shortcut(new KeyCodeCombination(KeyCode.LEFT, KeyCombination.SHIFT_DOWN), this::extendSelectionLeft),
                 new Shortcut(new KeyCodeCombination(KeyCode.RIGHT, KeyCombination.SHIFT_DOWN), this::extendSelectionRight),
                 new Shortcut(new KeyCodeCombination(KeyCode.UP, KeyCombination.SHIFT_DOWN), this::extendSelectionUp),
@@ -199,11 +211,24 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
         }
 
         setFocusTraversable(true);
+        searchUi = new SearchUi(
+                terminalSession,
+                font,
+                searchPromptText,
+                widthProperty(),
+                () -> closeSearch(),
+                this::redraw,
+                this::searchMatchesAffectViewport,
+                this::scrollSearchMatchIntoView);
+        applySearchTheme();
         getChildren().add(canvas);
         AnchorPane.setTopAnchor(canvas, 0.0);
         AnchorPane.setRightAnchor(canvas, 0.0);
         AnchorPane.setBottomAnchor(canvas, 0.0);
         AnchorPane.setLeftAnchor(canvas, 0.0);
+        getChildren().add(searchUi.view());
+        AnchorPane.setTopAnchor(searchUi.view(), 8.0);
+        AnchorPane.setRightAnchor(searchUi.view(), 8.0);
         widthProperty().addListener((_, _, _) -> handleResize());
         heightProperty().addListener((_, _, _) -> handleResize());
         resize(prefWidth(-1), prefHeight(-1));
@@ -211,6 +236,7 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
         terminalFonts.addListener((_, _, _) -> redraw());
         theme.addListener((_, _, value) -> {
             terminalSession.applyTheme(value);
+            applySearchTheme();
             redraw();
         });
         focusedProperty().addListener((_, _, focused) -> handleFocusChange(focused));
@@ -252,6 +278,18 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
 
     public ObjectProperty<Font> fontProperty() {
         return font;
+    }
+
+    public String getSearchPromptText() {
+        return searchPromptText.get();
+    }
+
+    public void setSearchPromptText(String value) {
+        searchPromptText.set(value);
+    }
+
+    public StringProperty searchPromptTextProperty() {
+        return searchPromptText;
     }
 
     public TerminalTheme getTheme() {
@@ -322,6 +360,7 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
     public void close() {
         // Closing the view is a process-lifecycle operation only. Native terminal state stays available until the
         // view itself becomes unreachable so the last rendered view can still be queried or shown.
+        searchUi.cancel();
         ptySession.close();
     }
 
@@ -333,6 +372,10 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
         }
 
         writeCommand(new PtySession.ResizePty(size.columns(), size.rows()));
+        if (searchUi.visible()) {
+            searchUi.refresh(false);
+            return;
+        }
         redraw();
     }
 
@@ -356,6 +399,11 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
     }
 
     private void handleKeyPressed(KeyEvent event) {
+        if (searchUi.visible() && event.getCode() == KeyCode.ESCAPE) {
+            closeSearch();
+            event.consume();
+            return;
+        }
         if (handleShortcut(event) || applyTransition(KeyInput.onKeyPressed(
                 keyInputState,
                 inputPlatform,
@@ -1109,6 +1157,48 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
         return true;
     }
 
+    public boolean toggleSearch() {
+        if (searchUi.visible()) {
+            closeSearch();
+            return true;
+        }
+
+        var selected = selection.isEmpty() ? "" : selectedText();
+        clearSelection();
+        searchUi.open(selected);
+        return true;
+    }
+
+    public boolean closeSearch() {
+        if (!searchUi.visible()) {
+            return false;
+        }
+        searchUi.close();
+        requestFocus();
+        redraw();
+        return true;
+    }
+
+    public boolean searchNext() {
+        return searchUi.selectNext(true);
+    }
+
+    public boolean searchPrevious() {
+        return searchUi.selectPrevious(true);
+    }
+
+    public String getSearchText() {
+        return searchUi.text();
+    }
+
+    public int getSearchMatchCount() {
+        return searchUi.matchCount();
+    }
+
+    public int getSelectedSearchMatchIndex() {
+        return searchUi.selectedMatch();
+    }
+
     private boolean scrollViewportWithoutSelection(long deltaRows) {
         var scrollbar = scrollbarInfo();
         if (!viewportScrollAvailable(scrollbar) || deltaRows == 0) {
@@ -1122,6 +1212,39 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
 
         scrollViewportTo(nextOffset, scrollbar);
         return true;
+    }
+
+    private boolean searchMatchesAffectViewport(List<Selection> matches) {
+        var scrollbar = scrollbarInfo();
+        if (scrollbar == null || scrollbar.visible() <= 0) {
+            return !matches.isEmpty();
+        }
+
+        var viewportTop = scrollbar.offset();
+        var viewportBottom = viewportTop + scrollbar.visible() - 1;
+        for (var match : matches) {
+            var normalized = match.normalized();
+            if (normalized.from().y() <= viewportBottom && normalized.to().y() >= viewportTop) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private void scrollSearchMatchIntoView(Selection match) {
+        var scrollbar = scrollbarInfo();
+        if (scrollbar == null || scrollbar.visible() <= 0) {
+            return;
+        }
+
+        var row = match.normalized().from().y();
+        var viewportTop = scrollbar.offset();
+        var viewportBottom = viewportTop + scrollbar.visible() - 1;
+        if (row < viewportTop) {
+            scrollViewportTo(row, scrollbar);
+        } else if (row > viewportBottom) {
+            scrollViewportTo(row - scrollbar.visible() + 1, scrollbar);
+        }
     }
 
     private boolean viewportScrollAvailable(TerminalSession.ScrollbarInfo scrollbar) {
@@ -1161,6 +1284,10 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
             selection = Selection.empty();
             redraw();
         }
+    }
+
+    private void applySearchTheme() {
+        searchUi.applyTheme(getTheme());
     }
 
     private boolean applyTransition(KeyInput.Transition transition) {
@@ -1231,6 +1358,8 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
                 keyInputState.preedit(),
                 selection,
                 hoveredHyperlink,
+                searchUi.visible() ? searchUi.result() : TerminalSession.SearchResult.empty(),
+                searchUi.visible() ? searchUi.selectedMatch() : -1,
                 isFocused(),
                 getTheme(),
                 scrollbarReservedWidthPx(),
@@ -1278,7 +1407,11 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
 
                 if (bytes.length != 0) {
                     terminal.terminalSession.writeToTerminal(bytes);
-                    terminal.redraw();
+                    if (terminal.searchUi.visible()) {
+                        terminal.searchUi.refresh();
+                    } else {
+                        terminal.redraw();
+                    }
                 }
             }
             if (outputs.get(outputs.size() - 1) instanceof PtySession.Closed) {

@@ -3,6 +3,7 @@ package io.github.vlaaad.ghosttyfx;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.fail;
 
@@ -21,7 +22,10 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Pattern;
 import javafx.application.Platform;
 import javafx.event.Event;
+import javafx.event.EventTarget;
 import javafx.event.EventType;
+import javafx.scene.Scene;
+import javafx.scene.control.Button;
 import javafx.scene.input.KeyCode;
 import javafx.scene.input.Clipboard;
 import javafx.scene.input.DataFormat;
@@ -30,10 +34,15 @@ import javafx.scene.input.KeyCodeCombination;
 import javafx.scene.input.KeyCombination;
 import javafx.scene.input.MouseButton;
 import javafx.scene.input.MouseEvent;
+import javafx.scene.control.Label;
+import javafx.scene.control.TextField;
+import javafx.scene.layout.HBox;
+import javafx.scene.layout.VBox;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.BeforeAll;
 import javafx.scene.paint.Color;
 import javafx.scene.text.Font;
+import javafx.stage.Stage;
 
 final class TerminalViewTest {
     private static final Duration START_TIMEOUT = Duration.ofSeconds(15);
@@ -106,7 +115,9 @@ final class TerminalViewTest {
                     Color.DARKBLUE,
                     Color.WHITE,
                     0.5,
-                    Color.gray(0.25));
+                    Color.gray(0.25),
+                    Color.YELLOW,
+                    Color.ORANGE);
             runOnFxThread(() -> {
                 view.setTheme(theme);
                 assertEquals(theme, view.getTheme());
@@ -134,6 +145,9 @@ final class TerminalViewTest {
                 assertTrue(combinations.contains(isMac()
                         ? new KeyCodeCombination(KeyCode.A, KeyCombination.META_DOWN)
                         : new KeyCodeCombination(KeyCode.A, KeyCombination.CONTROL_DOWN, KeyCombination.SHIFT_DOWN)));
+                assertTrue(combinations.contains(isMac()
+                        ? new KeyCodeCombination(KeyCode.F, KeyCombination.META_DOWN)
+                        : new KeyCodeCombination(KeyCode.F, KeyCombination.CONTROL_DOWN, KeyCombination.SHIFT_DOWN)));
                 assertTrue(combinations.contains(new KeyCodeCombination(KeyCode.PAGE_UP, KeyCombination.SHIFT_DOWN)));
                 assertTrue(combinations.contains(new KeyCodeCombination(KeyCode.END, KeyCombination.SHIFT_DOWN)));
                 assertTrue(combinations.contains(isMac()
@@ -269,6 +283,235 @@ final class TerminalViewTest {
     }
 
     @Test
+    void searchUsesSelectionAsInitialQueryAndNavigatesMatches() throws Exception {
+        var marker = "ghosttyfx-search";
+        var output = marker + "\nother\n" + marker;
+        var tempDirectory = Files.createTempDirectory("ghosttyfx-search-test-");
+        var pidFile = tempDirectory.resolve("shell.pid");
+        var shell = discoverOutputShell(pidFile, output);
+
+        try (var view = GhosttyFx.create(shell.command(), tempDirectory, System.getenv())) {
+            await("terminal output to become searchable", START_TIMEOUT, () -> runOnFxThread(() -> {
+                fireShortcut(view, selectAllShortcut());
+                var text = view.getInputMethodRequests().getSelectedText();
+                return text != null && text.contains(marker) ? Optional.of(Boolean.TRUE) : Optional.empty();
+            }));
+
+            runOnFxThread(() -> {
+                dragSelection(view, 0, marker.length() - 1);
+                assertEquals(marker, view.getInputMethodRequests().getSelectedText());
+
+                assertTrue(view.toggleSearch());
+                assertEquals(marker, view.getSearchText());
+                assertEquals("...", ((Label) view.lookup("#ghosttyfx-search-count")).getText());
+                return null;
+            });
+
+            await("search matches", START_TIMEOUT, () -> runOnFxThread(() ->
+                    view.getSearchMatchCount() == 2 ? Optional.of(Boolean.TRUE) : Optional.empty()));
+
+            runOnFxThread(() -> {
+                assertEquals(2, view.getSearchMatchCount());
+                assertEquals(0, view.getSelectedSearchMatchIndex());
+
+                assertTrue(view.searchNext());
+                assertEquals(1, view.getSelectedSearchMatchIndex());
+                assertTrue(view.searchPrevious());
+                assertEquals(0, view.getSelectedSearchMatchIndex());
+
+                fireShortcut(view, new KeyCodeCombination(KeyCode.ESCAPE));
+                assertEquals(-1, view.getSelectedSearchMatchIndex());
+                return null;
+            });
+        }
+    }
+
+    @Test
+    void searchMatchesSelectedCombiningGraphemeText() throws Exception {
+        var marker = "e\u0301a";
+        var output = marker + "\nother\n" + marker;
+        var tempDirectory = Files.createTempDirectory("ghosttyfx-search-grapheme-test-");
+        var pidFile = tempDirectory.resolve("shell.pid");
+        var shell = discoverOutputShell(pidFile, output);
+
+        try (var view = GhosttyFx.create(shell.command(), tempDirectory, System.getenv())) {
+            await("terminal grapheme output to become searchable", START_TIMEOUT, () -> runOnFxThread(() -> {
+                fireShortcut(view, selectAllShortcut());
+                var text = view.getInputMethodRequests().getSelectedText();
+                return text != null && text.contains(marker) ? Optional.of(Boolean.TRUE) : Optional.empty();
+            }));
+
+            runOnFxThread(() -> {
+                dragSelection(view, 0, 1);
+                assertEquals(marker, view.getInputMethodRequests().getSelectedText());
+                assertTrue(view.toggleSearch());
+                assertEquals(marker, view.getSearchText());
+                assertEquals("...", ((Label) view.lookup("#ghosttyfx-search-count")).getText());
+                return null;
+            });
+
+            await("grapheme search matches", START_TIMEOUT, () -> runOnFxThread(() ->
+                    view.getSearchMatchCount() == 2 ? Optional.of(Boolean.TRUE) : Optional.empty()));
+
+            runOnFxThread(() -> {
+                assertEquals(2, view.getSearchMatchCount());
+                assertEquals(0, view.getSelectedSearchMatchIndex());
+                return null;
+            });
+        }
+    }
+
+    @Test
+    void searchMatchesSelectedWideGraphemeText() throws Exception {
+        var marker = "界a";
+        var output = marker + "\nother\n" + marker;
+        var tempDirectory = Files.createTempDirectory("ghosttyfx-search-wide-test-");
+        var pidFile = tempDirectory.resolve("shell.pid");
+        var shell = discoverOutputShell(pidFile, output);
+
+        try (var view = GhosttyFx.create(shell.command(), tempDirectory, System.getenv())) {
+            await("terminal wide output to become searchable", START_TIMEOUT, () -> runOnFxThread(() -> {
+                fireShortcut(view, selectAllShortcut());
+                var text = view.getInputMethodRequests().getSelectedText();
+                return text != null && text.contains(marker) ? Optional.of(Boolean.TRUE) : Optional.empty();
+            }));
+
+            runOnFxThread(() -> {
+                dragSelection(view, 0, 2);
+                assertEquals(marker, view.getInputMethodRequests().getSelectedText());
+                assertTrue(view.toggleSearch());
+                assertEquals(marker, view.getSearchText());
+                assertEquals("...", ((Label) view.lookup("#ghosttyfx-search-count")).getText());
+                return null;
+            });
+
+            await("wide search matches", START_TIMEOUT, () -> runOnFxThread(() ->
+                    view.getSearchMatchCount() == 2 ? Optional.of(Boolean.TRUE) : Optional.empty()));
+
+            runOnFxThread(() -> {
+                assertEquals(2, view.getSearchMatchCount());
+                assertEquals(0, view.getSelectedSearchMatchIndex());
+                return null;
+            });
+        }
+    }
+
+    @Test
+    void searchFieldUpdatesMatchesAndConsumesEnterShortcuts() throws Exception {
+        var output = "alpha\nbeta\nalpha";
+        var tempDirectory = Files.createTempDirectory("ghosttyfx-search-field-test-");
+        var pidFile = tempDirectory.resolve("shell.pid");
+        var shell = discoverOutputShell(pidFile, output);
+
+        try (var view = GhosttyFx.create(shell.command(), tempDirectory, System.getenv())) {
+            await("terminal output to become searchable", START_TIMEOUT, () -> runOnFxThread(() -> {
+                fireShortcut(view, selectAllShortcut());
+                var text = view.getInputMethodRequests().getSelectedText();
+                return text != null && text.contains("beta") ? Optional.of(Boolean.TRUE) : Optional.empty();
+            }));
+
+            var stageRef = new AtomicReference<Stage>();
+            try {
+                runOnFxThread(() -> {
+                    var other = new Button("Other");
+                    var stage = new Stage();
+                    stageRef.set(stage);
+                    stage.setScene(new Scene(new VBox(view, other), view.prefWidth(-1), view.prefHeight(-1) + 40));
+                    stage.show();
+                    fireShortcut(view, searchShortcut());
+                    var search = (HBox) view.lookup("#ghosttyfx-search");
+                    var count = (Label) view.lookup("#ghosttyfx-search-count");
+                    var field = (TextField) view.lookup("#ghosttyfx-search-field");
+                    assertSame(field, search.getChildren().getFirst());
+                    assertSame(count, search.getChildren().get(1));
+                    assertEquals(0, search.getMinWidth());
+                    assertEquals(search.getPrefWidth(), search.getMaxWidth());
+                    assertTrue(search.getPrefWidth() <= 320);
+                    view.resize(220, view.getHeight());
+                    assertTrue(search.getPrefWidth() < 320);
+                    assertTrue(field.getBorder().getStrokes().isEmpty());
+                    assertEquals("Type to search...", view.getSearchPromptText());
+                    assertEquals("Type to search...", field.getPromptText());
+                    view.setSearchPromptText("Find in terminal");
+                    assertEquals("Find in terminal", field.getPromptText());
+                    assertThrows(NullPointerException.class, () -> view.setSearchPromptText(null));
+                    assertThrows(NullPointerException.class, () -> view.searchPromptTextProperty().set(null));
+                    field.setText("");
+                    assertTrue(count.isManaged());
+                    assertTrue(count.isVisible());
+                    assertEquals("0/0", count.getText());
+                    field.setText("alpha");
+                    assertEquals("...", count.getText());
+                    return null;
+                });
+
+                await("search matches", START_TIMEOUT, () -> runOnFxThread(() ->
+                        view.getSearchMatchCount() == 2 ? Optional.of(Boolean.TRUE) : Optional.empty()));
+
+                runOnFxThread(() -> {
+                    var other = (Button) ((VBox) view.getParent()).getChildren().get(1);
+                    var count = (Label) view.lookup("#ghosttyfx-search-count");
+                    var field = (TextField) view.lookup("#ghosttyfx-search-field");
+                    var search = (HBox) view.lookup("#ghosttyfx-search");
+                    assertEquals(2, view.getSearchMatchCount());
+                    assertEquals(0, view.getSelectedSearchMatchIndex());
+                    assertEquals("1/2", count.getText());
+                    assertTrue(count.isManaged());
+                    assertTrue(count.isVisible());
+                    assertEquals(Label.USE_PREF_SIZE, count.getMinWidth());
+                    assertEquals(Label.USE_COMPUTED_SIZE, count.getMaxWidth());
+
+                    var font = Font.font("Monospaced", field.getFont().getSize() + 3);
+                    view.setFont(font);
+                    assertEquals(font, field.getFont());
+                    assertEquals(font, count.getFont());
+
+                    var next = keyEvent(new KeyCodeCombination(KeyCode.ENTER));
+                    field.fireEvent(next);
+                    assertEquals(1, view.getSelectedSearchMatchIndex());
+                    field.fireEvent(keyEvent(new KeyCodeCombination(KeyCode.ENTER)));
+                    assertEquals(1, view.getSelectedSearchMatchIndex());
+
+                    var previous = keyEvent(new KeyCodeCombination(KeyCode.ENTER, KeyCombination.SHIFT_DOWN));
+                    field.fireEvent(previous);
+                    assertEquals(0, view.getSelectedSearchMatchIndex());
+                    field.fireEvent(keyEvent(new KeyCodeCombination(KeyCode.ENTER, KeyCombination.SHIFT_DOWN)));
+                    assertEquals(0, view.getSelectedSearchMatchIndex());
+
+                    field.positionCaret(2);
+                    var down = keyEvent(new KeyCodeCombination(KeyCode.DOWN));
+                    field.fireEvent(down);
+                    assertEquals(1, view.getSelectedSearchMatchIndex());
+                    assertEquals(2, field.getCaretPosition());
+                    field.fireEvent(keyEvent(new KeyCodeCombination(KeyCode.DOWN)));
+                    assertEquals(1, view.getSelectedSearchMatchIndex());
+                    assertEquals(2, field.getCaretPosition());
+
+                    var up = keyEvent(new KeyCodeCombination(KeyCode.UP));
+                    field.fireEvent(up);
+                    assertEquals(0, view.getSelectedSearchMatchIndex());
+                    assertEquals(2, field.getCaretPosition());
+                    field.fireEvent(keyEvent(new KeyCodeCombination(KeyCode.UP)));
+                    assertEquals(0, view.getSelectedSearchMatchIndex());
+                    assertEquals(2, field.getCaretPosition());
+                    other.requestFocus();
+                    assertFalse(field.isFocused());
+                    assertFalse(search.isVisible());
+                    return null;
+                });
+            } finally {
+                runOnFxThread(() -> {
+                    var stage = stageRef.get();
+                    if (stage != null) {
+                        stage.close();
+                    }
+                    return null;
+                });
+            }
+        }
+    }
+
+    @Test
     void ctrlCCopyClearsSelection() throws Exception {
         var marker = "ghosttyfx-copy-shortcut";
         var tempDirectory = Files.createTempDirectory("ghosttyfx-copy-test-");
@@ -320,6 +563,47 @@ final class TerminalViewTest {
 
                 var remainingSelection = runOnFxThread(() -> view.getInputMethodRequests().getSelectedText());
                 assertTrue(selectedText.equals(remainingSelection), "Expected terminal contents to remain readable after close()");
+                awaitProcessStop(handle);
+            } finally {
+                if (handle.isAlive()) {
+                    handle.destroyForcibly();
+                }
+            }
+        }
+    }
+
+    @Test
+    void closeCanRunOffFxThreadWhileSearchIsVisible() throws Exception {
+        var marker = "ghosttyfx-close-search";
+        var tempDirectory = Files.createTempDirectory("ghosttyfx-close-search-test-");
+        var pidFile = tempDirectory.resolve("shell.pid");
+        var shell = discoverOutputShell(pidFile, marker);
+        try (var view = GhosttyFx.create(shell.command(), tempDirectory, System.getenv())) {
+            var handle = await("shell process to start", START_TIMEOUT, () -> readAliveProcess(pidFile));
+            try {
+                await("terminal output to become searchable", START_TIMEOUT, () -> runOnFxThread(() -> {
+                    fireShortcut(view, selectAllShortcut());
+                    var text = view.getInputMethodRequests().getSelectedText();
+                    return text != null && text.contains(marker) ? Optional.of(Boolean.TRUE) : Optional.empty();
+                }));
+                runOnFxThread(() -> {
+                    assertTrue(view.toggleSearch());
+                    assertTrue(view.lookup("#ghosttyfx-search").isVisible());
+                    return null;
+                });
+
+                var failure = new AtomicReference<Throwable>();
+                var thread = Thread.ofVirtual().name("ghosttyfx-stage-close-test").start(() -> {
+                    try {
+                        view.close();
+                    } catch (Throwable throwable) {
+                        failure.set(throwable);
+                    }
+                });
+                thread.join(STOP_TIMEOUT);
+                if (failure.get() != null) {
+                    fail(failure.get());
+                }
                 awaitProcessStop(handle);
             } finally {
                 if (handle.isAlive()) {
@@ -396,12 +680,24 @@ final class TerminalViewTest {
                 : new KeyCodeCombination(KeyCode.A, KeyCombination.CONTROL_DOWN, KeyCombination.SHIFT_DOWN);
     }
 
-    private static KeyEvent fireShortcut(TerminalView view, KeyCombination shortcut) {
+    private static KeyCombination searchShortcut() {
+        return isMac()
+                ? new KeyCodeCombination(KeyCode.F, KeyCombination.META_DOWN)
+                : new KeyCodeCombination(KeyCode.F, KeyCombination.CONTROL_DOWN, KeyCombination.SHIFT_DOWN);
+    }
+
+    private static KeyEvent fireShortcut(EventTarget target, KeyCombination shortcut) {
+        var event = keyEvent(shortcut);
+        Event.fireEvent(target, event);
+        return event;
+    }
+
+    private static KeyEvent keyEvent(KeyCombination shortcut) {
         if (!(shortcut instanceof KeyCodeCombination combination)) {
             throw new IllegalArgumentException("Expected key-code shortcut, got: " + shortcut);
         }
 
-        var event = new KeyEvent(
+        return new KeyEvent(
                 KeyEvent.KEY_PRESSED,
                 "",
                 "",
@@ -410,8 +706,6 @@ final class TerminalViewTest {
                 modifierDown(combination.getControl()) || (shortcutDownOnCurrentPlatform(combination.getShortcut()) && !isMac()),
                 modifierDown(combination.getAlt()),
                 modifierDown(combination.getMeta()) || (shortcutDownOnCurrentPlatform(combination.getShortcut()) && isMac()));
-        Event.fireEvent(view, event);
-        return event;
     }
 
     private static void dragSelection(TerminalView view, int fromColumn, int toColumn) {

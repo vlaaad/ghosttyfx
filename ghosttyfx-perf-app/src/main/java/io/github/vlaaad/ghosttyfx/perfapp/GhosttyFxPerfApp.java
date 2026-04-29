@@ -19,6 +19,8 @@ import java.util.stream.Collectors;
 import javafx.animation.AnimationTimer;
 import javafx.application.Platform;
 import javafx.scene.Scene;
+import javafx.scene.Node;
+import javafx.scene.control.TextField;
 import javafx.scene.input.KeyCode;
 import javafx.scene.input.KeyEvent;
 import javafx.scene.layout.BorderPane;
@@ -104,7 +106,7 @@ public final class GhosttyFxPerfApp {
         if (comspec != null && !comspec.isBlank()) {
             addTerminal(result, seen, "COMSPEC", resolveExecutable(comspec));
         }
-        return List.copyOf(result);
+        return result;
     }
 
     private static List<TerminalOption> detectUnixTerminals() {
@@ -121,7 +123,7 @@ public final class GhosttyFxPerfApp {
         addTerminal(result, seen, "zsh", resolveExecutable("zsh"));
         addTerminal(result, seen, "fish", resolveExecutable("fish"));
         addTerminal(result, seen, "sh", resolveExecutable("sh"));
-        return List.copyOf(result);
+        return result;
     }
 
     private static void addTerminal(
@@ -205,8 +207,8 @@ public final class GhosttyFxPerfApp {
         return null;
     }
 
-    private static KeyEvent keyPressed(PerfConfig config) {
-        return new KeyEvent(KeyEvent.KEY_PRESSED, "", "", config.repeatKeyCode(), false, false, false, false);
+    private static KeyEvent keyPressed(KeyCode keyCode) {
+        return new KeyEvent(KeyEvent.KEY_PRESSED, "", "", keyCode, false, false, false, false);
     }
 
     private static KeyEvent keyTyped(String text) {
@@ -221,13 +223,13 @@ public final class GhosttyFxPerfApp {
                 false);
     }
 
-    private static KeyEvent keyReleased(PerfConfig config) {
-        return new KeyEvent(KeyEvent.KEY_RELEASED, "", "", config.repeatKeyCode(), false, false, false, false);
+    private static KeyEvent keyReleased(KeyCode keyCode) {
+        return new KeyEvent(KeyEvent.KEY_RELEASED, "", "", keyCode, false, false, false, false);
     }
 
-    private static long dispatch(TerminalView view, KeyEvent event) {
+    private static long dispatch(Node target, KeyEvent event) {
         var start = System.nanoTime();
-        view.fireEvent(event);
+        target.fireEvent(event);
         return System.nanoTime() - start;
     }
 
@@ -261,7 +263,8 @@ public final class GhosttyFxPerfApp {
             double viewHeight) throws IOException {
         var report = new ArrayList<String>();
         var runSeconds = recorder.runDurationNs() / 1_000_000_000d;
-        var repeatThroughput = runSeconds == 0 ? 0 : config.repeatCount() / runSeconds;
+        var runInputCount = config.scenario() == Scenario.SEARCH_FIELD ? config.searchQuery().length() : config.repeatCount();
+        var repeatThroughput = runSeconds == 0 ? 0 : runInputCount / runSeconds;
         var runDispatchCount = recorder.repeatDispatchNs().size() + recorder.releaseDispatchNs().size();
         var eventThroughput = runSeconds == 0 ? 0 : runDispatchCount / runSeconds;
         var baseline = summarizePhase(recorder.baselinePulseNs());
@@ -275,15 +278,15 @@ public final class GhosttyFxPerfApp {
         report.add("- Command: `" + terminal.command().stream().map(GhosttyFxPerfApp::escapeBackticks).collect(Collectors.joining(" ")) + "`");
         report.add("- Working directory: `" + escapeBackticks(config.cwd().toString()) + "`");
         report.add("- View size: " + Math.round(viewWidth) + "x" + Math.round(viewHeight));
-        report.add("- Scenario: type `" + escapeBackticks(config.preludeText()) + "` then hold `" + config.repeatKeyCode() + "`");
-        report.add("- Repeats: " + config.repeatCount());
+        report.add("- Scenario: " + config.scenario().description(config));
+        report.add("- Run inputs: " + runInputCount);
         report.add("- Batch size per pulse: " + config.batchSize());
         report.add("- Prelude settle: " + config.preludeSettleDuration().toMillis() + " ms");
         report.add("");
         report.add("## Summary");
         report.add("");
         report.add("- Run duration: " + DECIMAL.format(runSeconds) + " s");
-        report.add("- Repeat throughput: " + DECIMAL.format(repeatThroughput) + " repeats/s");
+        report.add("- Input throughput: " + DECIMAL.format(repeatThroughput) + " inputs/s");
         report.add("- Dispatch throughput: " + DECIMAL.format(eventThroughput) + " events/s");
         report.add("- Dispatch samples: " + recorder.dispatchSampleCount());
         report.add("- Prelude dispatch samples: " + recorder.textDispatchNs().size());
@@ -295,7 +298,7 @@ public final class GhosttyFxPerfApp {
         report.add("| Event | Count | Avg ms | P50 ms | P95 ms | P99 ms | Max ms |");
         report.add("| --- | ---: | ---: | ---: | ---: | ---: | ---: |");
         report.add(summaryRow("prelude-text", summarize(recorder.textDispatchNs())));
-        report.add(summaryRow("repeat-press", summarize(recorder.repeatDispatchNs())));
+        report.add(summaryRow("run-input", summarize(recorder.repeatDispatchNs())));
         report.add(summaryRow("release", summarize(recorder.releaseDispatchNs())));
         report.add("");
         report.add("## Pulses");
@@ -314,7 +317,7 @@ public final class GhosttyFxPerfApp {
         Files.writeString(config.outputDirectory().resolve("summary.md"), String.join(System.lineSeparator(), report));
         System.out.println("GhosttyFX perf report written to " + config.outputDirectory().resolve("summary.md"));
         System.out.println("Run duration: " + DECIMAL.format(runSeconds) + " s");
-        System.out.println("Repeat throughput: " + DECIMAL.format(repeatThroughput) + " repeats/s");
+        System.out.println("Input throughput: " + DECIMAL.format(repeatThroughput) + " inputs/s");
         System.out.println("Run pulse P95: " + DECIMAL.format(run.summary().p95Ms()) + " ms");
         System.out.println("Run pulse max: " + DECIMAL.format(run.summary().maxMs()) + " ms");
     }
@@ -391,6 +394,9 @@ public final class GhosttyFxPerfApp {
     private enum Phase {
         STARTUP,
         BASELINE,
+        LOAD_OUTPUT,
+        OUTPUT_SETTLE,
+        OPEN_SEARCH,
         PRELUDE,
         SETTLE,
         RUN,
@@ -400,7 +406,26 @@ public final class GhosttyFxPerfApp {
     private enum DispatchKind {
         TEXT,
         REPEAT,
-        RELEASE
+        RELEASE,
+        SEARCH
+    }
+
+    private enum Scenario {
+        REPEAT_INPUT {
+            @Override
+            String description(PerfConfig config) {
+                return "type `" + escapeBackticks(config.preludeText()) + "` then hold `" + config.repeatKeyCode() + "`";
+            }
+        },
+        SEARCH_FIELD {
+            @Override
+            String description(PerfConfig config) {
+                return "load " + config.searchOutputLines() + " terminal lines then type search query `"
+                        + escapeBackticks(config.searchQuery()) + "`";
+            }
+        };
+
+        abstract String description(PerfConfig config);
     }
 
     private record TerminalOption(String label, List<String> command) {
@@ -418,7 +443,10 @@ public final class GhosttyFxPerfApp {
             Duration preludeSettleDuration,
             Duration cooldownDuration,
             KeyCode repeatKeyCode,
-            String preludeText) {
+            String preludeText,
+            Scenario scenario,
+            int searchOutputLines,
+            String searchQuery) {
 
         static PerfConfig load() {
             var cwd = Path.of(System.getProperty("ghosttyfx.perf.cwd", System.getProperty("user.dir", ".")))
@@ -439,8 +467,14 @@ public final class GhosttyFxPerfApp {
             var cooldownDuration = durationProperty("ghosttyfx.perf.cooldownMillis", 1_000, 0);
             var repeatKeyCode = KeyCode.valueOf(System.getProperty("ghosttyfx.perf.repeatKeyCode", "TAB").toUpperCase(Locale.ROOT));
             var preludeText = System.getProperty("ghosttyfx.perf.preludeText", "cd ");
+            var scenario = Scenario.valueOf(System.getProperty("ghosttyfx.perf.scenario", "REPEAT_INPUT").toUpperCase(Locale.ROOT));
+            var searchOutputLines = intProperty("ghosttyfx.perf.searchOutputLines", 20_000, 1);
+            var searchQuery = System.getProperty("ghosttyfx.perf.searchQuery", "needle");
             if (preludeText.isEmpty()) {
                 throw new IllegalArgumentException("ghosttyfx.perf.preludeText must not be empty");
+            }
+            if (searchQuery.isEmpty()) {
+                throw new IllegalArgumentException("ghosttyfx.perf.searchQuery must not be empty");
             }
             return new PerfConfig(
                     cwd,
@@ -454,7 +488,10 @@ public final class GhosttyFxPerfApp {
                     preludeSettleDuration,
                     cooldownDuration,
                     repeatKeyCode,
-                    preludeText);
+                    preludeText,
+                    scenario,
+                    searchOutputLines,
+                    searchQuery);
         }
 
         private static int intProperty(String name, int defaultValue, int minimum) {
@@ -494,6 +531,7 @@ public final class GhosttyFxPerfApp {
                 case TEXT -> textDispatchNs.add(durationNs);
                 case REPEAT -> repeatDispatchNs.add(durationNs);
                 case RELEASE -> releaseDispatchNs.add(durationNs);
+                case SEARCH -> repeatDispatchNs.add(durationNs);
             }
             dispatchSamples.add(kind.name().toLowerCase(Locale.ROOT) + "," + durationNs);
         }
@@ -503,7 +541,7 @@ public final class GhosttyFxPerfApp {
                 case BASELINE -> baselinePulseNs.add(intervalNs);
                 case RUN -> runPulseNs.add(intervalNs);
                 case COOLDOWN -> cooldownPulseNs.add(intervalNs);
-                case STARTUP, PRELUDE, SETTLE -> {
+                case STARTUP, LOAD_OUTPUT, OUTPUT_SETTLE, OPEN_SEARCH, PRELUDE, SETTLE -> {
                     return;
                 }
             }
@@ -606,6 +644,9 @@ public final class GhosttyFxPerfApp {
                 switch (phase) {
                     case STARTUP -> handleStartup(now);
                     case BASELINE -> handleBaseline(now);
+                    case LOAD_OUTPUT -> handleLoadOutput(now);
+                    case OUTPUT_SETTLE -> handleOutputSettle(now);
+                    case OPEN_SEARCH -> handleOpenSearch(now);
                     case PRELUDE -> handlePrelude(now);
                     case SETTLE -> handleSettle(now);
                     case RUN -> handleRun();
@@ -625,8 +666,30 @@ public final class GhosttyFxPerfApp {
 
         private void handleBaseline(long now) {
             if (now - phaseStartedNs >= config.baselineDuration().toNanos()) {
-                switchPhase(Phase.PRELUDE, now);
+                switchPhase(config.scenario() == Scenario.SEARCH_FIELD ? Phase.LOAD_OUTPUT : Phase.PRELUDE, now);
             }
+        }
+
+        private void handleLoadOutput(long now) {
+            var command = searchOutputCommand();
+            statusLog.write("load-output-lines=" + config.searchOutputLines());
+            statusLog.write("load-output-command=" + command);
+            dispatchText(view, recorder, command);
+            recorder.recordDispatch(DispatchKind.RELEASE, dispatch(view, keyPressed(KeyCode.ENTER)));
+            recorder.recordDispatch(DispatchKind.RELEASE, dispatch(view, keyReleased(KeyCode.ENTER)));
+            switchPhase(Phase.OUTPUT_SETTLE, now);
+        }
+
+        private void handleOutputSettle(long now) {
+            if (now - phaseStartedNs >= config.preludeSettleDuration().toNanos()) {
+                switchPhase(Phase.OPEN_SEARCH, now);
+            }
+        }
+
+        private void handleOpenSearch(long now) {
+            statusLog.write("open-search");
+            view.toggleSearch();
+            switchPhase(Phase.RUN, now);
         }
 
         private void handlePrelude(long now) {
@@ -647,9 +710,14 @@ public final class GhosttyFxPerfApp {
                 statusLog.write("run-start");
             }
 
+            if (config.scenario() == Scenario.SEARCH_FIELD) {
+                handleSearchRun();
+                return;
+            }
+
             var batch = Math.min(config.batchSize(), config.repeatCount() - repeatsSent);
             for (var i = 0; i < batch; i++) {
-                recorder.recordDispatch(DispatchKind.REPEAT, dispatch(view, keyPressed(config)));
+                recorder.recordDispatch(DispatchKind.REPEAT, dispatch(view, keyPressed(config.repeatKeyCode())));
                 repeatsSent++;
                 if (repeatsSent == 1 || repeatsSent == config.repeatCount() || repeatsSent % 100 == 0) {
                     statusLog.write("repeats=" + repeatsSent);
@@ -657,10 +725,36 @@ public final class GhosttyFxPerfApp {
             }
 
             if (repeatsSent == config.repeatCount()) {
-                recorder.recordDispatch(DispatchKind.RELEASE, dispatch(view, keyReleased(config)));
+                recorder.recordDispatch(DispatchKind.RELEASE, dispatch(view, keyReleased(config.repeatKeyCode())));
                 recorder.markRunEnd();
                 switchPhase(Phase.COOLDOWN, lastPulseNs);
             }
+        }
+
+        private void handleSearchRun() {
+            var field = (TextField) view.lookup("#ghosttyfx-search-field");
+            var query = config.searchQuery();
+            var batch = Math.min(config.batchSize(), query.length() - repeatsSent);
+            for (var i = 0; i < batch; i++) {
+                var text = query.substring(repeatsSent, repeatsSent + 1);
+                recorder.recordDispatch(DispatchKind.SEARCH, dispatch(field, keyTyped(text)));
+                repeatsSent++;
+                statusLog.write("search-chars=" + repeatsSent);
+            }
+
+            if (repeatsSent == query.length()) {
+                recorder.markRunEnd();
+                switchPhase(Phase.COOLDOWN, lastPulseNs);
+            }
+        }
+
+        private String searchOutputCommand() {
+            var lines = config.searchOutputLines();
+            var os = System.getProperty("os.name", "").toLowerCase(Locale.ROOT);
+            if (os.contains("win")) {
+                return "1.." + lines + " | ForEach-Object { \"line $_ alpha beta needle gamma\" }";
+            }
+            return "for i in $(seq 1 " + lines + "); do printf 'line %s alpha beta needle gamma\\n' \"$i\"; done";
         }
 
         private void handleCooldown(long now) {

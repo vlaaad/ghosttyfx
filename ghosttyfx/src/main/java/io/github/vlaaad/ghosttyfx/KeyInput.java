@@ -86,7 +86,7 @@ final class KeyInput {
                 false);
         var deferred = new ArrayList<>(nextState.deferredPresses());
         deferred.add(pending);
-        return new Transition(nextState.withDeferredPresses(List.copyOf(deferred)), List.of(), false, true);
+        return new Transition(nextState.withDeferredPresses(deferred), List.of(), false, true);
     }
 
     static Transition onKeyReleased(State state, KeySnapshot event) {
@@ -158,12 +158,12 @@ final class KeyInput {
                             0,
                             "",
                             false));
-                    return new Transition(nextState, List.copyOf(outputs), false, false);
+                    return new Transition(nextState, outputs, false, false);
                 }
 
                 return new Transition(
                         nextState.withEmittedKeys(addEmitted(state.emittedKeys(), pending.code())),
-                        List.copyOf(outputs),
+                        outputs,
                         false,
                         false);
             }
@@ -208,7 +208,7 @@ final class KeyInput {
                 ? Preedit.empty()
                 : new Preedit(composedText, caretPosition);
         var redraw = !nextState.preedit().equals(preedit);
-        return new Transition(nextState.withPreedit(preedit), List.copyOf(outputs), redraw, committed);
+        return new Transition(nextState.withPreedit(preedit), outputs, redraw, committed);
     }
 
     static State onFocusLost(State state) {
@@ -460,7 +460,7 @@ final class KeyInput {
     private static List<PendingPress> dropFirstDeferred(List<PendingPress> deferredPresses) {
         return deferredPresses.size() == 1
                 ? List.of()
-                : List.copyOf(deferredPresses.subList(1, deferredPresses.size()));
+                : deferredPresses.subList(1, deferredPresses.size());
     }
 
     private static boolean shouldEncodeImmediately(short mods, boolean altGrText, boolean macOptionText, boolean windowsAltNumpad) {
@@ -520,7 +520,7 @@ final class KeyInput {
             }
             updated.add(pending);
         }
-        return changed ? List.copyOf(updated) : deferredPresses;
+        return changed ? updated : deferredPresses;
     }
 
     private static Set<KeyCode> addEmitted(Set<KeyCode> emittedKeys, KeyCode code) {

@@ -17,11 +17,6 @@ Generated per-platform `jextract` bindings for `libghostty-vt`.
 
 ### v1
 11. Blinking: cursor visibility is respected, but there is no blink timer for blinking cursor or blinking text attributes.
-15. Search UI:
-  - find/highlight navigation in scrollback
-  - search selection
-  - next/previous result shortcuts: macOS `Cmd+G`, `Cmd+Shift+G`
-  - end search shortcut: `Esc`; macOS also `Cmd+Shift+F`
 16. Rich font rendering: grapheme handling exists, but JavaFX fillText per cell means no full terminal-grade shaping/ligatures/fallback behavior like Ghostty’s renderer.
 17. URL handling:
   - regex URL matching

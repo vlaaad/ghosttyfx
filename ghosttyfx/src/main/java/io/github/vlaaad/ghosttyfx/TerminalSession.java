@@ -7,6 +7,9 @@ import java.lang.foreign.SegmentAllocator;
 import java.lang.foreign.ValueLayout;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 
@@ -597,6 +600,61 @@ final class TerminalSession implements AutoCloseable {
         }
     }
 
+    SearchDocumentBuilder newSearchDocument() {
+        var columns = columnCount();
+        var rows = totalRowCount();
+        return new SearchDocumentBuilder(columns, rows);
+    }
+
+    boolean appendSearchRows(SearchDocumentBuilder document, long budgetNs) {
+        if (document.complete() || document.columns() <= 0 || document.rows() <= 0) {
+            document.complete = true;
+            return false;
+        }
+
+        var changed = false;
+        var start = System.nanoTime();
+        try (var arena = Arena.ofConfined()) {
+            do {
+                appendSearchRow(document, document.nextRow, arena);
+                document.nextRow++;
+                changed = true;
+            } while (document.nextRow < document.rows()
+                    && (budgetNs == Long.MAX_VALUE || System.nanoTime() - start < budgetNs));
+        }
+        document.complete = document.nextRow >= document.rows();
+        return changed;
+    }
+
+    static SearchBatch search(SearchDocumentBuilder index, String query, int searchedUntil) {
+        var searchLimit = index.text().length() - query.length() + 1;
+        if (searchLimit <= searchedUntil) {
+            return new SearchBatch(List.of(), searchedUntil);
+        }
+
+        var matches = new ArrayList<Selection>();
+        var fromIndex = Math.max(0, searchedUntil - Math.max(0, query.length() - 1));
+        while (fromIndex < searchLimit) {
+            var matchIndex = regionMatchesIgnoreCase(index.text(), fromIndex, query)
+                    ? fromIndex
+                    : -1;
+            if (matchIndex < 0) {
+                fromIndex++;
+                continue;
+            }
+
+            if (matchIndex >= searchedUntil) {
+                var start = nearestMappedPoint(index.points(), matchIndex, 1);
+                var end = nearestMappedPoint(index.points(), matchIndex + query.length() - 1, -1);
+                if (start != null && end != null) {
+                    matches.add(Selection.linear(start, end));
+                }
+            }
+            fromIndex = matchIndex + Math.max(1, query.length());
+        }
+        return new SearchBatch(matches, searchLimit);
+    }
+
     Selection selectAllSelection() {
         try (var arena = Arena.ofConfined()) {
             var cols = arena.allocate(ValueLayout.JAVA_SHORT);
@@ -884,6 +942,8 @@ final class TerminalSession implements AutoCloseable {
             KeyInput.Preedit preedit,
             Selection selection,
             Selection hoveredHyperlink,
+            SearchResult searchResult,
+            int selectedSearchMatch,
             boolean focused,
             TerminalTheme theme,
             double scrollbarWidthPx,
@@ -947,6 +1007,9 @@ final class TerminalSession implements AutoCloseable {
                     var screenPoint = new Selection.ScreenPoint(viewportX, viewportTop + viewportY);
                     var selected = contains(selection, screenPoint);
                     var hovered = contains(hoveredHyperlink, screenPoint);
+                    var searchMatch = searchResult.matchIndex(screenPoint);
+                    var searchHighlighted = searchMatch >= 0;
+                    var currentSearchMatch = searchMatch == selectedSearchMatch;
                     var preeditCell = cursor != null
                             && preeditCellCount > 0
                             && viewportY == cursor.y()
@@ -968,6 +1031,10 @@ final class TerminalSession implements AutoCloseable {
                                 ghostty_vt_h.GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_BG_COLOR(),
                                 background) == GHOSTTY_SUCCESS) {
                             graphics.setFill(toFxColor(background));
+                            graphics.fillRect(x, y, metrics.cellWidthPx(), metrics.cellHeightPx());
+                        }
+                        if (!selected && searchHighlighted) {
+                            graphics.setFill(searchHighlightColor(theme, currentSearchMatch));
                             graphics.fillRect(x, y, metrics.cellWidthPx(), metrics.cellHeightPx());
                         }
                         x += metrics.cellWidthPx();
@@ -1027,6 +1094,10 @@ final class TerminalSession implements AutoCloseable {
 
                     if (selected || hasBackground) {
                         graphics.setFill(selected ? theme.selectionColor() : toFxColor(background));
+                        graphics.fillRect(x, y, metrics.cellWidthPx(), metrics.cellHeightPx());
+                    }
+                    if (!selected && searchHighlighted) {
+                        graphics.setFill(searchHighlightColor(theme, currentSearchMatch));
                         graphics.fillRect(x, y, metrics.cellWidthPx(), metrics.cellHeightPx());
                     }
 
@@ -1238,6 +1309,40 @@ final class TerminalSession implements AutoCloseable {
         return ghostty_vt_h.ghostty_terminal_grid_ref(terminal, ghosttyPoint, outGridRef) == GHOSTTY_SUCCESS;
     }
 
+    private void appendSearchRow(SearchDocumentBuilder document, int row, Arena arena) {
+        var lastTextColumn = lastTextColumn(row, document.columns(), arena);
+        for (var column = 0; column <= lastTextColumn; column++) {
+            var point = new Selection.ScreenPoint(column, row);
+            var grapheme = cellGrapheme(point, arena);
+            if (grapheme.spacerCell()) {
+                continue;
+            }
+            if (grapheme.text().isEmpty()) {
+                document.text().append(' ');
+                document.points().add(point);
+            } else {
+                var start = document.text().length();
+                document.text().append(grapheme.text());
+                for (var i = start; i < document.text().length(); i++) {
+                    document.points().add(point);
+                }
+            }
+        }
+        if (row + 1 < document.rows() && !rowWrap(new Selection.ScreenPoint(Math.max(0, document.columns() - 1), row), arena)) {
+            document.text().append('\n');
+            document.points().add(null);
+        }
+    }
+
+    private int lastTextColumn(int row, int columns, Arena arena) {
+        for (var column = columns - 1; column >= 0; column--) {
+            if (cellCodePoint(new Selection.ScreenPoint(column, row), arena) != null) {
+                return column;
+            }
+        }
+        return -1;
+    }
+
     private Selection wordSelection(Selection.ScreenPoint point, boolean includeHyperlink) {
         try (var arena = Arena.ofConfined()) {
             return wordSelection(point, arena, includeHyperlink);
@@ -1308,6 +1413,51 @@ final class TerminalSession implements AutoCloseable {
                 ghostty_vt_h.ghostty_cell_get(cell.get(ValueLayout.JAVA_LONG, 0), ghostty_vt_h.GHOSTTY_CELL_DATA_CODEPOINT(), codePoint),
                 "ghostty_cell_get(codepoint)");
         return codePoint.get(ValueLayout.JAVA_INT, 0);
+    }
+
+    private CellGrapheme cellGrapheme(Selection.ScreenPoint point, Arena arena) {
+        var gridRef = gridRef(point, arena);
+        if (gridRef == null) {
+            return CellGrapheme.empty();
+        }
+
+        var cell = arena.allocate(ValueLayout.JAVA_LONG);
+        if (ghostty_vt_h.ghostty_grid_ref_cell(gridRef, cell) != GHOSTTY_SUCCESS) {
+            return CellGrapheme.empty();
+        }
+
+        var hasText = arena.allocate(ValueLayout.JAVA_BOOLEAN);
+        requireGhosttySuccess(
+                ghostty_vt_h.ghostty_cell_get(cell.get(ValueLayout.JAVA_LONG, 0), ghostty_vt_h.GHOSTTY_CELL_DATA_HAS_TEXT(), hasText),
+                "ghostty_cell_get(has_text)");
+        if (!hasText.get(ValueLayout.JAVA_BOOLEAN, 0)) {
+            var wide = arena.allocate(ValueLayout.JAVA_INT);
+            requireGhosttySuccess(
+                    ghostty_vt_h.ghostty_cell_get(cell.get(ValueLayout.JAVA_LONG, 0), ghostty_vt_h.GHOSTTY_CELL_DATA_WIDE(), wide),
+                    "ghostty_cell_get(wide)");
+            return wide.get(ValueLayout.JAVA_INT, 0) == ghostty_vt_h.GHOSTTY_CELL_WIDE_SPACER_TAIL()
+                    ? CellGrapheme.spacer()
+                    : CellGrapheme.empty();
+        }
+
+        var length = arena.allocate(ValueLayout.JAVA_LONG);
+        var buffer = arena.allocate(MemoryLayout.sequenceLayout(MAX_GRAPHEME_CODEPOINTS, ValueLayout.JAVA_INT));
+        var result = ghostty_vt_h.ghostty_grid_ref_graphemes(gridRef, buffer, MAX_GRAPHEME_CODEPOINTS, length);
+        if (result == ghostty_vt_h.GHOSTTY_OUT_OF_SPACE()) {
+            buffer = arena.allocate(MemoryLayout.sequenceLayout(length.get(ValueLayout.JAVA_LONG, 0), ValueLayout.JAVA_INT));
+            requireGhosttySuccess(
+                    ghostty_vt_h.ghostty_grid_ref_graphemes(gridRef, buffer, length.get(ValueLayout.JAVA_LONG, 0), length),
+                    "ghostty_grid_ref_graphemes");
+        } else {
+            requireGhosttySuccess(result, "ghostty_grid_ref_graphemes");
+        }
+
+        var text = new StringBuilder(Math.toIntExact(length.get(ValueLayout.JAVA_LONG, 0)) * 2);
+        for (var i = 0L; i < length.get(ValueLayout.JAVA_LONG, 0); i++) {
+            var codePoint = buffer.get(ValueLayout.JAVA_INT, i * Integer.BYTES);
+            text.appendCodePoint(Character.isValidCodePoint(codePoint) ? codePoint : 0xFFFD);
+        }
+        return new CellGrapheme(text.toString(), false);
     }
 
     private String cellHyperlink(Selection.ScreenPoint point, Arena arena) {
@@ -1425,6 +1575,25 @@ final class TerminalSession implements AutoCloseable {
         return byY != 0 ? byY : Integer.compare(left.x(), right.x());
     }
 
+    private static Selection.ScreenPoint nearestMappedPoint(List<Selection.ScreenPoint> points, int index, int direction) {
+        for (var i = Math.clamp(index, 0, Math.max(0, points.size() - 1)); i >= 0 && i < points.size(); i += direction) {
+            var point = points.get(i);
+            if (point != null) {
+                return point;
+            }
+        }
+        return null;
+    }
+
+    private static boolean regionMatchesIgnoreCase(CharSequence text, int fromIndex, String query) {
+        for (var i = 0; i < query.length(); i++) {
+            if (Character.toLowerCase(text.charAt(fromIndex + i)) != Character.toLowerCase(query.charAt(i))) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     private static Selection.ScreenPoint next(Selection.ScreenPoint point, int columns) {
         return point.x() + 1 < columns
                 ? new Selection.ScreenPoint(point.x() + 1, point.y())
@@ -1461,6 +1630,12 @@ final class TerminalSession implements AutoCloseable {
             return false;
         }
         return point.y() != to.y() || point.x() <= to.x();
+    }
+
+    private static Color searchHighlightColor(TerminalTheme theme, boolean selected) {
+        return selected
+                ? theme.searchCurrentMatchColor()
+                : theme.searchMatchColor();
     }
 
     private static void drawHoverUnderline(
@@ -1557,6 +1732,128 @@ final class TerminalSession implements AutoCloseable {
         }
 
         return color.deriveColor(0, 1, 1, color.getOpacity() * factor);
+    }
+
+    static final class SearchDocumentBuilder {
+        private final int columns;
+        private final int rows;
+        private final StringBuilder text = new StringBuilder();
+        private final ArrayList<Selection.ScreenPoint> points = new ArrayList<>();
+        private int nextRow;
+        private boolean complete;
+
+        private SearchDocumentBuilder(int columns, int rows) {
+            this.columns = columns;
+            this.rows = rows;
+            complete = columns <= 0 || rows <= 0;
+        }
+
+        int columns() {
+            return columns;
+        }
+
+        private int rows() {
+            return rows;
+        }
+
+        private StringBuilder text() {
+            return text;
+        }
+
+        private ArrayList<Selection.ScreenPoint> points() {
+            return points;
+        }
+
+        boolean complete() {
+            return complete;
+        }
+
+    }
+
+    record SearchBatch(List<Selection> matches, int searchedUntil) {
+
+    }
+
+    record SearchResult(List<Selection> matches, Map<Integer, List<SearchSpan>> rows) {
+
+        private static final SearchResult EMPTY = new SearchResult(List.of(), Map.of());
+
+        static SearchResult empty() {
+            return EMPTY;
+        }
+
+        static SearchResult of(List<Selection> matches, int columns) {
+            if (matches.isEmpty()) {
+                return empty();
+            }
+
+            var rows = new HashMap<Integer, List<SearchSpan>>();
+            appendRows(rows, matches, 0, columns);
+            return new SearchResult(List.copyOf(matches), rows);
+        }
+
+        static SearchResult append(SearchResult result, List<Selection> matches, int columns) {
+            if (matches.isEmpty()) {
+                return result;
+            }
+
+            var allMatches = result.matches instanceof ArrayList<Selection> mutableMatches
+                    ? mutableMatches
+                    : new ArrayList<>(result.matches);
+            var rows = result.rows instanceof HashMap<Integer, List<SearchSpan>> mutableRows
+                    ? mutableRows
+                    : new HashMap<>(result.rows);
+            var firstMatchIndex = allMatches.size();
+            allMatches.addAll(matches);
+            appendRows(rows, matches, firstMatchIndex, columns);
+            return new SearchResult(allMatches, rows);
+        }
+
+        private static void appendRows(
+                Map<Integer, List<SearchSpan>> rows,
+                List<Selection> matches,
+                int firstMatchIndex,
+                int columns) {
+            for (var i = 0; i < matches.size(); i++) {
+                var normalized = matches.get(i).normalized();
+                var matchIndex = firstMatchIndex + i;
+                for (var y = normalized.from().y(); y <= normalized.to().y(); y++) {
+                    var fromX = y == normalized.from().y() ? normalized.from().x() : 0;
+                    var toX = y == normalized.to().y() ? normalized.to().x() : Math.max(0, columns - 1);
+                    rows.computeIfAbsent(y, _ -> new ArrayList<>()).add(new SearchSpan(fromX, toX, matchIndex));
+                }
+            }
+        }
+
+        private int matchIndex(Selection.ScreenPoint point) {
+            var spans = rows.get(point.y());
+            if (spans == null) {
+                return -1;
+            }
+            for (var span : spans) {
+                if (point.x() >= span.fromX() && point.x() <= span.toX()) {
+                    return span.matchIndex();
+                }
+            }
+            return -1;
+        }
+
+    }
+
+    private record SearchSpan(int fromX, int toX, int matchIndex) {
+
+    }
+
+    private record CellGrapheme(String text, boolean spacerCell) {
+
+        private static CellGrapheme empty() {
+            return new CellGrapheme("", false);
+        }
+
+        private static CellGrapheme spacer() {
+            return new CellGrapheme("", true);
+        }
+
     }
 
     private Color decorationColor(MemorySegment color, Color fallback, TerminalTheme theme) {

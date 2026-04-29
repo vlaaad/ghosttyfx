@@ -12,8 +12,10 @@ public record TerminalTheme(
         Color cursorText,
         Color selectionColor,
         Color selectionText,
-    double faintOpacity,
-        Color scrollbarColor) {
+        double faintOpacity,
+        Color scrollbarColor,
+        Color searchMatchColor,
+        Color searchCurrentMatchColor) {
 
     public TerminalTheme {
         Objects.requireNonNull(background, "background");
@@ -24,6 +26,8 @@ public record TerminalTheme(
         Objects.requireNonNull(selectionColor, "selectionColor");
         Objects.requireNonNull(selectionText, "selectionText");
         Objects.requireNonNull(scrollbarColor, "scrollbarColor");
+        Objects.requireNonNull(searchMatchColor, "searchMatchColor");
+        Objects.requireNonNull(searchCurrentMatchColor, "searchCurrentMatchColor");
         if (!Double.isFinite(faintOpacity) || faintOpacity < 0.0 || faintOpacity > 1.0) {
             throw new IllegalArgumentException("faintOpacity must be between 0 and 1");
         }
@@ -48,6 +52,8 @@ public record TerminalTheme(
                 foreground,
                 background,
                 0.5,
-                foreground.deriveColor(0, 1, 1, 0.45));
+                foreground.deriveColor(0, 1, 1, 0.45),
+                foreground.deriveColor(0, 1, 1, 0.18),
+                foreground.deriveColor(0, 1, 1, 0.35));
     }
 }

@@ -302,7 +302,9 @@ public final class GhosttyFxManualApp {
                 color(selection),
                 fg,
                 0.5,
-                fg.deriveColor(0, 1, 1, 0.45)));
+                fg.deriveColor(0, 1, 1, 0.45),
+                fg.deriveColor(0, 1, 1, 0.18),
+                fg.deriveColor(0, 1, 1, 0.35)));
     }
 
     private static Color color(String value) {
@@ -326,7 +328,7 @@ public final class GhosttyFxManualApp {
         if (comspec != null && !comspec.isBlank()) {
             addTerminal(result, seen, "COMSPEC", resolveExecutable(comspec));
         }
-        return List.copyOf(result);
+        return result;
     }
 
     private static List<TerminalOption> detectUnixTerminals() {
@@ -343,7 +345,7 @@ public final class GhosttyFxManualApp {
         addTerminal(result, seen, "zsh", resolveExecutable("zsh"));
         addTerminal(result, seen, "fish", resolveExecutable("fish"));
         addTerminal(result, seen, "sh", resolveExecutable("sh"));
-        return List.copyOf(result);
+        return result;
     }
 
     private static void addTerminal(

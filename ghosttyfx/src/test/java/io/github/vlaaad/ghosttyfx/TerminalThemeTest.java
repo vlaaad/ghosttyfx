@@ -23,6 +23,8 @@ final class TerminalThemeTest {
         assertEquals(theme.background(), theme.selectionText());
         assertEquals(0.5, theme.faintOpacity());
         assertEquals(theme.foreground().deriveColor(0, 1, 1, 0.45), theme.scrollbarColor());
+        assertEquals(theme.foreground().deriveColor(0, 1, 1, 0.18), theme.searchMatchColor());
+        assertEquals(theme.foreground().deriveColor(0, 1, 1, 0.35), theme.searchCurrentMatchColor());
     }
 
     @Test
@@ -50,6 +52,8 @@ final class TerminalThemeTest {
                 Color.WHITE,
                 Color.BLACK,
                 0.5,
+                Color.WHITE,
+                Color.WHITE,
                 Color.WHITE));
         assertThrows(NullPointerException.class, () -> newTheme(List.of(Color.BLACK, null)));
     }
@@ -64,7 +68,9 @@ final class TerminalThemeTest {
                 Color.WHITE,
                 Color.BLACK,
                 0.5,
-                Color.gray(0.5));
+                Color.gray(0.5),
+                Color.gray(0.6),
+                Color.gray(0.7));
     }
 
     private static List<Color> colors(int count) {
