@@ -20,6 +20,7 @@ Generated per-platform `jextract` bindings for `libghostty-vt`.
 17. URL handling:
   - regex URL matching
   - copy URL under cursor
+18. make pty4j a runtime dep - allow other things too! figure out / document the public api...
 
 ### v2
 6. kitty graphics
