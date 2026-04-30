@@ -99,6 +99,7 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
             super.set(java.util.Objects.requireNonNull(value, "font"));
         }
     };
+    private final BooleanProperty cursorBlinking = new SimpleBooleanProperty(this, "cursorBlinking", true);
     private final StringProperty searchPromptText = new SimpleStringProperty(this, "searchPromptText", "Type to search...") {
         @Override
         public void set(String value) {
@@ -248,6 +249,12 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
         resize(prefWidth(-1), prefHeight(-1));
         cellMetrics.addListener((_, _, _) -> handleResize());
         terminalFonts.addListener((_, _, _) -> redraw());
+        cursorBlinking.addListener((_, _, value) -> {
+            terminalSession.setCursorBlinking(value);
+            cursorBlinkVisible = true;
+            updateCursorBlinkTimeline();
+            redraw();
+        });
         theme.addListener((_, _, value) -> {
             terminalSession.applyTheme(value);
             applySearchTheme();
@@ -294,6 +301,18 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
 
     public ObjectProperty<Font> fontProperty() {
         return font;
+    }
+
+    public boolean isCursorBlinking() {
+        return cursorBlinking.get();
+    }
+
+    public void setCursorBlinking(boolean value) {
+        cursorBlinking.set(value);
+    }
+
+    public BooleanProperty cursorBlinkingProperty() {
+        return cursorBlinking;
     }
 
     public String getSearchPromptText() {
@@ -1389,7 +1408,15 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
 
     private void resetCursorBlink() {
         cursorBlinkVisible = true;
-        cursorBlinkTimeline.playFromStart();
+        updateCursorBlinkTimeline();
+    }
+
+    private void updateCursorBlinkTimeline() {
+        if (isCursorBlinking()) {
+            cursorBlinkTimeline.playFromStart();
+        } else {
+            cursorBlinkTimeline.stop();
+        }
     }
 
     private void tickCursorBlink() {

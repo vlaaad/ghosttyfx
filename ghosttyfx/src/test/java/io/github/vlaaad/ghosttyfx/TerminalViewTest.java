@@ -96,6 +96,27 @@ final class TerminalViewTest {
     }
 
     @Test
+    void cursorBlinkingPropertyStoresValue() throws Exception {
+        var tempDirectory = Files.createTempDirectory("ghosttyfx-cursor-blinking-test-");
+        var pidFile = tempDirectory.resolve("shell.pid");
+        var shell = discoverShell(pidFile);
+
+        try (var view = GhosttyFx.create(shell.command(), tempDirectory, System.getenv())) {
+            runOnFxThread(() -> {
+                assertTrue(view.isCursorBlinking());
+
+                view.setCursorBlinking(false);
+                assertFalse(view.isCursorBlinking());
+                assertFalse(view.cursorBlinkingProperty().get());
+
+                view.cursorBlinkingProperty().set(true);
+                assertTrue(view.isCursorBlinking());
+                return null;
+            });
+        }
+    }
+
+    @Test
     void themePropertyRejectsNullAndStoresTheme() throws Exception {
         var tempDirectory = Files.createTempDirectory("ghosttyfx-theme-test-");
         var pidFile = tempDirectory.resolve("shell.pid");

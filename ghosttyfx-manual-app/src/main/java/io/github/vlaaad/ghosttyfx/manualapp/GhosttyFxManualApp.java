@@ -3,6 +3,7 @@ package io.github.vlaaad.ghosttyfx.manualapp;
 import io.github.vlaaad.ghosttyfx.TerminalView;
 import io.github.vlaaad.ghosttyfx.GhosttyFx;
 import io.github.vlaaad.ghosttyfx.TerminalTheme;
+
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -12,12 +13,15 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
+
 import javafx.application.Platform;
 import javafx.collections.FXCollections;
 import javafx.geometry.Insets;
+import javafx.geometry.Pos;
 import javafx.scene.Scene;
 import javafx.scene.control.Alert;
 import javafx.scene.control.Button;
+import javafx.scene.control.CheckBox;
 import javafx.scene.control.ComboBox;
 import javafx.scene.control.Tab;
 import javafx.scene.control.TabPane;
@@ -50,6 +54,8 @@ public final class GhosttyFxManualApp {
             var cwdField = new TextField(DEFAULT_CWD.toString());
             var chooseDirectory = new Button("Browse...");
             var startTerminal = new Button("New Terminal");
+            var cursorBlinking = new CheckBox("Cursor blink");
+            cursorBlinking.setSelected(true);
             var tabs = new TabPane();
             var bellSound = new AudioClip(Objects.requireNonNull(
                     GhosttyFxManualApp.class.getResource("bell_ding1.wav"),
@@ -109,6 +115,7 @@ public final class GhosttyFxManualApp {
                     if (theme != null) {
                         view.setTheme(theme.theme());
                     }
+                    view.setCursorBlinking(cursorBlinking.isSelected());
                 } catch (RuntimeException e) {
                     var alert = new Alert(Alert.AlertType.ERROR);
                     alert.setTitle("GhosttyFX");
@@ -139,9 +146,17 @@ public final class GhosttyFxManualApp {
                     }
                 }
             });
+            cursorBlinking.selectedProperty().addListener((_, _, selected) -> {
+                for (var tab : tabs.getTabs()) {
+                    if (tab.getContent() instanceof TerminalView view) {
+                        view.setCursorBlinking(selected);
+                    }
+                }
+            });
 
             HBox.setHgrow(cwdField, Priority.ALWAYS);
-            var controls = new HBox(8, terminalPicker, themePicker, cwdField, chooseDirectory, startTerminal);
+            var controls = new HBox(8, terminalPicker, themePicker, cwdField, chooseDirectory, cursorBlinking, startTerminal);
+            controls.setAlignment(Pos.CENTER_LEFT);
             controls.setPadding(new Insets(8));
 
             var root = new BorderPane();

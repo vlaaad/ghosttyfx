@@ -127,9 +127,7 @@ final class TerminalSession implements AutoCloseable {
                             initialCellMetrics.cellWidthPx(),
                             initialCellMetrics.cellHeightPx()),
                     "ghostty_terminal_resize");
-            requireGhosttySuccess(
-                    ghostty_vt_h.ghostty_terminal_mode_set(terminal, CURSOR_BLINKING_MODE, true),
-                    "ghostty_terminal_mode_set(cursor_blinking)");
+            setCursorBlinking(true);
             var palette = GhosttyColorRgb.allocateArray(PALETTE_SIZE, arena);
             requireGhosttySuccess(
                     ghostty_vt_h.ghostty_terminal_get(
@@ -216,6 +214,13 @@ final class TerminalSession implements AutoCloseable {
                             theme.palette().isEmpty() ? MemorySegment.NULL : nativePalette(theme, arena)),
                     "ghostty_terminal_set(color_palette)");
         }
+        updateRenderState();
+    }
+
+    void setCursorBlinking(boolean value) {
+        requireGhosttySuccess(
+                ghostty_vt_h.ghostty_terminal_mode_set(terminal, CURSOR_BLINKING_MODE, value),
+                "ghostty_terminal_mode_set(cursor_blinking)");
         updateRenderState();
     }
 
