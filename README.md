@@ -16,7 +16,6 @@ Generated per-platform `jextract` bindings for `libghostty-vt`.
 ## Next steps
 
 ### v1
-11. Blinking: cursor visibility is respected, but there is no blink timer for blinking cursor or blinking text attributes.
 16. Rich font rendering: grapheme handling exists, but JavaFX fillText per cell means no full terminal-grade shaping/ligatures/fallback behavior like Ghostty’s renderer.
 17. URL handling:
   - regex URL matching
