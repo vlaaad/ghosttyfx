@@ -1,21 +1,14 @@
 package io.github.vlaaad.ghosttyfx;
 
-import com.pty4j.PtyProcess;
-import com.pty4j.PtyProcessBuilder;
-import com.pty4j.WinSize;
-
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
-import java.util.Map;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
-import java.util.concurrent.TimeUnit;
 
 final class PtySession implements AutoCloseable {
 
@@ -27,8 +20,8 @@ final class PtySession implements AutoCloseable {
     private final BlockingQueue<ProcessOutput> processOutputs = new ArrayBlockingQueue<>(256);
     private final Future<?> ioTask;
 
-    PtySession(List<String> command, Path cwd, Map<String, String> environment, int initialColumns, int initialRows) {
-        ioTask = IO.submit(() -> runProcess(command, cwd, environment, initialColumns, initialRows));
+    PtySession(TerminalFactory terminalFactory, int initialColumns, int initialRows) {
+        ioTask = IO.submit(() -> runProcess(terminalFactory, initialColumns, initialRows));
     }
 
     @Override
@@ -52,81 +45,53 @@ final class PtySession implements AutoCloseable {
         return outputs;
     }
 
-    private int runProcess(
-            List<String> command,
-            Path cwd,
-            Map<String, String> environment,
-            int initialColumns,
-            int initialRows) throws Exception {
-        if (!Files.isDirectory(cwd)) {
-            throw new IllegalArgumentException("cwd must be an existing directory: " + cwd);
-        }
-
-        var process = (PtyProcess) new PtyProcessBuilder()
-                .setCommand(command.toArray(String[]::new))
-                .setConsole(false)
-                .setRedirectErrorStream(true)
-                .setDirectory(cwd.toString())
-                .setEnvironment(environment)
-                .setInitialColumns(initialColumns)
-                .setInitialRows(initialRows)
-                .setUseWinConPty(true)
-                .start();
+    private Void runProcess(TerminalFactory terminalFactory, int initialColumns, int initialRows) throws Exception {
         try {
-            // output task, no cleanup since we want to emit closed event when the process exits
-            IO.submit(() -> {
-                try (var input = process.getInputStream()) {
-                    var buffer = new byte[8 * 1024];
-                    while (true) {
+            try (var terminal = terminalFactory.open(initialColumns, initialRows)) {
+                // output task, no cleanup since we want to emit closed event when the process exits
+                var outputTask = IO.submit(() -> {
+                    try (var input = terminal.output()) {
+                        var buffer = new byte[8 * 1024];
                         var read = input.read(buffer);
-                        if (read < 0) {
-                            return null;
-                        }
-                        processOutputs.put(new Chunk(Arrays.copyOf(buffer, read)));
-                    }
-                } finally {
-                    processOutputs.put(new Closed());
-                }
-            });
-            // input task, no cleanup since we want to consume the proc commands even after the process exits
-            IO.submit(() -> {
-                try (var output = process.getOutputStream()) {
-                    while (true) {
-                        switch (commands.take()) {
-                            case WriteInput(var bytes) ->
-                                output.write(bytes);
-                            case ResizePty(var columns, var rows) ->
-                                process.setWinSize(new WinSize(columns, rows));
+                        while (read >= 0) {
+                            processOutputs.put(new Chunk(Arrays.copyOf(buffer, read)));
+                            read = input.read(buffer);
                         }
                     }
-                } catch (Exception _) {
-                    COMMAND_DRAIN.submit(() -> {
+                    return null;
+                });
+                // input task, no cleanup since we want to consume the proc commands even after the process exits
+                IO.submit(() -> {
+                    try (var output = terminal.input()) {
                         while (true) {
-                            commands.take();
+                            switch (commands.take()) {
+                                case WriteInput(var bytes) ->
+                                    output.write(bytes);
+                                case ResizePty(var columns, var rows) ->
+                                    terminal.resize(columns, rows);
+                            }
                         }
-                    });
+                    } catch (Exception _) {
+                        COMMAND_DRAIN.submit(() -> {
+                            while (true) {
+                                commands.take();
+                            }
+                        });
+                    }
+                });
+                try {
+                    outputTask.get();
+                } catch (InterruptedException _) {
+                    // proceed to closing the terminal
+                } catch (ExecutionException e) {
+                    throw e.getCause();
                 }
-            });
-            try {
-                return process.waitFor();
-            } catch (InterruptedException _) {
-                return destroyProcess(process);
             }
-        } finally {
-            // process cleanup
-            if (process.isAlive()) {
-                destroyProcess(process);
-            }
+            processOutputs.put(new Closed(new TerminalState.Closed()));
+        } catch (Throwable t) {
+            processOutputs.put(new Closed(new TerminalState.Failed(t)));
         }
-    }
-
-    private static int destroyProcess(Process process) throws InterruptedException {
-        process.destroy();
-        if (!process.waitFor(2, TimeUnit.SECONDS)) {
-            process.destroyForcibly();
-            return process.waitFor();
-        }
-        return process.exitValue();
+        return null;
     }
 
     sealed interface Command permits WriteInput, ResizePty {
@@ -144,6 +109,6 @@ final class PtySession implements AutoCloseable {
     record Chunk(byte[] bytes) implements ProcessOutput {
     }
 
-    record Closed() implements ProcessOutput {
+    record Closed(TerminalState state) implements ProcessOutput {
     }
 }

@@ -76,7 +76,7 @@ final class TerminalSession implements AutoCloseable {
     private final MemorySegment mouseEvent;
     private final MemorySegment xtversionString;
     private final ArrayList<Color> builtInPalette = new ArrayList<>(PALETTE_SIZE);
-    private final PtySession ptySession;
+    private final Consumer<byte[]> terminalInput;
     private final Consumer<String> titleChanged;
     private final Runnable bell;
     private Size size;
@@ -86,10 +86,10 @@ final class TerminalSession implements AutoCloseable {
             int initialColumns,
             int initialRows,
             TerminalView.CellMetrics initialCellMetrics,
-            PtySession ptySession,
+            Consumer<byte[]> terminalInput,
             Consumer<String> titleChanged,
             Runnable bell) {
-        this.ptySession = ptySession;
+        this.terminalInput = terminalInput;
         this.titleChanged = titleChanged;
         this.bell = bell;
         size = new Size(initialColumns, initialRows);
@@ -228,11 +228,7 @@ final class TerminalSession implements AutoCloseable {
         if (length == 0) {
             return;
         }
-        try {
-            ptySession.putCommand(new PtySession.WriteInput(data.reinterpret(length).toArray(ValueLayout.JAVA_BYTE)));
-        } catch (InterruptedException _) {
-            Thread.currentThread().interrupt();
-        }
+        terminalInput.accept(data.reinterpret(length).toArray(ValueLayout.JAVA_BYTE));
     }
 
     private boolean reportSize(MemorySegment terminal, MemorySegment userdata, MemorySegment outSize) {

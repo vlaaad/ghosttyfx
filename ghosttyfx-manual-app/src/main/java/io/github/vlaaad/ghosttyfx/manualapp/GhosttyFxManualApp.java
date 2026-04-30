@@ -2,6 +2,7 @@ package io.github.vlaaad.ghosttyfx.manualapp;
 
 import io.github.vlaaad.ghosttyfx.TerminalView;
 import io.github.vlaaad.ghosttyfx.GhosttyFx;
+import io.github.vlaaad.ghosttyfx.TerminalState;
 import io.github.vlaaad.ghosttyfx.TerminalTheme;
 
 import java.io.File;
@@ -111,7 +112,7 @@ public final class GhosttyFxManualApp {
 
                 final TerminalView view;
                 try {
-                    view = GhosttyFx.create(terminal.command(), cwd, System.getenv());
+                    view = GhosttyFx.create((columns, rows) -> new PtyTerminal(terminal.command(), cwd, System.getenv(), columns, rows));
                     if (theme != null) {
                         view.setTheme(theme.theme());
                     }
@@ -134,7 +135,11 @@ public final class GhosttyFxManualApp {
                 tabs.getTabs().add(tab);
                 tabs.getSelectionModel().select(tab);
                 view.requestFocus();
-                view.processExitedProperty().addListener((_, _, _) -> tabs.getTabs().remove(tab));
+                view.terminalStateProperty().addListener((_, _, state) -> {
+                    if (!(state instanceof TerminalState.Running)) {
+                        tabs.getTabs().remove(tab);
+                    }
+                });
             });
             themePicker.valueProperty().addListener((_, _, theme) -> {
                 if (theme == null) {

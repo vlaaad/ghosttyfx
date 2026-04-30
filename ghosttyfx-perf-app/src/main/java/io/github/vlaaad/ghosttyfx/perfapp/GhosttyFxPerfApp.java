@@ -57,7 +57,7 @@ public final class GhosttyFxPerfApp {
         statusLog.write("startup");
         var terminal = detectTerminal();
         statusLog.write("terminal=" + terminal.label());
-        var view = GhosttyFx.create(terminal.command(), config.cwd(), System.getenv());
+        var view = GhosttyFx.create((columns, rows) -> new PtyTerminal(terminal.command(), config.cwd(), System.getenv(), columns, rows));
         var root = new BorderPane(view);
         var scene = new Scene(root, config.width(), config.height());
         var stage = new Stage();

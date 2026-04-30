@@ -5,9 +5,7 @@ import java.lang.ref.Cleaner;
 import java.lang.ref.WeakReference;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Path;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 import java.util.function.DoubleSupplier;
 
@@ -21,8 +19,8 @@ import javafx.beans.binding.ObjectBinding;
 import javafx.beans.property.BooleanProperty;
 import javafx.beans.property.ListProperty;
 import javafx.beans.property.ObjectProperty;
-import javafx.beans.property.ReadOnlyBooleanProperty;
-import javafx.beans.property.ReadOnlyBooleanWrapper;
+import javafx.beans.property.ReadOnlyObjectProperty;
+import javafx.beans.property.ReadOnlyObjectWrapper;
 import javafx.beans.property.SimpleBooleanProperty;
 import javafx.beans.property.SimpleListProperty;
 import javafx.beans.property.SimpleObjectProperty;
@@ -121,7 +119,8 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
             super.set(Objects.requireNonNull(value, "shortcuts"));
         }
     };
-    private final ReadOnlyBooleanWrapper processExited = new ReadOnlyBooleanWrapper(this, "processExited", false);
+    private final ReadOnlyObjectWrapper<TerminalState> terminalState =
+            new ReadOnlyObjectWrapper<>(this, "terminalState", new TerminalState.Running());
 
     private final ObjectBinding<CellMetrics> cellMetrics = Bindings.createObjectBinding(() -> {
         var text = new Text();
@@ -146,9 +145,9 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
             () -> INITIAL_COLUMNS * cellMetrics.get().cellWidthPx() + scrollbarReservedWidthPx(),
             () -> INITIAL_ROWS * cellMetrics.get().cellHeightPx());
 
-    TerminalView(List<String> command, Path cwd, Map<String, String> environment) {
-        title = new SimpleStringProperty(this, "title", command.getFirst());
-        ptySession = new PtySession(command, cwd, environment, INITIAL_COLUMNS, INITIAL_ROWS);
+    public TerminalView(TerminalFactory terminalFactory) {
+        title = new SimpleStringProperty(this, "title", "Terminal");
+        ptySession = new PtySession(Objects.requireNonNull(terminalFactory, "terminalFactory"), INITIAL_COLUMNS, INITIAL_ROWS);
         processOutputDrain = new ProcessOutputDrain(this);
         cursorBlinkTimeline = new Timeline(new KeyFrame(BLINK_INTERVAL, _ -> tickCursorBlink()));
         cursorBlinkTimeline.setCycleCount(Animation.INDEFINITE);
@@ -160,7 +159,7 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
                 INITIAL_COLUMNS,
                 INITIAL_ROWS,
                 initialCellMetrics,
-                ptySession,
+                bytes -> writeBytes(bytes),
                 (newTitle) -> {
                     var view = thisRef.get();
                     if (view != null) {
@@ -388,12 +387,12 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
         return onBell;
     }
 
-    public boolean isProcessExited() {
-        return processExited.get();
+    public TerminalState getTerminalState() {
+        return terminalState.get();
     }
 
-    public ReadOnlyBooleanProperty processExitedProperty() {
-        return processExited.getReadOnlyProperty();
+    public ReadOnlyObjectProperty<TerminalState> terminalStateProperty() {
+        return terminalState.getReadOnlyProperty();
     }
 
     @Override
@@ -1515,10 +1514,10 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
                     }
                 }
             }
-            if (outputs.get(outputs.size() - 1) instanceof PtySession.Closed) {
+            if (outputs.get(outputs.size() - 1) instanceof PtySession.Closed(var state)) {
                 stop();
                 if (terminal != null) {
-                    terminal.processExited.set(true);
+                    terminal.terminalState.set(state);
                 }
             }
         }

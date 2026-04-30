@@ -7,8 +7,12 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.fail;
 
+import java.io.ByteArrayInputStream;
 import java.io.File;
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -67,7 +71,7 @@ final class TerminalViewTest {
         var shell = discoverShell(pidFile);
         ProcessHandle handle;
 
-        try (var _ = GhosttyFx.create(shell.command(), tempDirectory, System.getenv())) {
+        try (var _ = createView(shell, tempDirectory)) {
             handle = await("shell process to start", START_TIMEOUT, () -> readAliveProcess(pidFile));
             assertTrue(handle.isAlive(), "Expected shell process to be alive: " + handle.pid());
         }
@@ -86,7 +90,7 @@ final class TerminalViewTest {
         var pidFile = tempDirectory.resolve("shell.pid");
         var shell = discoverShell(pidFile);
 
-        try (var view = GhosttyFx.create(shell.command(), tempDirectory, System.getenv())) {
+        try (var view = createView(shell, tempDirectory)) {
             var initialPrefWidth = view.prefWidth(-1);
             var initialPrefHeight = view.prefHeight(-1);
             view.fontProperty().set(Font.font("Monospaced", view.fontProperty().get().getSize() + 6));
@@ -102,7 +106,7 @@ final class TerminalViewTest {
         var pidFile = tempDirectory.resolve("shell.pid");
         var shell = discoverShell(pidFile);
 
-        try (var view = GhosttyFx.create(shell.command(), tempDirectory, System.getenv())) {
+        try (var view = createView(shell, tempDirectory)) {
             runOnFxThread(() -> {
                 assertTrue(view.isCursorBlinking());
 
@@ -123,7 +127,7 @@ final class TerminalViewTest {
         var pidFile = tempDirectory.resolve("shell.pid");
         var shell = discoverShell(pidFile);
 
-        try (var view = GhosttyFx.create(shell.command(), tempDirectory, System.getenv())) {
+        try (var view = createView(shell, tempDirectory)) {
             var theme = new TerminalTheme(
                     Color.WHITE,
                     Color.BLACK,
@@ -152,7 +156,7 @@ final class TerminalViewTest {
         var pidFile = tempDirectory.resolve("shell.pid");
         var shell = discoverShell(pidFile);
 
-        try (var view = GhosttyFx.create(shell.command(), tempDirectory, System.getenv())) {
+        try (var view = createView(shell, tempDirectory)) {
             runOnFxThread(() -> {
                 var combinations = view.getShortcuts().stream()
                         .map(Shortcut::combination)
@@ -205,7 +209,7 @@ final class TerminalViewTest {
         var pidFile = tempDirectory.resolve("shell.pid");
         var shell = discoverShell(pidFile);
 
-        try (var view = GhosttyFx.create(shell.command(), tempDirectory, System.getenv())) {
+        try (var view = createView(shell, tempDirectory)) {
             runOnFxThread(() -> {
                 assertFalse(view.sendText(""));
                 assertTrue(view.sendText("A"));
@@ -236,7 +240,7 @@ final class TerminalViewTest {
         var pidFile = tempDirectory.resolve("shell.pid");
         var shell = discoverOutputShell(pidFile, marker);
 
-        try (var view = GhosttyFx.create(shell.command(), tempDirectory, System.getenv())) {
+        try (var view = createView(shell, tempDirectory)) {
             await("terminal output to be addressable", START_TIMEOUT, () -> runOnFxThread(() -> {
                 fireShortcut(view, selectAllShortcut());
                 return marker.equals(view.getInputMethodRequests().getSelectedText())
@@ -268,7 +272,7 @@ final class TerminalViewTest {
         var pidFile = tempDirectory.resolve("shell.pid");
         var shell = discoverShell(pidFile);
 
-        try (var view = GhosttyFx.create(shell.command(), tempDirectory, System.getenv())) {
+        try (var view = createView(shell, tempDirectory)) {
             runOnFxThread(() -> {
                 assertFalse(view.scrollViewportPageUp());
                 assertFalse(view.scrollViewportPageDown());
@@ -285,7 +289,7 @@ final class TerminalViewTest {
         var pidFile = tempDirectory.resolve("shell.pid");
         var shell = discoverOutputShell(pidFile, lineOutput(80));
 
-        try (var view = GhosttyFx.create(shell.command(), tempDirectory, System.getenv())) {
+        try (var view = createView(shell, tempDirectory)) {
             await("scrollable terminal output", START_TIMEOUT, () -> runOnFxThread(() ->
                     view.scrollViewportToTop() ? Optional.of(Boolean.TRUE) : Optional.empty()));
 
@@ -308,7 +312,7 @@ final class TerminalViewTest {
         var pidFile = tempDirectory.resolve("shell.pid");
         var shell = discoverOutputShell(pidFile, output);
 
-        try (var view = GhosttyFx.create(shell.command(), tempDirectory, System.getenv())) {
+        try (var view = createView(shell, tempDirectory)) {
             await("terminal output to become searchable", START_TIMEOUT, () -> runOnFxThread(() -> {
                 fireShortcut(view, selectAllShortcut());
                 var text = view.getInputMethodRequests().getSelectedText();
@@ -349,11 +353,8 @@ final class TerminalViewTest {
     void searchMatchesSelectedCombiningGraphemeText() throws Exception {
         var marker = "e\u0301a";
         var output = marker + "\nother\n" + marker;
-        var tempDirectory = Files.createTempDirectory("ghosttyfx-search-grapheme-test-");
-        var pidFile = tempDirectory.resolve("shell.pid");
-        var shell = discoverOutputShell(pidFile, output);
 
-        try (var view = GhosttyFx.create(shell.command(), tempDirectory, System.getenv())) {
+        try (var view = createView(output)) {
             await("terminal grapheme output to become searchable", START_TIMEOUT, () -> runOnFxThread(() -> {
                 fireShortcut(view, selectAllShortcut());
                 var text = view.getInputMethodRequests().getSelectedText();
@@ -385,11 +386,8 @@ final class TerminalViewTest {
     void searchMatchesSelectedWideGraphemeText() throws Exception {
         var marker = "界a";
         var output = marker + "\nother\n" + marker;
-        var tempDirectory = Files.createTempDirectory("ghosttyfx-search-wide-test-");
-        var pidFile = tempDirectory.resolve("shell.pid");
-        var shell = discoverOutputShell(pidFile, output);
 
-        try (var view = GhosttyFx.create(shell.command(), tempDirectory, System.getenv())) {
+        try (var view = createView(output)) {
             await("terminal wide output to become searchable", START_TIMEOUT, () -> runOnFxThread(() -> {
                 fireShortcut(view, selectAllShortcut());
                 var text = view.getInputMethodRequests().getSelectedText();
@@ -423,7 +421,7 @@ final class TerminalViewTest {
         var pidFile = tempDirectory.resolve("shell.pid");
         var shell = discoverShell(pidFile);
 
-        try (var view = GhosttyFx.create(shell.command(), tempDirectory, System.getenv())) {
+        try (var view = createView(shell, tempDirectory)) {
             runOnFxThread(() -> {
                 assertTrue(view.toggleSearch());
                 var search = (HBox) view.lookup("#ghosttyfx-search");
@@ -466,7 +464,7 @@ final class TerminalViewTest {
         var pidFile = tempDirectory.resolve("shell.pid");
         var shell = discoverOutputShell(pidFile, output);
 
-        try (var view = GhosttyFx.create(shell.command(), tempDirectory, System.getenv())) {
+        try (var view = createView(shell, tempDirectory)) {
             await("terminal output to become searchable", START_TIMEOUT, () -> runOnFxThread(() -> {
                 fireShortcut(view, selectAllShortcut());
                 var text = view.getInputMethodRequests().getSelectedText();
@@ -530,7 +528,7 @@ final class TerminalViewTest {
         var clipboardContents = runOnFxThread(TerminalViewTest::snapshotClipboardContents);
 
         try {
-            try (var view = GhosttyFx.create(shell.command(), tempDirectory, System.getenv())) {
+            try (var view = createView(shell, tempDirectory)) {
                 var selectedText = await("terminal output to become selectable", START_TIMEOUT, () -> runOnFxThread(() -> {
                     fireShortcut(view, selectAllShortcut());
                     var text = view.getInputMethodRequests().getSelectedText();
@@ -560,7 +558,7 @@ final class TerminalViewTest {
         var tempDirectory = Files.createTempDirectory("ghosttyfx-close-test-");
         var pidFile = tempDirectory.resolve("shell.pid");
         var shell = discoverOutputShell(pidFile, marker);
-        try (var view = GhosttyFx.create(shell.command(), tempDirectory, System.getenv())) {
+        try (var view = createView(shell, tempDirectory)) {
             var handle = await("shell process to start", START_TIMEOUT, () -> readAliveProcess(pidFile));
             try {
                 var selectedText = await("terminal output to become selectable", START_TIMEOUT, () -> runOnFxThread(() -> {
@@ -588,7 +586,7 @@ final class TerminalViewTest {
         var tempDirectory = Files.createTempDirectory("ghosttyfx-close-search-test-");
         var pidFile = tempDirectory.resolve("shell.pid");
         var shell = discoverOutputShell(pidFile, marker);
-        try (var view = GhosttyFx.create(shell.command(), tempDirectory, System.getenv())) {
+        try (var view = createView(shell, tempDirectory)) {
             var handle = await("shell process to start", START_TIMEOUT, () -> readAliveProcess(pidFile));
             try {
                 await("terminal output to become searchable", START_TIMEOUT, () -> runOnFxThread(() -> {
@@ -625,6 +623,14 @@ final class TerminalViewTest {
 
     private static void awaitProcessStop(ProcessHandle handle) throws Exception {
         await("shell process to stop", STOP_TIMEOUT, () -> handle.isAlive() ? Optional.empty() : Optional.of(Boolean.TRUE));
+    }
+
+    private static TerminalView createView(ShellCommand shell, Path cwd) throws IOException {
+        return GhosttyFx.create((_, _) -> new ProcessTerminal(shell.command(), cwd));
+    }
+
+    private static TerminalView createView(String output) throws IOException {
+        return GhosttyFx.create((_, _) -> new StaticTerminal(output));
     }
 
     private static <T> T runOnFxThread(CheckedSupplier<T> supplier) throws Exception {
@@ -931,4 +937,68 @@ final class TerminalViewTest {
     }
 
     private record ShellCommand(List<String> command) {}
+
+    private static final class ProcessTerminal implements Terminal {
+        private final Process process;
+
+        private ProcessTerminal(List<String> command, Path cwd) throws IOException {
+            process = new ProcessBuilder(command)
+                    .directory(cwd.toFile())
+                    .redirectErrorStream(true)
+                    .start();
+        }
+
+        @Override
+        public InputStream output() {
+            return process.getInputStream();
+        }
+
+        @Override
+        public OutputStream input() {
+            return process.getOutputStream();
+        }
+
+        @Override
+        public void resize(int columns, int rows) {
+        }
+
+        @Override
+        public void close() {
+            process.destroy();
+            try {
+                if (!process.waitFor(2, TimeUnit.SECONDS)) {
+                    process.destroyForcibly();
+                    process.waitFor();
+                }
+            } catch (InterruptedException _) {
+                Thread.currentThread().interrupt();
+            }
+        }
+    }
+
+    private static final class StaticTerminal implements Terminal {
+        private final InputStream output;
+
+        private StaticTerminal(String output) {
+            this.output = new ByteArrayInputStream(output.getBytes(StandardCharsets.UTF_8));
+        }
+
+        @Override
+        public InputStream output() {
+            return output;
+        }
+
+        @Override
+        public OutputStream input() {
+            return OutputStream.nullOutputStream();
+        }
+
+        @Override
+        public void resize(int columns, int rows) {
+        }
+
+        @Override
+        public void close() {
+        }
+    }
 }
