@@ -19,7 +19,9 @@ import java.util.concurrent.TimeUnit;
 
 final class PtySession implements AutoCloseable {
 
-    private static final ExecutorService IO = Executors.newVirtualThreadPerTaskExecutor();
+    private static final ExecutorService IO = Executors.newThreadPerTaskExecutor(
+            Thread.ofPlatform().daemon().name("ghosttyfx-pty-io-", 0).factory());
+    private static final ExecutorService COMMAND_DRAIN = Executors.newVirtualThreadPerTaskExecutor();
 
     private final BlockingQueue<Command> commands = new ArrayBlockingQueue<>(16_384);
     private final BlockingQueue<ProcessOutput> processOutputs = new ArrayBlockingQueue<>(256);
@@ -98,9 +100,11 @@ final class PtySession implements AutoCloseable {
                         }
                     }
                 } catch (Exception _) {
-                    while (true) {
-                        commands.take();
-                    }
+                    COMMAND_DRAIN.submit(() -> {
+                        while (true) {
+                            commands.take();
+                        }
+                    });
                 }
             });
             try {

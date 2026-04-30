@@ -155,16 +155,25 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
         textBlinkTimeline = new Timeline(new KeyFrame(BLINK_INTERVAL, _ -> tickTextBlink()));
         textBlinkTimeline.setCycleCount(Animation.INDEFINITE);
         var initialCellMetrics = cellMetrics.get();
+        var thisRef = new WeakReference<>(this);
         terminalSession = new TerminalSession(
                 INITIAL_COLUMNS,
                 INITIAL_ROWS,
                 initialCellMetrics,
                 ptySession,
-                title::set,
+                (newTitle) -> {
+                    var view = thisRef.get();
+                    if (view != null) {
+                        view.title.set(newTitle);
+                    }
+                },
                 () -> {
-                    var handler = onBell.get();
-                    if (handler != null) {
-                        handler.run();
+                    var view = thisRef.get();
+                    if (view != null) {
+                        var handler = view.onBell.get();
+                        if (handler != null) {
+                            handler.run();
+                        }
                     }
                 });
         shortcuts.addAll(
@@ -252,7 +261,7 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
         cursorBlinking.addListener((_, _, value) -> {
             terminalSession.setCursorBlinking(value);
             cursorBlinkVisible = true;
-            updateCursorBlinkTimeline();
+            updateBlinkTimelines();
             redraw();
         });
         theme.addListener((_, _, value) -> {
@@ -276,19 +285,15 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
         setOnInputMethodTextChanged(this::handleInputMethodTextChanged);
         setInputMethodRequests(new TerminalInputMethodRequests());
         setCursor(Cursor.DEFAULT);
+        sceneProperty().addListener((_, _, _) -> updateBlinkTimelines());
         terminalSession.applyTheme(getTheme());
         redraw();
         processOutputDrain.start();
-        cursorBlinkTimeline.play();
-        textBlinkTimeline.play();
 
         // The view only owns the process lifecycle directly. Native terminal resources stay alive as long as the
-        // terminal session is reachable so an already-rendered view can still be queried or shown after close().
-        CLEANER.register(terminalSession, () -> {
-            try (terminalSession) {
-                ptySession.close();
-            }
-        });
+        // terminal view is reachable so an already-rendered view can still be queried/filtered/interacted with
+        // after close().
+        CLEANER.register(this, new Cleanup(terminalSession, ptySession));
     }
 
     public Font getFont() {
@@ -395,9 +400,6 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
     public void close() {
         // Closing the view is a process-lifecycle operation only. Native terminal state stays available until the
         // view itself becomes unreachable so the last rendered view can still be queried or shown.
-        searchUi.cancel();
-        cursorBlinkTimeline.stop();
-        textBlinkTimeline.stop();
         ptySession.close();
     }
 
@@ -1412,11 +1414,22 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
     }
 
     private void updateCursorBlinkTimeline() {
-        if (isCursorBlinking()) {
+        if (getScene() != null && isCursorBlinking()) {
             cursorBlinkTimeline.playFromStart();
         } else {
             cursorBlinkTimeline.stop();
         }
+    }
+
+    private void updateBlinkTimelines() {
+        if (getScene() == null) {
+            cursorBlinkTimeline.stop();
+            textBlinkTimeline.stop();
+            return;
+        }
+
+        updateCursorBlinkTimeline();
+        textBlinkTimeline.play();
     }
 
     private void tickCursorBlink() {
@@ -1447,6 +1460,14 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
 
     private CursorLocation currentCursorLocation() {
         return terminalSession.currentCursorLocation(cellMetrics.get());
+    }
+
+    private record Cleanup(TerminalSession terminalSession, PtySession ptySession) implements Runnable {
+        @Override
+        public void run() {
+            try (terminalSession; ptySession) {
+            }
+        }
     }
 
     private static final class ProcessOutputDrain extends AnimationTimer {

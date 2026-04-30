@@ -82,6 +82,7 @@ final class SearchUi {
                 closeSearch.run();
             }
         });
+        field.sceneProperty().addListener((_, _, _) -> updateIndexTimer());
 
         count = new Label();
         count.setId("ghosttyfx-search-count");
@@ -179,7 +180,7 @@ final class SearchUi {
             updateCount();
         }
         redraw.run();
-        indexTimer.start();
+        updateIndexTimer();
     }
 
     boolean selectNext(boolean wrap) {
@@ -260,6 +261,14 @@ final class SearchUi {
         }
         if (current.document().complete()) {
             job = null;
+            indexTimer.stop();
+        }
+    }
+
+    private void updateIndexTimer() {
+        if (field.getScene() != null && visible() && job != null) {
+            indexTimer.start();
+        } else {
             indexTimer.stop();
         }
     }

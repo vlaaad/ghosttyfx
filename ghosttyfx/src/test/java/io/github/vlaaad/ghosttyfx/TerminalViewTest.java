@@ -24,6 +24,7 @@ import javafx.application.Platform;
 import javafx.event.Event;
 import javafx.event.EventTarget;
 import javafx.event.EventType;
+import javafx.scene.Scene;
 import javafx.scene.input.KeyCode;
 import javafx.scene.input.Clipboard;
 import javafx.scene.input.DataFormat;
@@ -315,6 +316,7 @@ final class TerminalViewTest {
             }));
 
             runOnFxThread(() -> {
+                attachToScene(view);
                 dragSelection(view, 0, marker.length() - 1);
                 assertEquals(marker, view.getInputMethodRequests().getSelectedText());
 
@@ -359,6 +361,7 @@ final class TerminalViewTest {
             }));
 
             runOnFxThread(() -> {
+                attachToScene(view);
                 dragSelection(view, 0, 1);
                 assertEquals(marker, view.getInputMethodRequests().getSelectedText());
                 assertTrue(view.toggleSearch());
@@ -394,6 +397,7 @@ final class TerminalViewTest {
             }));
 
             runOnFxThread(() -> {
+                attachToScene(view);
                 dragSelection(view, 0, 2);
                 assertEquals(marker, view.getInputMethodRequests().getSelectedText());
                 assertTrue(view.toggleSearch());
@@ -470,6 +474,7 @@ final class TerminalViewTest {
             }));
 
             runOnFxThread(() -> {
+                attachToScene(view);
                 assertTrue(view.toggleSearch());
                 var count = (Label) view.lookup("#ghosttyfx-search-count");
                 var field = (TextField) view.lookup("#ghosttyfx-search-field");
@@ -887,6 +892,12 @@ final class TerminalViewTest {
         }
         fail("Timed out waiting for " + description + " within " + timeout);
         throw new AssertionError("unreachable");
+    }
+
+    private static void attachToScene(TerminalView view) {
+        if (view.getScene() == null) {
+            new Scene(view, 800, 600);
+        }
     }
 
     private static boolean isWindows() {
