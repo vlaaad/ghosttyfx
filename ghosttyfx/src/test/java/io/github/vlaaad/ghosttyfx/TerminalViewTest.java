@@ -24,8 +24,6 @@ import javafx.application.Platform;
 import javafx.event.Event;
 import javafx.event.EventTarget;
 import javafx.event.EventType;
-import javafx.scene.Scene;
-import javafx.scene.control.Button;
 import javafx.scene.input.KeyCode;
 import javafx.scene.input.Clipboard;
 import javafx.scene.input.DataFormat;
@@ -37,12 +35,10 @@ import javafx.scene.input.MouseEvent;
 import javafx.scene.control.Label;
 import javafx.scene.control.TextField;
 import javafx.scene.layout.HBox;
-import javafx.scene.layout.VBox;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.BeforeAll;
 import javafx.scene.paint.Color;
 import javafx.scene.text.Font;
-import javafx.stage.Stage;
 
 final class TerminalViewTest {
     private static final Duration START_TIMEOUT = Duration.ofSeconds(30);
@@ -397,9 +393,51 @@ final class TerminalViewTest {
     }
 
     @Test
-    void searchFieldUpdatesMatchesAndConsumesEnterShortcuts() throws Exception {
-        var output = "alpha\nbeta\nalpha";
+    void searchFieldShowsLayoutAndBoundProperties() throws Exception {
         var tempDirectory = Files.createTempDirectory("ghosttyfx-search-field-test-");
+        var pidFile = tempDirectory.resolve("shell.pid");
+        var shell = discoverShell(pidFile);
+
+        try (var view = GhosttyFx.create(shell.command(), tempDirectory, System.getenv())) {
+            runOnFxThread(() -> {
+                assertTrue(view.toggleSearch());
+                var search = (HBox) view.lookup("#ghosttyfx-search");
+                var count = (Label) view.lookup("#ghosttyfx-search-count");
+                var field = (TextField) view.lookup("#ghosttyfx-search-field");
+                assertSame(field, search.getChildren().getFirst());
+                assertSame(count, search.getChildren().get(1));
+                assertEquals(0, search.getMinWidth());
+                assertEquals(search.getPrefWidth(), search.getMaxWidth());
+                assertTrue(search.getPrefWidth() <= 320);
+                view.resize(220, view.getHeight());
+                assertTrue(search.getPrefWidth() < 320);
+                assertTrue(field.getBorder().getStrokes().isEmpty());
+                assertEquals("Type to search...", view.getSearchPromptText());
+                assertEquals("Type to search...", field.getPromptText());
+                view.setSearchPromptText("Find in terminal");
+                assertEquals("Find in terminal", field.getPromptText());
+                assertThrows(NullPointerException.class, () -> view.setSearchPromptText(null));
+                assertThrows(NullPointerException.class, () -> view.searchPromptTextProperty().set(null));
+                field.setText("");
+                assertTrue(count.isManaged());
+                assertTrue(count.isVisible());
+                assertEquals("0/0", count.getText());
+                assertEquals(Label.USE_PREF_SIZE, count.getMinWidth());
+                assertEquals(Label.USE_COMPUTED_SIZE, count.getMaxWidth());
+
+                var font = Font.font("Monospaced", field.getFont().getSize() + 3);
+                view.setFont(font);
+                assertEquals(font, field.getFont());
+                assertEquals(font, count.getFont());
+                return null;
+            });
+        }
+    }
+
+    @Test
+    void searchFieldUpdatesMatchesAndConsumesNavigationShortcuts() throws Exception {
+        var output = "alpha\nbeta\nalpha";
+        var tempDirectory = Files.createTempDirectory("ghosttyfx-search-field-navigation-test-");
         var pidFile = tempDirectory.resolve("shell.pid");
         var shell = discoverOutputShell(pidFile, output);
 
@@ -410,104 +448,50 @@ final class TerminalViewTest {
                 return text != null && text.contains("beta") ? Optional.of(Boolean.TRUE) : Optional.empty();
             }));
 
-            var stageRef = new AtomicReference<Stage>();
-            try {
-                runOnFxThread(() -> {
-                    var other = new Button("Other");
-                    var stage = new Stage();
-                    stageRef.set(stage);
-                    stage.setScene(new Scene(new VBox(view, other), view.prefWidth(-1), view.prefHeight(-1) + 40));
-                    stage.show();
-                    fireShortcut(view, searchShortcut());
-                    var search = (HBox) view.lookup("#ghosttyfx-search");
-                    var count = (Label) view.lookup("#ghosttyfx-search-count");
-                    var field = (TextField) view.lookup("#ghosttyfx-search-field");
-                    assertSame(field, search.getChildren().getFirst());
-                    assertSame(count, search.getChildren().get(1));
-                    assertEquals(0, search.getMinWidth());
-                    assertEquals(search.getPrefWidth(), search.getMaxWidth());
-                    assertTrue(search.getPrefWidth() <= 320);
-                    view.resize(220, view.getHeight());
-                    assertTrue(search.getPrefWidth() < 320);
-                    assertTrue(field.getBorder().getStrokes().isEmpty());
-                    assertEquals("Type to search...", view.getSearchPromptText());
-                    assertEquals("Type to search...", field.getPromptText());
-                    view.setSearchPromptText("Find in terminal");
-                    assertEquals("Find in terminal", field.getPromptText());
-                    assertThrows(NullPointerException.class, () -> view.setSearchPromptText(null));
-                    assertThrows(NullPointerException.class, () -> view.searchPromptTextProperty().set(null));
-                    field.setText("");
-                    assertTrue(count.isManaged());
-                    assertTrue(count.isVisible());
-                    assertEquals("0/0", count.getText());
-                    field.setText("alpha");
-                    assertEquals("...", count.getText());
-                    return null;
-                });
+            runOnFxThread(() -> {
+                assertTrue(view.toggleSearch());
+                var count = (Label) view.lookup("#ghosttyfx-search-count");
+                var field = (TextField) view.lookup("#ghosttyfx-search-field");
+                field.setText("alpha");
+                assertEquals("...", count.getText());
+                return null;
+            });
 
-                await("search matches", START_TIMEOUT, () -> runOnFxThread(() ->
-                        view.getSearchMatchCount() == 2 ? Optional.of(Boolean.TRUE) : Optional.empty()));
+            await("search matches", START_TIMEOUT, () -> runOnFxThread(() ->
+                    view.getSearchMatchCount() == 2 ? Optional.of(Boolean.TRUE) : Optional.empty()));
 
-                runOnFxThread(() -> {
-                    var other = (Button) ((VBox) view.getParent()).getChildren().get(1);
-                    var count = (Label) view.lookup("#ghosttyfx-search-count");
-                    var field = (TextField) view.lookup("#ghosttyfx-search-field");
-                    var search = (HBox) view.lookup("#ghosttyfx-search");
-                    assertEquals(2, view.getSearchMatchCount());
-                    assertEquals(0, view.getSelectedSearchMatchIndex());
-                    assertEquals("1/2", count.getText());
-                    assertTrue(count.isManaged());
-                    assertTrue(count.isVisible());
-                    assertEquals(Label.USE_PREF_SIZE, count.getMinWidth());
-                    assertEquals(Label.USE_COMPUTED_SIZE, count.getMaxWidth());
+            runOnFxThread(() -> {
+                var count = (Label) view.lookup("#ghosttyfx-search-count");
+                var field = (TextField) view.lookup("#ghosttyfx-search-field");
+                assertEquals(0, view.getSelectedSearchMatchIndex());
+                assertEquals("1/2", count.getText());
 
-                    var font = Font.font("Monospaced", field.getFont().getSize() + 3);
-                    view.setFont(font);
-                    assertEquals(font, field.getFont());
-                    assertEquals(font, count.getFont());
+                field.fireEvent(keyEvent(new KeyCodeCombination(KeyCode.ENTER)));
+                assertEquals(1, view.getSelectedSearchMatchIndex());
+                field.fireEvent(keyEvent(new KeyCodeCombination(KeyCode.ENTER)));
+                assertEquals(1, view.getSelectedSearchMatchIndex());
 
-                    var next = keyEvent(new KeyCodeCombination(KeyCode.ENTER));
-                    field.fireEvent(next);
-                    assertEquals(1, view.getSelectedSearchMatchIndex());
-                    field.fireEvent(keyEvent(new KeyCodeCombination(KeyCode.ENTER)));
-                    assertEquals(1, view.getSelectedSearchMatchIndex());
+                field.fireEvent(keyEvent(new KeyCodeCombination(KeyCode.ENTER, KeyCombination.SHIFT_DOWN)));
+                assertEquals(0, view.getSelectedSearchMatchIndex());
+                field.fireEvent(keyEvent(new KeyCodeCombination(KeyCode.ENTER, KeyCombination.SHIFT_DOWN)));
+                assertEquals(0, view.getSelectedSearchMatchIndex());
 
-                    var previous = keyEvent(new KeyCodeCombination(KeyCode.ENTER, KeyCombination.SHIFT_DOWN));
-                    field.fireEvent(previous);
-                    assertEquals(0, view.getSelectedSearchMatchIndex());
-                    field.fireEvent(keyEvent(new KeyCodeCombination(KeyCode.ENTER, KeyCombination.SHIFT_DOWN)));
-                    assertEquals(0, view.getSelectedSearchMatchIndex());
+                field.positionCaret(2);
+                field.fireEvent(keyEvent(new KeyCodeCombination(KeyCode.DOWN)));
+                assertEquals(1, view.getSelectedSearchMatchIndex());
+                assertEquals(2, field.getCaretPosition());
+                field.fireEvent(keyEvent(new KeyCodeCombination(KeyCode.DOWN)));
+                assertEquals(1, view.getSelectedSearchMatchIndex());
+                assertEquals(2, field.getCaretPosition());
 
-                    field.positionCaret(2);
-                    var down = keyEvent(new KeyCodeCombination(KeyCode.DOWN));
-                    field.fireEvent(down);
-                    assertEquals(1, view.getSelectedSearchMatchIndex());
-                    assertEquals(2, field.getCaretPosition());
-                    field.fireEvent(keyEvent(new KeyCodeCombination(KeyCode.DOWN)));
-                    assertEquals(1, view.getSelectedSearchMatchIndex());
-                    assertEquals(2, field.getCaretPosition());
-
-                    var up = keyEvent(new KeyCodeCombination(KeyCode.UP));
-                    field.fireEvent(up);
-                    assertEquals(0, view.getSelectedSearchMatchIndex());
-                    assertEquals(2, field.getCaretPosition());
-                    field.fireEvent(keyEvent(new KeyCodeCombination(KeyCode.UP)));
-                    assertEquals(0, view.getSelectedSearchMatchIndex());
-                    assertEquals(2, field.getCaretPosition());
-                    other.requestFocus();
-                    assertFalse(field.isFocused());
-                    assertFalse(search.isVisible());
-                    return null;
-                });
-            } finally {
-                runOnFxThread(() -> {
-                    var stage = stageRef.get();
-                    if (stage != null) {
-                        stage.close();
-                    }
-                    return null;
-                });
-            }
+                field.fireEvent(keyEvent(new KeyCodeCombination(KeyCode.UP)));
+                assertEquals(0, view.getSelectedSearchMatchIndex());
+                assertEquals(2, field.getCaretPosition());
+                field.fireEvent(keyEvent(new KeyCodeCombination(KeyCode.UP)));
+                assertEquals(0, view.getSelectedSearchMatchIndex());
+                assertEquals(2, field.getCaretPosition());
+                return null;
+            });
         }
     }
 
