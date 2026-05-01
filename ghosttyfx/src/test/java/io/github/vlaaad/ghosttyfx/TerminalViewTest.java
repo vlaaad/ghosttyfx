@@ -293,6 +293,48 @@ final class TerminalViewTest {
     }
 
     @Test
+    void builtInUrlRegexLinkExcludesTrailingSentencePunctuation() throws Exception {
+        try (var view = createView("https://example.test/, foo")) {
+            awaitText(view, "https://example.test/");
+            runOnFxThread(() -> {
+                moveToCell(view, 4, 0);
+                assertSame(Cursor.HAND, view.getCursor());
+                moveToCell(view, "https://example.test/".length(), 0);
+                assertSame(Cursor.DEFAULT, view.getCursor());
+                return null;
+            });
+        }
+    }
+
+    @Test
+    void builtInUrlRegexLinkHandlesMarkdownClosingParenthesis() throws Exception {
+        var output = "[docs](https://example.test/readme)";
+        try (var view = createView(output)) {
+            awaitText(view, "https://example.test/readme");
+            runOnFxThread(() -> {
+                moveToCell(view, output.indexOf("example"), 0);
+                assertSame(Cursor.HAND, view.getCursor());
+                moveToCell(view, output.length() - 1, 0);
+                assertSame(Cursor.DEFAULT, view.getCursor());
+                return null;
+            });
+        }
+    }
+
+    @Test
+    void builtInUrlRegexLinkKeepsBalancedParenthesis() throws Exception {
+        var output = "https://en.wikipedia.org/wiki/Rust_(video_game)";
+        try (var view = createView(output)) {
+            awaitText(view, output);
+            runOnFxThread(() -> {
+                moveToCell(view, output.length() - 1, 0);
+                assertSame(Cursor.HAND, view.getCursor());
+                return null;
+            });
+        }
+    }
+
+    @Test
     void builtInUrlRegexLinkDoesNotMatchFilePaths() throws Exception {
         try (var view = createView("file:///tmp/a C:\\tmp\\a /tmp/a")) {
             awaitText(view, "file:///tmp/a");

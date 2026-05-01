@@ -69,7 +69,7 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
     private static final Duration BLINK_INTERVAL = Duration.millis(600);
     private static final Font DEFAULT_FONT = Font.font("Monospaced", 14);
     private static final RegexLink BUILT_IN_REGEX_LINK = new RegexLink(
-            Pattern.compile("(?i)\\bhttps?://[^\\s<>\"']+"),
+            Pattern.compile("(?i)\\bhttps?://(?:\\[[0-9a-f:]+(?:[:0-9a-f]*)+\\](?::[0-9]+)?|[\\w\\-.~:/?#@!$&*+,;=%]+(?:[\\(\\[]\\w*[\\)\\]])?)+(?<![,.])"),
             match -> openBuiltInWebPageUrl(match.group()));
 
     private final TerminalSession terminalSession;

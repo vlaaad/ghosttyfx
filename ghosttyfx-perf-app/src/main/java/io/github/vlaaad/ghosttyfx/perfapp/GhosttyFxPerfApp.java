@@ -422,7 +422,17 @@ public final class GhosttyFxPerfApp {
                 return "load " + config.searchOutputLines() + " terminal lines then type search query `"
                         + escapeBackticks(config.searchQuery()) + "`";
             }
+        },
+        LINK_OUTPUT {
+            @Override
+            String description(PerfConfig config) {
+                return "load " + config.linkOutputLines() + " URL-heavy terminal lines then scroll";
+            }
         };
+
+        boolean loadsOutput() {
+            return this == SEARCH_FIELD || this == LINK_OUTPUT;
+        }
 
         abstract String description(PerfConfig config);
     }
@@ -445,7 +455,8 @@ public final class GhosttyFxPerfApp {
             String preludeText,
             Scenario scenario,
             int searchOutputLines,
-            String searchQuery) {
+            String searchQuery,
+            int linkOutputLines) {
 
         static PerfConfig load() {
             var cwd = Path.of(System.getProperty("ghosttyfx.perf.cwd", System.getProperty("user.dir", ".")))
@@ -469,6 +480,7 @@ public final class GhosttyFxPerfApp {
             var scenario = Scenario.valueOf(System.getProperty("ghosttyfx.perf.scenario", "REPEAT_INPUT").toUpperCase(Locale.ROOT));
             var searchOutputLines = intProperty("ghosttyfx.perf.searchOutputLines", 20_000, 1);
             var searchQuery = System.getProperty("ghosttyfx.perf.searchQuery", "needle");
+            var linkOutputLines = intProperty("ghosttyfx.perf.linkOutputLines", 20_000, 1);
             if (preludeText.isEmpty()) {
                 throw new IllegalArgumentException("ghosttyfx.perf.preludeText must not be empty");
             }
@@ -490,7 +502,8 @@ public final class GhosttyFxPerfApp {
                     preludeText,
                     scenario,
                     searchOutputLines,
-                    searchQuery);
+                    searchQuery,
+                    linkOutputLines);
         }
 
         private static int intProperty(String name, int defaultValue, int minimum) {
@@ -609,6 +622,7 @@ public final class GhosttyFxPerfApp {
         private long lastPulseNs;
         private long phaseStartedNs;
         private int repeatsSent;
+        private boolean scrollUp = true;
         private Phase phase = Phase.STARTUP;
         private boolean completed;
 
@@ -665,13 +679,13 @@ public final class GhosttyFxPerfApp {
 
         private void handleBaseline(long now) {
             if (now - phaseStartedNs >= config.baselineDuration().toNanos()) {
-                switchPhase(config.scenario() == Scenario.SEARCH_FIELD ? Phase.LOAD_OUTPUT : Phase.PRELUDE, now);
+                switchPhase(config.scenario().loadsOutput() ? Phase.LOAD_OUTPUT : Phase.PRELUDE, now);
             }
         }
 
         private void handleLoadOutput(long now) {
-            var command = searchOutputCommand();
-            statusLog.write("load-output-lines=" + config.searchOutputLines());
+            var command = config.scenario() == Scenario.LINK_OUTPUT ? linkOutputCommand() : searchOutputCommand();
+            statusLog.write("load-output-lines=" + (config.scenario() == Scenario.LINK_OUTPUT ? config.linkOutputLines() : config.searchOutputLines()));
             statusLog.write("load-output-command=" + command);
             dispatchText(view, recorder, command);
             recorder.recordDispatch(DispatchKind.RELEASE, dispatch(view, keyPressed(KeyCode.ENTER)));
@@ -681,7 +695,7 @@ public final class GhosttyFxPerfApp {
 
         private void handleOutputSettle(long now) {
             if (now - phaseStartedNs >= config.preludeSettleDuration().toNanos()) {
-                switchPhase(Phase.OPEN_SEARCH, now);
+                switchPhase(config.scenario() == Scenario.SEARCH_FIELD ? Phase.OPEN_SEARCH : Phase.RUN, now);
             }
         }
 
@@ -711,6 +725,10 @@ public final class GhosttyFxPerfApp {
 
             if (config.scenario() == Scenario.SEARCH_FIELD) {
                 handleSearchRun();
+                return;
+            }
+            if (config.scenario() == Scenario.LINK_OUTPUT) {
+                handleLinkOutputRun();
                 return;
             }
 
@@ -747,6 +765,29 @@ public final class GhosttyFxPerfApp {
             }
         }
 
+        private void handleLinkOutputRun() {
+            var batch = Math.min(config.batchSize(), config.repeatCount() - repeatsSent);
+            for (var i = 0; i < batch; i++) {
+                var start = System.nanoTime();
+                if (scrollUp) {
+                    view.scrollViewportPageUp();
+                } else {
+                    view.scrollViewportPageDown();
+                }
+                recorder.recordDispatch(DispatchKind.REPEAT, System.nanoTime() - start);
+                scrollUp = !scrollUp;
+                repeatsSent++;
+                if (repeatsSent == 1 || repeatsSent == config.repeatCount() || repeatsSent % 100 == 0) {
+                    statusLog.write("scrolls=" + repeatsSent);
+                }
+            }
+
+            if (repeatsSent == config.repeatCount()) {
+                recorder.markRunEnd();
+                switchPhase(Phase.COOLDOWN, lastPulseNs);
+            }
+        }
+
         private String searchOutputCommand() {
             var lines = config.searchOutputLines();
             var os = System.getProperty("os.name", "").toLowerCase(Locale.ROOT);
@@ -754,6 +795,15 @@ public final class GhosttyFxPerfApp {
                 return "1.." + lines + " | ForEach-Object { \"line $_ alpha beta needle gamma\" }";
             }
             return "for i in $(seq 1 " + lines + "); do printf 'line %s alpha beta needle gamma\\n' \"$i\"; done";
+        }
+
+        private String linkOutputCommand() {
+            var lines = config.linkOutputLines();
+            var os = System.getProperty("os.name", "").toLowerCase(Locale.ROOT);
+            if (os.contains("win")) {
+                return "1.." + lines + " | ForEach-Object { \"link $_ https://example.test/r/ChatGPT/comments/1t0l9ri/item-$($_), foo https://example.test/a(b)$($_). next\" }";
+            }
+            return "for i in $(seq 1 " + lines + "); do printf 'link %s https://example.test/r/ChatGPT/comments/1t0l9ri/item-%s, foo https://example.test/a(b)%s. next\\n' \"$i\" \"$i\" \"$i\"; done";
         }
 
         private void handleCooldown(long now) {
