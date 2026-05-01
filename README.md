@@ -16,13 +16,7 @@ Generated per-platform `jextract` bindings for `libghostty-vt`.
 ## Next steps
 
 ### v1
-17. Link handling:
-  - support regex links with `Pattern -> action`, custom links first, built-in URL/path last
-  - keep OSC 8 highest priority and use the same hover/click handling for OSC 8 and regex links
-  - match regexes on the logical line under the mouse, including soft wraps
-  - built-in URL/path link opens with the system opener
-  - keep copy selection-only for now; no copy URL/link under cursor
-  - Defold use case: custom project-path regex with optional line, resolved/opened by the embedding app
+18. check: do we need setters for observable lists?
 
 ### v2
 6. kitty graphics
