@@ -5,9 +5,11 @@ import java.lang.ref.Cleaner;
 import java.lang.ref.WeakReference;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.function.DoubleSupplier;
+import java.util.regex.Pattern;
 
 import io.github.vlaaad.ghostty.bindings.ghostty_vt_h;
 import javafx.animation.Animation;
@@ -66,6 +68,9 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
     private static final double SCROLL_TOTAL_DELTA_EPSILON = 1e-6;
     private static final Duration BLINK_INTERVAL = Duration.millis(600);
     private static final Font DEFAULT_FONT = Font.font("Monospaced", 14);
+    private static final RegexLink BUILT_IN_REGEX_LINK = new RegexLink(
+            Pattern.compile("(?i)\\bhttps?://[^\\s<>\"']+"),
+            match -> openBuiltInWebPageUrl(match.group()));
 
     private final TerminalSession terminalSession;
     private final PtySession ptySession;
@@ -75,7 +80,7 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
     private KeyInput.State keyInputState = KeyInput.initialState();
     private MouseInput.State mouseInputState = MouseInput.initialState();
     private Selection selection = Selection.empty();
-    private Selection hoveredHyperlink = Selection.empty();
+    private ActiveLink hoveredLink;
     private boolean cursorBlinkVisible = true;
     private boolean textBlinkVisible = true;
     private TerminalSession.BlinkState blinkState = TerminalSession.BlinkState.none();
@@ -115,6 +120,12 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
         @Override
         public void set(ObservableList<Shortcut> value) {
             super.set(Objects.requireNonNull(value, "shortcuts"));
+        }
+    };
+    private final ListProperty<RegexLink> regexLinks = new SimpleListProperty<>(this, "regexLinks", FXCollections.observableArrayList()) {
+        @Override
+        public void set(ObservableList<RegexLink> value) {
+            super.set(Objects.requireNonNull(value, "regexLinks"));
         }
     };
     private final ReadOnlyObjectWrapper<TerminalState> terminalState =
@@ -256,6 +267,7 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
         resize(prefWidth(-1), prefHeight(-1));
         cellMetrics.addListener((_, _, _) -> handleResize());
         terminalFonts.addListener((_, _, _) -> redraw());
+        regexLinks.addListener((_, _, _) -> redraw());
         cursorBlinking.addListener((_, _, value) -> {
             terminalSession.setCursorBlinking(value);
             cursorBlinkVisible = true;
@@ -364,6 +376,18 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
 
     public ListProperty<Shortcut> shortcutsProperty() {
         return shortcuts;
+    }
+
+    public ObservableList<RegexLink> getRegexLinks() {
+        return regexLinks.get();
+    }
+
+    public void setRegexLinks(ObservableList<RegexLink> value) {
+        regexLinks.set(value);
+    }
+
+    public ListProperty<RegexLink> regexLinksProperty() {
+        return regexLinks;
     }
 
     public String getTitle() {
@@ -516,7 +540,7 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
                 clickCount,
                 rectangle,
                 false,
-                hit.hyperlinkUri()));
+                activeLink(hit)));
         clearHover(false);
         switch (clickCount) {
             case 1 -> clearSelection();
@@ -614,10 +638,10 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
         if (releasedGesture.clickCount() == 1
                 && !releasedGesture.dragged()
                 && hit != null
-                && releasedGesture.hyperlinkUri() != null
+                && releasedGesture.link() != null
                 && releasedGesture.anchor().equals(hit.screenPoint())
-                && releasedGesture.hyperlinkUri().equals(hit.hyperlinkUri())) {
-            openHyperlink(releasedGesture.hyperlinkUri());
+                && releasedGesture.link().sameTarget(activeLink(hit))) {
+            releasedGesture.link().action().run();
         }
         refreshHover(event);
     }
@@ -888,6 +912,33 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
                 scrollbarReservedWidthPx());
     }
 
+    private ActiveLink activeLink(TerminalSession.CellHit hit) {
+        if (hit.hyperlinkUri() != null && !hit.hyperlinkUri().isEmpty()) {
+            var selection = terminalSession.hyperlinkSelection(hit.screenPoint(), hit.hyperlinkUri());
+            if (selection.isEmpty()) {
+                return null;
+            }
+            return new ActiveLink(new ActiveLink.Osc8(hit.hyperlinkUri()), selection, () -> openHyperlink(hit.hyperlinkUri()));
+        }
+
+        var match = terminalSession.regexLinkAt(hit.screenPoint(), allRegexLinks());
+        if (match == null || match.selection().isEmpty()) {
+            return null;
+        }
+
+        return new ActiveLink(
+                new ActiveLink.Regex(match.index(), match.match().group()),
+                match.selection(),
+                () -> match.link().action().accept(match.match()));
+    }
+
+    private List<RegexLink> allRegexLinks() {
+        var links = new ArrayList<RegexLink>(getRegexLinks().size() + 1);
+        links.addAll(getRegexLinks());
+        links.add(BUILT_IN_REGEX_LINK);
+        return links;
+    }
+
     private void refreshHover(MouseEvent event) {
         var pressGesture = mouseInputState.pressGesture();
         if (pressGesture != null && pressGesture.button() == TerminalSession.MouseButton.LEFT) {
@@ -899,27 +950,27 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
         }
 
         var hit = contentHit(event);
-        if (hit == null || hit.hyperlinkUri() == null || hit.hyperlinkUri().isEmpty()) {
+        if (hit == null) {
             clearHover(true);
             return;
         }
 
-        var nextHover = terminalSession.hyperlinkSelection(hit.screenPoint(), hit.hyperlinkUri());
-        if (nextHover.isEmpty()) {
+        var nextHover = activeLink(hit);
+        if (nextHover == null) {
             clearHover(true);
             return;
         }
 
-        if (!nextHover.equals(hoveredHyperlink)) {
-            hoveredHyperlink = nextHover;
+        if (hoveredLink == null || !hoveredLink.sameTarget(nextHover)) {
+            hoveredLink = nextHover;
             redraw();
         }
         setCursor(Cursor.HAND);
     }
 
     private void clearHover(boolean redraw) {
-        var changed = !hoveredHyperlink.isEmpty() || getCursor() != Cursor.DEFAULT;
-        hoveredHyperlink = Selection.empty();
+        var changed = hoveredLink != null || getCursor() != Cursor.DEFAULT;
+        hoveredLink = null;
         setCursor(Cursor.DEFAULT);
         if (changed && redraw) {
             redraw();
@@ -1042,6 +1093,23 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
         try {
             if (Desktop.isDesktopSupported() && Desktop.getDesktop().isSupported(Desktop.Action.BROWSE)) {
                 Desktop.getDesktop().browse(URI.create(hyperlinkUri));
+            }
+        } catch (Exception _) {
+        }
+    }
+
+    private static void openBuiltInWebPageUrl(String text) {
+        try {
+            if (!Desktop.isDesktopSupported()) {
+                return;
+            }
+
+            var desktop = Desktop.getDesktop();
+            var uri = URI.create(text);
+            var scheme = uri.getScheme();
+            if (("http".equalsIgnoreCase(scheme) || "https".equalsIgnoreCase(scheme))
+                    && desktop.isSupported(Desktop.Action.BROWSE)) {
+                desktop.browse(uri);
             }
         } catch (Exception _) {
         }
@@ -1395,7 +1463,8 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
                 cellMetrics.get(),
                 keyInputState.preedit(),
                 selection,
-                hoveredHyperlink,
+                hoveredLink == null ? Selection.empty() : hoveredLink.selection(),
+                allRegexLinks(),
                 searchUi.visible() ? searchUi.result() : TerminalSession.SearchResult.empty(),
                 searchUi.visible() ? searchUi.selectedMatch() : -1,
                 isFocused(),

@@ -12,6 +12,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
+import java.util.regex.MatchResult;
 
 import io.github.vlaaad.ghostty.bindings.GhosttyColorRgb;
 import io.github.vlaaad.ghostty.bindings.GhosttyDeviceAttributes;
@@ -658,6 +659,73 @@ final class TerminalSession implements AutoCloseable {
         return new SearchBatch(matches, searchLimit);
     }
 
+    MatchedRegexLink regexLinkAt(Selection.ScreenPoint point, List<RegexLink> regexLinks) {
+        if (regexLinks.isEmpty()) {
+            return null;
+        }
+
+        var line = logicalLine(point);
+        if (line.text().isEmpty()) {
+            return null;
+        }
+
+        for (var i = 0; i < regexLinks.size(); i++) {
+            var regexLink = regexLinks.get(i);
+            var matcher = regexLink.pattern().matcher(line.text());
+            while (matcher.find()) {
+                var selection = line.selection(matcher.start(), matcher.end());
+                if (!selection.isEmpty() && contains(selection, point)) {
+                    return new MatchedRegexLink(i, regexLink, matcher.toMatchResult(), selection);
+                }
+            }
+        }
+        return null;
+    }
+
+    List<Selection> regexLinkSelections(List<RegexLink> regexLinks, int startRow, int endRow) {
+        if (regexLinks.isEmpty()) {
+            return List.of();
+        }
+
+        var rows = totalRowCount();
+        if (rows <= 0) {
+            return List.of();
+        }
+
+        startRow = Math.clamp(startRow, 0, rows - 1);
+        endRow = Math.clamp(endRow, startRow, rows - 1);
+        try (var arena = Arena.ofConfined()) {
+            while (startRow > 0 && rowWrapContinuation(new Selection.ScreenPoint(0, startRow), arena)) {
+                startRow--;
+            }
+        }
+
+        var selections = new ArrayList<Selection>();
+        for (var row = startRow; row <= endRow; row++) {
+            try (var arena = Arena.ofConfined()) {
+                if (row > 0 && rowWrapContinuation(new Selection.ScreenPoint(0, row), arena)) {
+                    continue;
+                }
+            }
+
+            var line = logicalLine(new Selection.ScreenPoint(0, row));
+            if (line.text().isEmpty()) {
+                continue;
+            }
+
+            for (var regexLink : regexLinks) {
+                var matcher = regexLink.pattern().matcher(line.text());
+                while (matcher.find()) {
+                    var selection = line.selection(matcher.start(), matcher.end());
+                    if (!selection.isEmpty()) {
+                        selections.add(selection);
+                    }
+                }
+            }
+        }
+        return selections;
+    }
+
     Selection selectAllSelection() {
         try (var arena = Arena.ofConfined()) {
             var cols = arena.allocate(ValueLayout.JAVA_SHORT);
@@ -809,6 +877,34 @@ final class TerminalSession implements AutoCloseable {
         }
     }
 
+    LogicalLine logicalLine(Selection.ScreenPoint point) {
+        var columns = columnCount();
+        var rows = totalRowCount();
+        if (columns <= 0 || rows <= 0 || point.y() >= rows) {
+            return LogicalLine.empty();
+        }
+
+        try (var arena = Arena.ofConfined()) {
+            var current = point;
+            while (current.y() > 0 && rowWrapContinuation(current, arena)) {
+                current = new Selection.ScreenPoint(current.x(), current.y() - 1);
+            }
+
+            var startRow = current.y();
+            var endRow = current.y();
+            while (endRow + 1 < rows && rowWrap(new Selection.ScreenPoint(columns - 1, endRow), arena)) {
+                endRow++;
+            }
+
+            var text = new StringBuilder();
+            var points = new ArrayList<Selection.ScreenPoint>();
+            for (var row = startRow; row <= endRow; row++) {
+                appendLogicalLineRow(text, points, row, columns, arena);
+            }
+            return new LogicalLine(text.toString(), List.copyOf(points));
+        }
+    }
+
     Selection hyperlinkSelection(Selection.ScreenPoint point, String uri) {
         if (uri.isEmpty()) {
             return Selection.empty();
@@ -944,7 +1040,8 @@ final class TerminalSession implements AutoCloseable {
             TerminalView.CellMetrics metrics,
             KeyInput.Preedit preedit,
             Selection selection,
-            Selection hoveredHyperlink,
+            Selection hoveredLink,
+            List<RegexLink> regexLinks,
             SearchResult searchResult,
             int selectedSearchMatch,
             boolean focused,
@@ -987,6 +1084,11 @@ final class TerminalSession implements AutoCloseable {
             var viewportTop = ghostty_vt_h.ghostty_terminal_get(terminal, ghostty_vt_h.GHOSTTY_TERMINAL_DATA_SCROLLBAR(), scrollbar) == GHOSTTY_SUCCESS
                     ? Math.toIntExact(GhosttyTerminalScrollbar.offset(scrollbar))
                     : 0;
+            var visibleRows = Math.max(1, (int) Math.ceil(height / metrics.cellHeightPx()));
+            var linkResult = SearchResult.append(
+                    SearchResult.empty(),
+                    regexLinkSelections(regexLinks, viewportTop, viewportTop + visibleRows - 1),
+                    columnCount());
             var cursor = cursorInfo(arena);
             var preeditCellCount = preedit.text().codePointCount(0, preedit.text().length());
             var text = new StringBuilder(MAX_GRAPHEME_CODEPOINTS * 2);
@@ -1013,7 +1115,8 @@ final class TerminalSession implements AutoCloseable {
                 while (ghostty_vt_h.ghostty_render_state_row_cells_next(rowCells)) {
                     var screenPoint = new Selection.ScreenPoint(viewportX, viewportTop + viewportY);
                     var selected = contains(selection, screenPoint);
-                    var hovered = contains(hoveredHyperlink, screenPoint);
+                    var hovered = contains(hoveredLink, screenPoint);
+                    var linked = linkResult.matchIndex(screenPoint) >= 0;
                     var searchMatch = searchResult.matchIndex(screenPoint);
                     var searchHighlighted = searchMatch >= 0;
                     var currentSearchMatch = searchMatch == selectedSearchMatch;
@@ -1137,7 +1240,7 @@ final class TerminalSession implements AutoCloseable {
                             if (GhosttyStyle.underline(style) == ghostty_vt_h.GHOSTTY_SGR_UNDERLINE_NONE()
                                     && !GhosttyStyle.strikethrough(style)
                                     && !GhosttyStyle.overline(style)
-                                    && cellHyperlink(screenPoint, arena) != null) {
+                                    && (linked || cellHyperlink(screenPoint, arena) != null)) {
                                 graphics.setStroke(applyOpacity(baseTextColor, faintFactor * (hovered ? 0.85 : 0.45)));
                                 drawUnderline(graphics, x, y + metrics.cellHeightPx() - 2.5, metrics.cellWidthPx(), ghostty_vt_h.GHOSTTY_SGR_UNDERLINE_DOTTED());
                             }
@@ -1344,6 +1447,32 @@ final class TerminalSession implements AutoCloseable {
         if (row + 1 < document.rows() && !rowWrap(new Selection.ScreenPoint(Math.max(0, document.columns() - 1), row), arena)) {
             document.text().append('\n');
             document.points().add(null);
+        }
+    }
+
+    private void appendLogicalLineRow(
+            StringBuilder text,
+            ArrayList<Selection.ScreenPoint> points,
+            int row,
+            int columns,
+            Arena arena) {
+        var lastTextColumn = lastTextColumn(row, columns, arena);
+        for (var column = 0; column <= lastTextColumn; column++) {
+            var point = new Selection.ScreenPoint(column, row);
+            var grapheme = cellGrapheme(point, arena);
+            if (grapheme.spacerCell()) {
+                continue;
+            }
+            if (grapheme.text().isEmpty()) {
+                text.append(' ');
+                points.add(point);
+            } else {
+                var start = text.length();
+                text.append(grapheme.text());
+                for (var i = start; i < text.length(); i++) {
+                    points.add(point);
+                }
+            }
         }
     }
 
@@ -1774,6 +1903,27 @@ final class TerminalSession implements AutoCloseable {
 
     record SearchBatch(List<Selection> matches, int searchedUntil) {
 
+    }
+
+    record MatchedRegexLink(int index, RegexLink link, MatchResult match, Selection selection) {
+    }
+
+    record LogicalLine(String text, List<Selection.ScreenPoint> points) {
+        private static final LogicalLine EMPTY = new LogicalLine("", List.of());
+
+        static LogicalLine empty() {
+            return EMPTY;
+        }
+
+        Selection selection(int start, int end) {
+            if (start >= end || points.isEmpty()) {
+                return Selection.empty();
+            }
+
+            var from = nearestMappedPoint(points, start, 1);
+            var to = nearestMappedPoint(points, end - 1, -1);
+            return from == null || to == null ? Selection.empty() : Selection.linear(from, to);
+        }
     }
 
     record SearchResult(List<Selection> matches, Map<Integer, List<SearchSpan>> rows) {

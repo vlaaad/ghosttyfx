@@ -29,6 +29,7 @@ import javafx.application.Platform;
 import javafx.event.Event;
 import javafx.event.EventTarget;
 import javafx.event.EventType;
+import javafx.scene.Cursor;
 import javafx.scene.Scene;
 import javafx.scene.input.KeyCode;
 import javafx.scene.input.Clipboard;
@@ -199,6 +200,137 @@ final class TerminalViewTest {
                 view.getShortcuts().add(shortcut);
                 assertTrue(view.getShortcuts().contains(shortcut));
                 assertThrows(NullPointerException.class, () -> view.setShortcuts(null));
+                return null;
+            });
+        }
+    }
+
+    @Test
+    void exposesRegexLinkListProperty() throws Exception {
+        try (var view = createView("")) {
+            runOnFxThread(() -> {
+                var link = new RegexLink(Pattern.compile("issue-(\\d+)"), _ -> {});
+                view.getRegexLinks().add(link);
+                assertTrue(view.getRegexLinks().contains(link));
+                assertThrows(NullPointerException.class, () -> new RegexLink(null, _ -> {}));
+                assertThrows(NullPointerException.class, () -> new RegexLink(Pattern.compile("x"), null));
+                assertThrows(NullPointerException.class, () -> view.setRegexLinks(null));
+                return null;
+            });
+        }
+    }
+
+    @Test
+    void customRegexLinkClickReceivesMatchResult() throws Exception {
+        var group = new AtomicReference<String>();
+        try (var view = createView("issue-123")) {
+            awaitText(view, "issue-123");
+            runOnFxThread(() -> {
+                view.getRegexLinks().add(new RegexLink(Pattern.compile("issue-(\\d+)"), match -> group.set(match.group(1))));
+                clickCell(view, 2, 0);
+                assertEquals("123", group.get());
+                return null;
+            });
+        }
+    }
+
+    @Test
+    void osc8LinkWinsOverCustomRegexLink() throws Exception {
+        var clicks = new AtomicInteger();
+        var output = "\u001B]8;;https://example.test\u001B\\abc\u001B]8;;\u001B\\";
+        try (var view = createView(output)) {
+            awaitText(view, "abc");
+            runOnFxThread(() -> {
+                view.getRegexLinks().add(new RegexLink(Pattern.compile("abc"), _ -> clicks.incrementAndGet()));
+                moveToCell(view, 1, 0);
+                assertSame(Cursor.HAND, view.getCursor());
+                assertEquals(0, clicks.get());
+                return null;
+            });
+        }
+    }
+
+    @Test
+    void customRegexLinksUseUserOrder() throws Exception {
+        var clicks = new AtomicReference<String>();
+        try (var view = createView("abc")) {
+            awaitText(view, "abc");
+            runOnFxThread(() -> {
+                view.getRegexLinks().add(new RegexLink(Pattern.compile("ab"), _ -> clicks.set("first")));
+                view.getRegexLinks().add(new RegexLink(Pattern.compile("bc"), _ -> clicks.set("second")));
+                clickCell(view, 1, 0);
+                assertEquals("first", clicks.get());
+                return null;
+            });
+        }
+    }
+
+    @Test
+    void regexLinksMatchAcrossSoftWrappedLogicalLine() throws Exception {
+        var clicks = new AtomicReference<String>();
+        var output = "a".repeat(79) + "XY";
+        try (var view = createView(output)) {
+            awaitText(view, "XY");
+            runOnFxThread(() -> {
+                view.getRegexLinks().add(new RegexLink(Pattern.compile("XY"), match -> clicks.set(match.group())));
+                clickCell(view, 79, 0);
+                assertEquals("XY", clicks.get());
+                return null;
+            });
+        }
+    }
+
+    @Test
+    void builtInUrlRegexLinkIsAvailableAfterCustomLinks() throws Exception {
+        try (var view = createView("https://example.test")) {
+            awaitText(view, "https://example.test");
+            runOnFxThread(() -> {
+                moveToCell(view, 4, 0);
+                assertSame(Cursor.HAND, view.getCursor());
+                return null;
+            });
+        }
+    }
+
+    @Test
+    void builtInUrlRegexLinkDoesNotMatchFilePaths() throws Exception {
+        try (var view = createView("file:///tmp/a C:\\tmp\\a /tmp/a")) {
+            awaitText(view, "file:///tmp/a");
+            runOnFxThread(() -> {
+                moveToCell(view, 2, 0);
+                assertSame(Cursor.DEFAULT, view.getCursor());
+                moveToCell(view, 15, 0);
+                assertSame(Cursor.DEFAULT, view.getCursor());
+                moveToCell(view, 24, 0);
+                assertSame(Cursor.DEFAULT, view.getCursor());
+                return null;
+            });
+        }
+    }
+
+    @Test
+    void copyDoesNotCopyLinkUnderCursorWithoutSelection() throws Exception {
+        var clicks = new AtomicInteger();
+        var clipboardContents = runOnFxThread(TerminalViewTest::snapshotClipboardContents);
+        try {
+            try (var view = createView("issue-123")) {
+                awaitText(view, "issue-123");
+                runOnFxThread(() -> {
+                    view.getRegexLinks().add(new RegexLink(Pattern.compile("issue-(\\d+)"), _ -> clicks.incrementAndGet()));
+                    var clipboard = Clipboard.getSystemClipboard();
+                    var content = new javafx.scene.input.ClipboardContent();
+                    content.putString("unchanged");
+                    clipboard.setContent(content);
+                    moveToCell(view, 2, 0);
+                    fireShortcut(view, copyShortcut());
+                    assertEquals("unchanged", clipboard.getString());
+                    assertEquals(0, clicks.get());
+                    return null;
+                });
+            }
+        } finally {
+            runOnFxThread(() -> {
+                restoreClipboardContents(clipboardContents);
                 return null;
             });
         }
@@ -738,15 +870,53 @@ final class TerminalViewTest {
                 modifierDown(combination.getMeta()) || (shortcutDownOnCurrentPlatform(combination.getShortcut()) && isMac()));
     }
 
+    private static void awaitText(TerminalView view, String expected) throws Exception {
+        await("terminal output containing " + expected, START_TIMEOUT, () -> runOnFxThread(() -> {
+            fireShortcut(view, selectAllShortcut());
+            var text = view.getInputMethodRequests().getSelectedText();
+            return text != null && text.contains(expected) ? Optional.of(Boolean.TRUE) : Optional.empty();
+        }));
+        runOnFxThread(() -> {
+            Event.fireEvent(view, mouseEvent(MouseEvent.MOUSE_PRESSED, cellX(view, 0, 0.1), cellY(view, 5, 0.5), true));
+            Event.fireEvent(view, mouseEvent(MouseEvent.MOUSE_RELEASED, cellX(view, 0, 0.1), cellY(view, 5, 0.5), false));
+            return null;
+        });
+    }
+
+    private static void clickCell(TerminalView view, int column, int row) {
+        var x = cellX(view, column, 0.5);
+        var y = cellY(view, row, 0.5);
+        Event.fireEvent(view, mouseEvent(MouseEvent.MOUSE_PRESSED, x, y, true));
+        Event.fireEvent(view, mouseEvent(MouseEvent.MOUSE_RELEASED, x, y, false));
+    }
+
+    private static void moveToCell(TerminalView view, int column, int row) {
+        Event.fireEvent(view, mouseEvent(MouseEvent.MOUSE_MOVED, cellX(view, column, 0.5), cellY(view, row, 0.5), false));
+    }
+
     private static void dragSelection(TerminalView view, int fromColumn, int toColumn) {
-        var cellWidth = (view.prefWidth(-1) - 10) / 80;
-        var cellHeight = view.prefHeight(-1) / 24;
-        var fromX = fromColumn * cellWidth + cellWidth * 0.1;
-        var toX = toColumn * cellWidth + cellWidth * 0.8;
-        var y = cellHeight * 0.5;
+        var fromX = cellX(view, fromColumn, 0.1);
+        var toX = cellX(view, toColumn, 0.8);
+        var y = cellY(view, 0, 0.5);
         Event.fireEvent(view, mouseEvent(MouseEvent.MOUSE_PRESSED, fromX, y, true));
         Event.fireEvent(view, mouseEvent(MouseEvent.MOUSE_DRAGGED, toX, y, true));
         Event.fireEvent(view, mouseEvent(MouseEvent.MOUSE_RELEASED, toX, y, false));
+    }
+
+    private static double cellX(TerminalView view, int column, double offset) {
+        return column * cellWidth(view) + cellWidth(view) * offset;
+    }
+
+    private static double cellY(TerminalView view, int row, double offset) {
+        return row * cellHeight(view) + cellHeight(view) * offset;
+    }
+
+    private static double cellWidth(TerminalView view) {
+        return (view.prefWidth(-1) - 10) / 80;
+    }
+
+    private static double cellHeight(TerminalView view) {
+        return view.prefHeight(-1) / 24;
     }
 
     private static MouseEvent mouseEvent(EventType<MouseEvent> eventType, double x, double y, boolean primaryButtonDown) {

@@ -197,9 +197,9 @@ final class MouseInput {
             int clickCount,
             boolean rectangleSelection,
             boolean dragged,
-            String hyperlinkUri) {
+            ActiveLink link) {
         PressGesture withDrag(boolean dragged) {
-            return new PressGesture(button, anchor, anchorCellOffsetX, clickCount, rectangleSelection, dragged, hyperlinkUri);
+            return new PressGesture(button, anchor, anchorCellOffsetX, clickCount, rectangleSelection, dragged, link);
         }
     }
 }
