@@ -16,10 +16,13 @@ Generated per-platform `jextract` bindings for `libghostty-vt`.
 ## Next steps
 
 ### v1
-16. Rich font rendering: grapheme handling exists, but JavaFX fillText per cell means no full terminal-grade shaping/ligatures/fallback behavior like Ghostty’s renderer.
-17. URL handling:
-  - regex URL matching
-  - copy URL under cursor
+17. Link handling:
+  - support regex links with `Pattern -> action`, custom links first, built-in URL/path last
+  - keep OSC 8 highest priority and use the same hover/click handling for OSC 8 and regex links
+  - match regexes on the logical line under the mouse, including soft wraps
+  - built-in URL/path link opens with the system opener
+  - keep copy selection-only for now; no copy URL/link under cursor
+  - Defold use case: custom project-path regex with optional line, resolved/opened by the embedding app
 
 ### v2
 6. kitty graphics

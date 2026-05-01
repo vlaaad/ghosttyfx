@@ -1134,13 +1134,14 @@ final class TerminalSession implements AutoCloseable {
                             graphics.setFont(fonts.forStyle(GhosttyStyle.bold(style), GhosttyStyle.italic(style)));
                             graphics.fillText(renderedText, x, baseline);
                             drawTextDecorations(graphics, x, y, metrics, style, selected, baseTextColor, textColor, theme, faintFactor);
+                            if (GhosttyStyle.underline(style) == ghostty_vt_h.GHOSTTY_SGR_UNDERLINE_NONE()
+                                    && !GhosttyStyle.strikethrough(style)
+                                    && !GhosttyStyle.overline(style)
+                                    && cellHyperlink(screenPoint, arena) != null) {
+                                graphics.setStroke(applyOpacity(baseTextColor, faintFactor * (hovered ? 0.85 : 0.45)));
+                                drawUnderline(graphics, x, y + metrics.cellHeightPx() - 2.5, metrics.cellWidthPx(), ghostty_vt_h.GHOSTTY_SGR_UNDERLINE_DOTTED());
+                            }
                         }
-                    }
-
-                    if (hovered) {
-                        var hoverColor = selected ? theme.selectionText() : toFxColor(foreground);
-                        graphics.setStroke(applyOpacity(hoverColor, faintFactor));
-                        drawHoverUnderline(graphics, x, y, metrics);
                     }
                     x += metrics.cellWidthPx();
                     viewportX++;
@@ -1650,17 +1651,6 @@ final class TerminalSession implements AutoCloseable {
                 : theme.searchMatchColor();
     }
 
-    private static void drawHoverUnderline(
-            GraphicsContext graphics,
-            double x,
-            double y,
-            TerminalView.CellMetrics metrics) {
-        graphics.setLineWidth(1.0);
-        var underlineY = y + metrics.cellHeightPx() - 2.5;
-        graphics.strokeLine(x, underlineY, x + metrics.cellWidthPx(), underlineY);
-        graphics.setLineWidth(1.0);
-    }
-
     private void drawTextDecorations(
             GraphicsContext graphics,
             double x,
@@ -1723,7 +1713,7 @@ final class TerminalSession implements AutoCloseable {
             var dotY = Math.round(y);
             var spacing = 3.0;
             var phase = 1.0;
-            var endX = x + width;
+            var endX = x + width - 1;
             for (var dotX = Math.ceil((x - phase) / spacing) * spacing + phase; dotX <= endX; dotX += spacing) {
                 graphics.fillRect(dotX, dotY, 1, 1);
             }
