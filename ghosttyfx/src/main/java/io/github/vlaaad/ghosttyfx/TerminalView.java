@@ -61,9 +61,10 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
     private static final short MOUSE_ALTERNATE_SCROLL_MODE = 1007;
     private static final short BRACKETED_PASTE_MODE = 2004;
     private static final double DEFAULT_SCROLL_MULTIPLIER_Y = 40;
-    private static final double SCROLLBAR_WIDTH_PX = 6;
-    private static final double SCROLLBAR_MARGIN_PX = 2;
-    private static final double MIN_SCROLLBAR_HEIGHT_PX = 10;
+    static final double SCROLLBAR_WIDTH_PX = 8;
+    static final double SCROLLBAR_MARGIN_PX = 1;
+    private static final double MIN_SCROLLBAR_HEIGHT_PX = 30;
+    static final double SCROLLBAR_ARC_PX = SCROLLBAR_WIDTH_PX;
     private static final double SCROLL_TOTAL_DELTA_EPSILON = 1e-6;
     private static final Duration BLINK_INTERVAL = Duration.millis(600);
     private static final Font DEFAULT_FONT = Font.font("Monospaced", 14);

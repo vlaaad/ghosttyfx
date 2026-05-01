@@ -61,7 +61,7 @@ final class TerminalSession implements AutoCloseable {
     private static final int PALETTE_SIZE = 256;
     private static final int MAX_GHOSTTY_DIMENSION = 0xFFFF;
     private static final short CURSOR_BLINKING_MODE = 12;
-    private static final long INITIAL_MAX_SCROLLBACK = 1_000;
+    private static final long INITIAL_MAX_SCROLLBACK = 10_000_000;
     private static final double BLOCK_CURSOR_ALPHA = 0.5;
     private static final byte[] XTVERSION_BYTES = "ghosttyfx".getBytes(StandardCharsets.UTF_8);
 
@@ -1048,7 +1048,7 @@ final class TerminalSession implements AutoCloseable {
             TerminalTheme theme,
             boolean cursorBlinkVisible,
             boolean textBlinkVisible,
-            double scrollbarWidthPx,
+            double scrollbarReservedWidthPx,
             double minScrollbarHeightPx) {
         graphics.setFont(fonts.regular());
 
@@ -1258,10 +1258,16 @@ final class TerminalSession implements AutoCloseable {
             graphics.setFont(fonts.regular());
             renderPreedit(graphics, metrics, fonts, preedit, cursor, theme);
 
-            var scrollbarInfo = scrollbarInfo(width, height, scrollbarWidthPx, minScrollbarHeightPx);
+            var scrollbarInfo = scrollbarInfo(width, height, scrollbarReservedWidthPx, minScrollbarHeightPx);
             if (scrollbarInfo != null && scrollbarInfo.scrollable()) {
                 graphics.setFill(theme.scrollbarColor());
-                graphics.fillRect(scrollbarInfo.thumbX(), scrollbarInfo.thumbY(), scrollbarWidthPx, scrollbarInfo.thumbHeight());
+                graphics.fillRoundRect(
+                        scrollbarInfo.thumbX(),
+                        scrollbarInfo.thumbY(),
+                        TerminalView.SCROLLBAR_WIDTH_PX,
+                        scrollbarInfo.thumbHeight(),
+                        TerminalView.SCROLLBAR_ARC_PX,
+                        TerminalView.SCROLLBAR_ARC_PX);
             }
             return new BlinkState(hasCursorBlink, hasTextBlink);
         }
@@ -2223,7 +2229,7 @@ final class TerminalSession implements AutoCloseable {
             long total,
             long visible,
             long offset,
-            double thumbLeft,
+            double gutterLeft,
             double height,
             double thumbY,
             double thumbHeight) {
@@ -2281,7 +2287,7 @@ final class TerminalSession implements AutoCloseable {
         }
 
         double thumbX() {
-            return thumbLeft + 2;
+            return gutterLeft + TerminalView.SCROLLBAR_MARGIN_PX;
         }
     }
 
