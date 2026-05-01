@@ -4,7 +4,6 @@ import io.github.vlaaad.ghostty.bindings.ghostty_vt_h;
 import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.List;
-import java.util.Locale;
 import java.util.Set;
 import javafx.scene.input.KeyCode;
 import javafx.scene.input.KeyEvent;
@@ -16,7 +15,7 @@ final class KeyInput {
         return new State(Set.of(), Set.of(), List.of(), false, Preedit.empty());
     }
 
-    static Transition onKeyPressed(State state, Platform platform, boolean macOptionAsAlt, KeySnapshot event) {
+    static Transition onKeyPressed(State state, HostPlatform platform, boolean macOptionAsAlt, KeySnapshot event) {
         var classification = classify(event.code());
         var pressed = copyKeys(state.pressedKeys());
         var repeat = !pressed.add(event.code());
@@ -45,12 +44,12 @@ final class KeyInput {
         }
 
         var altGrText = state.altGraphDown();
-        var macOptionText = platform == Platform.MACOS
+        var macOptionText = platform.os() == HostPlatform.OS.MACOS
                 && !macOptionAsAlt
                 && event.altDown()
                 && !event.controlDown()
                 && !event.metaDown();
-        var windowsAltNumpad = platform == Platform.WINDOWS
+        var windowsAltNumpad = platform.os() == HostPlatform.OS.WINDOWS
                 && event.altDown()
                 && !event.controlDown()
                 && !event.metaDown()
@@ -125,8 +124,8 @@ final class KeyInput {
                 false);
     }
 
-    static Transition onKeyTyped(State state, Platform platform, boolean metaDown, String text) {
-        if (platform == Platform.MACOS && metaDown) {
+    static Transition onKeyTyped(State state, HostPlatform platform, boolean metaDown, String text) {
+        if (platform.os() == HostPlatform.OS.MACOS && metaDown) {
             return new Transition(state, List.of(), false, false);
         }
 
@@ -311,23 +310,6 @@ final class KeyInput {
                     INFO, COLORED_KEY_0, COLORED_KEY_1, COLORED_KEY_2, COLORED_KEY_3, RECORD, FAST_FWD, REWIND,
                     CHANNEL_UP, CHANNEL_DOWN -> new KeyClassification(Bucket.SEMANTIC, ghostty_vt_h.GHOSTTY_KEY_UNIDENTIFIED(), 0, TextKind.NONE, false, false);
         };
-    }
-
-    enum Platform {
-        WINDOWS,
-        MACOS,
-        LINUX;
-
-        static Platform current() {
-            var os = System.getProperty("os.name", "").toLowerCase(Locale.ROOT);
-            if (os.contains("win")) {
-                return WINDOWS;
-            }
-            if (os.contains("mac") || os.contains("darwin")) {
-                return MACOS;
-            }
-            return LINUX;
-        }
     }
 
     enum Bucket {

@@ -99,8 +99,6 @@ final class TerminalSession implements AutoCloseable {
         GhosttyString.len(xtversionString, XTVERSION_BYTES.length);
 
         try (var arena = Arena.ofConfined()) {
-            GhosttyFx.NativeLibraryHolder.ensureLoaded();
-
             var terminalPointer = arena.allocate(ValueLayout.ADDRESS);
             var options = GhosttyTerminalOptions.allocate(arena);
             GhosttyTerminalOptions.cols(options, (short) initialColumns);

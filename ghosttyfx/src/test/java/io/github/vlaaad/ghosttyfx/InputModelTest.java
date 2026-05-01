@@ -20,11 +20,11 @@ final class InputModelTest {
     @Test
     void encodesPrintableInput() {
         var state = KeyInput.initialState();
-        var pressed = KeyInput.onKeyPressed(state, KeyInput.Platform.LINUX, false, snapshot(KeyCode.A));
+        var pressed = KeyInput.onKeyPressed(state, linux(), false, snapshot(KeyCode.A));
         assertTrue(pressed.outputs().isEmpty());
         assertEquals(1, pressed.state().deferredPresses().size());
 
-        var typed = KeyInput.onKeyTyped(pressed.state(), KeyInput.Platform.LINUX, false, "a");
+        var typed = KeyInput.onKeyTyped(pressed.state(), linux(), false, "a");
         assertEquals(1, typed.outputs().size());
         assertEquals(
                 new KeyInput.EncodeOutput(
@@ -44,11 +44,11 @@ final class InputModelTest {
         var state = KeyInput.initialState();
         var pressed = KeyInput.onKeyPressed(
                 state,
-                KeyInput.Platform.LINUX,
+                linux(),
                 false,
                 snapshot(KeyCode.A, true, false, false, false));
 
-        var typed = KeyInput.onKeyTyped(pressed.state(), KeyInput.Platform.LINUX, false, "A");
+        var typed = KeyInput.onKeyTyped(pressed.state(), linux(), false, "A");
         assertEquals(
                 new KeyInput.EncodeOutput(
                         KeyCode.A,
@@ -66,7 +66,7 @@ final class InputModelTest {
     void encodesCtrlComboImmediately() {
         var transition = KeyInput.onKeyPressed(
                 KeyInput.initialState(),
-                KeyInput.Platform.LINUX,
+                linux(),
                 false,
                 snapshot(KeyCode.C, false, true, false, false));
 
@@ -87,19 +87,19 @@ final class InputModelTest {
     void defersAltGrText() {
         var state = KeyInput.onKeyPressed(
                         KeyInput.initialState(),
-                        KeyInput.Platform.LINUX,
+                        linux(),
                         false,
                         snapshot(KeyCode.ALT_GRAPH))
                 .state();
 
         var pressed = KeyInput.onKeyPressed(
                 state,
-                KeyInput.Platform.LINUX,
+                linux(),
                 false,
                 snapshot(KeyCode.Q, false, true, true, false));
         assertTrue(pressed.outputs().isEmpty());
 
-        var typed = KeyInput.onKeyTyped(pressed.state(), KeyInput.Platform.LINUX, false, "@");
+        var typed = KeyInput.onKeyTyped(pressed.state(), linux(), false, "@");
         assertEquals(
                 new KeyInput.EncodeOutput(
                         KeyCode.Q,
@@ -117,12 +117,12 @@ final class InputModelTest {
     void defersMacOptionTextWhenOptionIsNotAlt() {
         var pressed = KeyInput.onKeyPressed(
                 KeyInput.initialState(),
-                KeyInput.Platform.MACOS,
+                macos(),
                 false,
                 snapshot(KeyCode.E, false, false, true, false));
         assertTrue(pressed.outputs().isEmpty());
 
-        var typed = KeyInput.onKeyTyped(pressed.state(), KeyInput.Platform.MACOS, false, "€");
+        var typed = KeyInput.onKeyTyped(pressed.state(), macos(), false, "€");
         assertEquals(
                 new KeyInput.EncodeOutput(
                         KeyCode.E,
@@ -140,7 +140,7 @@ final class InputModelTest {
     void treatsMacOptionAsAltWhenEnabled() {
         var transition = KeyInput.onKeyPressed(
                 KeyInput.initialState(),
-                KeyInput.Platform.MACOS,
+                macos(),
                 true,
                 snapshot(KeyCode.E, false, false, true, false));
 
@@ -162,18 +162,18 @@ final class InputModelTest {
         var state = KeyInput.initialState();
         state = KeyInput.onKeyPressed(
                         state,
-                        KeyInput.Platform.WINDOWS,
+                        windows(),
                         false,
                         snapshot(KeyCode.NUMPAD1, false, false, true, false))
                 .state();
         state = KeyInput.onKeyPressed(
                         state,
-                        KeyInput.Platform.WINDOWS,
+                        windows(),
                         false,
                         snapshot(KeyCode.NUMPAD6, false, false, true, false))
                 .state();
 
-        var typed = KeyInput.onKeyTyped(state, KeyInput.Platform.WINDOWS, false, "A");
+        var typed = KeyInput.onKeyTyped(state, windows(), false, "A");
         assertEquals(1, typed.outputs().size());
         assertEquals(new KeyInput.RawTextOutput("A"), typed.outputs().getFirst());
         assertTrue(typed.state().deferredPresses().isEmpty());
@@ -184,18 +184,18 @@ final class InputModelTest {
         var state = KeyInput.initialState();
         state = KeyInput.onKeyPressed(
                         state,
-                        KeyInput.Platform.LINUX,
+                        linux(),
                         false,
                         snapshot(KeyCode.DEAD_ACUTE))
                 .state();
         state = KeyInput.onKeyPressed(
                         state,
-                        KeyInput.Platform.LINUX,
+                        linux(),
                         false,
                         snapshot(KeyCode.A))
                 .state();
 
-        var typed = KeyInput.onKeyTyped(state, KeyInput.Platform.LINUX, false, "á");
+        var typed = KeyInput.onKeyTyped(state, linux(), false, "á");
         assertEquals(new KeyInput.RawTextOutput("á"), typed.outputs().getFirst());
         assertTrue(typed.state().deferredPresses().isEmpty());
     }
@@ -204,7 +204,7 @@ final class InputModelTest {
     void handlesImePreeditAndCommit() {
         var pressed = KeyInput.onKeyPressed(
                 KeyInput.initialState(),
-                KeyInput.Platform.LINUX,
+                linux(),
                 false,
                 snapshot(KeyCode.A));
         var preedit = KeyInput.onInputMethodTextChanged(pressed.state(), "あ", 1, "");
@@ -233,14 +233,14 @@ final class InputModelTest {
         var state = KeyInput.initialState();
         state = KeyInput.onKeyPressed(
                         state,
-                        KeyInput.Platform.LINUX,
+                        linux(),
                         false,
                         snapshot(KeyCode.DEAD_ACUTE))
                 .state();
         state = KeyInput.onInputMethodTextChanged(state, "´", 1, "´").state();
         state = KeyInput.onKeyPressed(
                         state,
-                        KeyInput.Platform.LINUX,
+                        linux(),
                         false,
                         snapshot(KeyCode.A))
                 .state();
@@ -262,13 +262,13 @@ final class InputModelTest {
     void supportsLateTypedAfterRelease() {
         var pressed = KeyInput.onKeyPressed(
                 KeyInput.initialState(),
-                KeyInput.Platform.LINUX,
+                linux(),
                 false,
                 snapshot(KeyCode.A));
         var released = KeyInput.onKeyReleased(pressed.state(), snapshot(KeyCode.A));
         assertTrue(released.outputs().isEmpty());
 
-        var typed = KeyInput.onKeyTyped(released.state(), KeyInput.Platform.LINUX, false, "a");
+        var typed = KeyInput.onKeyTyped(released.state(), linux(), false, "a");
         assertEquals(2, typed.outputs().size());
         assertEquals(
                 new KeyInput.EncodeOutput(
@@ -298,7 +298,7 @@ final class InputModelTest {
     void ignoresMacCommandTypedText() {
         var typed = KeyInput.onKeyTyped(
                 KeyInput.initialState(),
-                KeyInput.Platform.MACOS,
+                macos(),
                 true,
                 "a");
 
@@ -330,5 +330,17 @@ final class InputModelTest {
 
     private static short mods(int value) {
         return (short) value;
+    }
+
+    private static HostPlatform linux() {
+        return new HostPlatform(HostPlatform.OS.LINUX, HostPlatform.Arch.X86_64);
+    }
+
+    private static HostPlatform macos() {
+        return new HostPlatform(HostPlatform.OS.MACOS, HostPlatform.Arch.AARCH64);
+    }
+
+    private static HostPlatform windows() {
+        return new HostPlatform(HostPlatform.OS.WINDOWS, HostPlatform.Arch.X86_64);
     }
 }

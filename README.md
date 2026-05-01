@@ -20,7 +20,6 @@ Generated per-platform `jextract` bindings for `libghostty-vt`.
 17. URL handling:
   - regex URL matching
   - copy URL under cursor
-19. get rid of version, GhosttyFx class
 
 ### v2
 6. kitty graphics

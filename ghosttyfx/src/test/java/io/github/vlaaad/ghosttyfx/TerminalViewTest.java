@@ -22,6 +22,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Pattern;
 import javafx.application.Platform;
@@ -200,6 +201,19 @@ final class TerminalViewTest {
                 assertThrows(NullPointerException.class, () -> view.setShortcuts(null));
                 return null;
             });
+        }
+    }
+
+    @Test
+    void exposesBellAndTitleEffectsFromTerminalOutput() throws Exception {
+        var bells = new AtomicInteger();
+        try (var view = createView("\u0007\u001B]2;ghosttyfx title\u001B\\")) {
+            view.setOnBell(bells::incrementAndGet);
+
+            await("terminal bell and title effects", START_TIMEOUT, () -> runOnFxThread(() ->
+                    bells.get() == 1 && "ghosttyfx title".equals(view.getTitle())
+                            ? Optional.of(Boolean.TRUE)
+                            : Optional.empty()));
         }
     }
 
@@ -626,11 +640,11 @@ final class TerminalViewTest {
     }
 
     private static TerminalView createView(ShellCommand shell, Path cwd) throws IOException {
-        return GhosttyFx.create((_, _) -> new ProcessTerminal(shell.command(), cwd));
+        return new TerminalView((_, _) -> new ProcessTerminal(shell.command(), cwd));
     }
 
     private static TerminalView createView(String output) throws IOException {
-        return GhosttyFx.create((_, _) -> new StaticTerminal(output));
+        return new TerminalView((_, _) -> new StaticTerminal(output));
     }
 
     private static <T> T runOnFxThread(CheckedSupplier<T> supplier) throws Exception {

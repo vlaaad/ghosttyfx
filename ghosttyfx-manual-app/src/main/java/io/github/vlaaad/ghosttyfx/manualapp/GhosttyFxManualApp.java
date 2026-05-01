@@ -1,7 +1,6 @@
 package io.github.vlaaad.ghosttyfx.manualapp;
 
 import io.github.vlaaad.ghosttyfx.TerminalView;
-import io.github.vlaaad.ghosttyfx.GhosttyFx;
 import io.github.vlaaad.ghosttyfx.TerminalState;
 import io.github.vlaaad.ghosttyfx.TerminalTheme;
 
@@ -112,7 +111,7 @@ public final class GhosttyFxManualApp {
 
                 final TerminalView view;
                 try {
-                    view = GhosttyFx.create((columns, rows) -> new PtyTerminal(terminal.command(), cwd, System.getenv(), columns, rows));
+                    view = new TerminalView((columns, rows) -> new PtyTerminal(terminal.command(), cwd, System.getenv(), columns, rows));
                     if (theme != null) {
                         view.setTheme(theme.theme());
                     }

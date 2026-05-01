@@ -72,8 +72,6 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
     private final AnimationTimer processOutputDrain;
     private final Timeline cursorBlinkTimeline;
     private final Timeline textBlinkTimeline;
-    private final KeyInput.Platform inputPlatform = KeyInput.Platform.current();
-
     private KeyInput.State keyInputState = KeyInput.initialState();
     private MouseInput.State mouseInputState = MouseInput.initialState();
     private Selection selection = Selection.empty();
@@ -146,6 +144,7 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
             () -> INITIAL_ROWS * cellMetrics.get().cellHeightPx());
 
     public TerminalView(TerminalFactory terminalFactory) {
+        NativeLibrary.ensureLoaded();
         title = new SimpleStringProperty(this, "title", "Terminal");
         ptySession = new PtySession(Objects.requireNonNull(terminalFactory, "terminalFactory"), INITIAL_COLUMNS, INITIAL_ROWS);
         processOutputDrain = new ProcessOutputDrain(this);
@@ -177,22 +176,22 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
                 });
         shortcuts.addAll(
                 new Shortcut(
-                        inputPlatform == KeyInput.Platform.MACOS
+                        HostPlatform.CURRENT.os() == HostPlatform.OS.MACOS
                                 ? new KeyCodeCombination(KeyCode.C, KeyCombination.META_DOWN)
                                 : new KeyCodeCombination(KeyCode.C, KeyCombination.CONTROL_DOWN),
                         this::copySelection),
                 new Shortcut(
-                        inputPlatform == KeyInput.Platform.MACOS
+                        HostPlatform.CURRENT.os() == HostPlatform.OS.MACOS
                                 ? new KeyCodeCombination(KeyCode.V, KeyCombination.META_DOWN)
                                 : new KeyCodeCombination(KeyCode.V, KeyCombination.CONTROL_DOWN),
                         this::pasteClipboard),
                 new Shortcut(
-                        inputPlatform == KeyInput.Platform.MACOS
+                        HostPlatform.CURRENT.os() == HostPlatform.OS.MACOS
                                 ? new KeyCodeCombination(KeyCode.A, KeyCombination.META_DOWN)
                                 : new KeyCodeCombination(KeyCode.A, KeyCombination.CONTROL_DOWN, KeyCombination.SHIFT_DOWN),
                         this::selectAll),
                 new Shortcut(
-                        inputPlatform == KeyInput.Platform.MACOS
+                        HostPlatform.CURRENT.os() == HostPlatform.OS.MACOS
                                 ? new KeyCodeCombination(KeyCode.F, KeyCombination.META_DOWN)
                                 : new KeyCodeCombination(KeyCode.F, KeyCombination.CONTROL_DOWN, KeyCombination.SHIFT_DOWN),
                         this::toggleSearch),
@@ -205,26 +204,26 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
                 new Shortcut(new KeyCodeCombination(KeyCode.HOME, KeyCombination.SHIFT_DOWN), this::extendSelectionHome),
                 new Shortcut(new KeyCodeCombination(KeyCode.END, KeyCombination.SHIFT_DOWN), this::extendSelectionEnd),
                 new Shortcut(
-                        inputPlatform == KeyInput.Platform.MACOS
+                        HostPlatform.CURRENT.os() == HostPlatform.OS.MACOS
                                 ? new KeyCodeCombination(KeyCode.PAGE_UP, KeyCombination.META_DOWN)
                                 : new KeyCodeCombination(KeyCode.PAGE_UP, KeyCombination.SHIFT_DOWN),
                         this::scrollViewportPageUp),
                 new Shortcut(
-                        inputPlatform == KeyInput.Platform.MACOS
+                        HostPlatform.CURRENT.os() == HostPlatform.OS.MACOS
                                 ? new KeyCodeCombination(KeyCode.PAGE_DOWN, KeyCombination.META_DOWN)
                                 : new KeyCodeCombination(KeyCode.PAGE_DOWN, KeyCombination.SHIFT_DOWN),
                         this::scrollViewportPageDown),
                 new Shortcut(
-                        inputPlatform == KeyInput.Platform.MACOS
+                        HostPlatform.CURRENT.os() == HostPlatform.OS.MACOS
                                 ? new KeyCodeCombination(KeyCode.HOME, KeyCombination.META_DOWN)
                                 : new KeyCodeCombination(KeyCode.HOME, KeyCombination.SHIFT_DOWN),
                         this::scrollViewportToTop),
                 new Shortcut(
-                        inputPlatform == KeyInput.Platform.MACOS
+                        HostPlatform.CURRENT.os() == HostPlatform.OS.MACOS
                                 ? new KeyCodeCombination(KeyCode.END, KeyCombination.META_DOWN)
                                 : new KeyCodeCombination(KeyCode.END, KeyCombination.SHIFT_DOWN),
                         this::scrollViewportToBottom));
-        if (inputPlatform == KeyInput.Platform.MACOS) {
+        if (HostPlatform.CURRENT.os() == HostPlatform.OS.MACOS) {
             shortcuts.addAll(
                     new Shortcut(new KeyCodeCombination(KeyCode.LEFT, KeyCombination.ALT_DOWN), () -> sendEsc("b")),
                     new Shortcut(new KeyCodeCombination(KeyCode.RIGHT, KeyCombination.ALT_DOWN), () -> sendEsc("f")),
@@ -444,7 +443,7 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
         }
         if (handleShortcut(event) || applyTransition(KeyInput.onKeyPressed(
                 keyInputState,
-                inputPlatform,
+                HostPlatform.CURRENT,
                 isMacOptionAsAlt(),
                 snapshot(event)))) {
             event.consume();
@@ -460,7 +459,7 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
     private void handleKeyTyped(KeyEvent event) {
         if (applyTransition(KeyInput.onKeyTyped(
                 keyInputState,
-                inputPlatform,
+                HostPlatform.CURRENT,
                 event.isMetaDown(),
                 event.getCharacter()))) {
             event.consume();
@@ -1029,7 +1028,7 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
     }
 
     private boolean isRectangleSelection(MouseEvent event) {
-        return inputPlatform == KeyInput.Platform.MACOS
+        return HostPlatform.CURRENT.os() == HostPlatform.OS.MACOS
                 ? event.isAltDown()
                 : event.isAltDown() && (event.isControlDown() || event.isMetaDown());
     }
