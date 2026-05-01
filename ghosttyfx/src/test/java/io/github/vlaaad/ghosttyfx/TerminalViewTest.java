@@ -153,7 +153,7 @@ final class TerminalViewTest {
     }
 
     @Test
-    void exposesShortcutListProperty() throws Exception {
+    void exposesShortcutList() throws Exception {
         var tempDirectory = Files.createTempDirectory("ghosttyfx-selection-shortcuts-test-");
         var pidFile = tempDirectory.resolve("shell.pid");
         var shell = discoverShell(pidFile);
@@ -199,14 +199,13 @@ final class TerminalViewTest {
                         () -> false);
                 view.getShortcuts().add(shortcut);
                 assertTrue(view.getShortcuts().contains(shortcut));
-                assertThrows(NullPointerException.class, () -> view.setShortcuts(null));
                 return null;
             });
         }
     }
 
     @Test
-    void exposesRegexLinkListProperty() throws Exception {
+    void exposesRegexLinkList() throws Exception {
         try (var view = createView("")) {
             runOnFxThread(() -> {
                 var link = new RegexLink(Pattern.compile("issue-(\\d+)"), _ -> {});
@@ -214,7 +213,6 @@ final class TerminalViewTest {
                 assertTrue(view.getRegexLinks().contains(link));
                 assertThrows(NullPointerException.class, () -> new RegexLink(null, _ -> {}));
                 assertThrows(NullPointerException.class, () -> new RegexLink(Pattern.compile("x"), null));
-                assertThrows(NullPointerException.class, () -> view.setRegexLinks(null));
                 return null;
             });
         }

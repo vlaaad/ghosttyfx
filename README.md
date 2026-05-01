@@ -16,7 +16,6 @@ Generated per-platform `jextract` bindings for `libghostty-vt`.
 ## Next steps
 
 ### v1
-18. check: do we need setters for observable lists?
 19. perf
 20. doc
 21. release

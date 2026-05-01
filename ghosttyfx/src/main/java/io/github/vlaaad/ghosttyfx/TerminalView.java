@@ -19,16 +19,15 @@ import javafx.animation.Timeline;
 import javafx.beans.binding.Bindings;
 import javafx.beans.binding.ObjectBinding;
 import javafx.beans.property.BooleanProperty;
-import javafx.beans.property.ListProperty;
 import javafx.beans.property.ObjectProperty;
 import javafx.beans.property.ReadOnlyObjectProperty;
 import javafx.beans.property.ReadOnlyObjectWrapper;
 import javafx.beans.property.SimpleBooleanProperty;
-import javafx.beans.property.SimpleListProperty;
 import javafx.beans.property.SimpleObjectProperty;
 import javafx.beans.property.SimpleStringProperty;
 import javafx.beans.property.StringProperty;
 import javafx.collections.FXCollections;
+import javafx.collections.ListChangeListener;
 import javafx.collections.ObservableList;
 import javafx.geometry.Point2D;
 import javafx.scene.Cursor;
@@ -116,18 +115,8 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
                 Font.font(font.getFamily(), FontWeight.BOLD, FontPosture.ITALIC, font.getSize()));
     }, font);
     private final BooleanProperty macOptionAsAlt = new SimpleBooleanProperty(this, "macOptionAsAlt", false);
-    private final ListProperty<Shortcut> shortcuts = new SimpleListProperty<>(this, "shortcuts", FXCollections.observableArrayList()) {
-        @Override
-        public void set(ObservableList<Shortcut> value) {
-            super.set(Objects.requireNonNull(value, "shortcuts"));
-        }
-    };
-    private final ListProperty<RegexLink> regexLinks = new SimpleListProperty<>(this, "regexLinks", FXCollections.observableArrayList()) {
-        @Override
-        public void set(ObservableList<RegexLink> value) {
-            super.set(Objects.requireNonNull(value, "regexLinks"));
-        }
-    };
+    private final ObservableList<Shortcut> shortcuts = FXCollections.observableArrayList();
+    private final ObservableList<RegexLink> regexLinks = FXCollections.observableArrayList();
     private final ReadOnlyObjectWrapper<TerminalState> terminalState =
             new ReadOnlyObjectWrapper<>(this, "terminalState", new TerminalState.Running());
 
@@ -267,7 +256,7 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
         resize(prefWidth(-1), prefHeight(-1));
         cellMetrics.addListener((_, _, _) -> handleResize());
         terminalFonts.addListener((_, _, _) -> redraw());
-        regexLinks.addListener((_, _, _) -> redraw());
+        regexLinks.addListener((ListChangeListener<RegexLink>) _ -> redraw());
         cursorBlinking.addListener((_, _, value) -> {
             terminalSession.setCursorBlinking(value);
             cursorBlinkVisible = true;
@@ -367,26 +356,10 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
     }
 
     public ObservableList<Shortcut> getShortcuts() {
-        return shortcuts.get();
-    }
-
-    public void setShortcuts(ObservableList<Shortcut> value) {
-        shortcuts.set(value);
-    }
-
-    public ListProperty<Shortcut> shortcutsProperty() {
         return shortcuts;
     }
 
     public ObservableList<RegexLink> getRegexLinks() {
-        return regexLinks.get();
-    }
-
-    public void setRegexLinks(ObservableList<RegexLink> value) {
-        regexLinks.set(value);
-    }
-
-    public ListProperty<RegexLink> regexLinksProperty() {
         return regexLinks;
     }
 
