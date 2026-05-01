@@ -5,7 +5,6 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
-import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -83,13 +82,11 @@ final class PtySession implements AutoCloseable {
                     outputTask.get();
                 } catch (InterruptedException _) {
                     // proceed to closing the terminal
-                } catch (ExecutionException e) {
-                    throw e.getCause();
                 }
             }
             processOutputs.put(new Closed(new TerminalState.Closed()));
-        } catch (Throwable t) {
-            processOutputs.put(new Closed(new TerminalState.Failed(t)));
+        } catch (Exception e) {
+            processOutputs.put(new Closed(new TerminalState.Failed(e)));
         }
         return null;
     }

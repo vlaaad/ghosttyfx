@@ -10,7 +10,7 @@ public sealed interface TerminalState permits TerminalState.Running, TerminalSta
     record Closed() implements TerminalState {
     }
 
-    record Failed(Throwable error) implements TerminalState {
+    record Failed(Exception error) implements TerminalState {
 
         public Failed {
             Objects.requireNonNull(error, "error");

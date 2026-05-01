@@ -1,17 +1,16 @@
 package io.github.vlaaad.ghosttyfx;
 
-import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 
 public interface Terminal extends AutoCloseable {
 
-    InputStream output() throws IOException;
+    InputStream output() throws Exception;
 
-    OutputStream input() throws IOException;
+    OutputStream input() throws Exception;
 
-    void resize(int columns, int rows) throws IOException;
+    void resize(int columns, int rows) throws Exception;
 
     @Override
-    void close() throws IOException;
+    void close() throws Exception;
 }
