@@ -16,18 +16,19 @@ Generated per-platform `jextract` bindings for `libghostty-vt`.
 ## Next steps
 
 ### v1
-19. perf
+14. Semantic prompt / shell integration UI (osc 133): libghostty parses semantic prompt data, but the view does not expose prompt navigation, command regions, or similar UI behavior.
+14.0. implement shell injections first to make terminals emit osc 133 markers (osc 633 not supported); PowerShell/pwsh must emit prompt-start and prompt-end markers around the rendered prompt.
+14.0.1. resize acceptance: with injected PowerShell/pwsh, prompt at 80 columns, resize to 6 columns, then back to 80; the cursor must return to the prompt end through the real PTY + libghostty path, not by a JavaFX-only workaround.
+14.0.2. note: plain prompts without osc 133 markers reproduce libghostty cursor pin reflow behavior (`38,0 -> 5,0 -> 5,0`), so shell integration is required for prompt redraw after shrink/grow.
+14.1. prompt-aware navigation (ctrl+up/down) to jump to prev/next prompts.
+14.2. region selection (quadruple-click to select region)
+14.3. prompt marks in left edge
+14.4. regex url parsing: suppress on input regions
 20. doc
 21. release
 
 ### v2
 6. kitty graphics
-14. Semantic prompt / shell integration UI (osc 133): libghostty parses semantic prompt data, but the view does not expose prompt navigation, command regions, or similar UI behavior.
-14.0. blocker: we need to implement shell injections first to make terminals emit osc 133/633 markers
-14.1. prompt-aware navigation (ctrl+up/down) to jump to prev/next prompts.
-14.2. region selection (quadruple-click to select region)
-14.3. prompt marks in left edge
-14.4. regex url parsing: suppress on input regions
 
 ## Local Build
 
