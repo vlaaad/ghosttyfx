@@ -1,8 +1,9 @@
 package io.github.vlaaad.ghosttyfx.manualapp;
 
-import io.github.vlaaad.ghosttyfx.TerminalView;
+import io.github.vlaaad.ghosttyfx.Shell;
 import io.github.vlaaad.ghosttyfx.TerminalState;
 import io.github.vlaaad.ghosttyfx.TerminalTheme;
+import io.github.vlaaad.ghosttyfx.TerminalView;
 
 import java.io.File;
 import java.io.IOException;
@@ -111,7 +112,10 @@ public final class GhosttyFxManualApp {
 
                 final TerminalView view;
                 try {
-                    view = new TerminalView((columns, rows) -> new PtyTerminal(terminal.command(), cwd, System.getenv(), columns, rows));
+                    view = new TerminalView((columns, rows) -> {
+                        var launcher = Shell.integrate(terminal.command(), System.getenv());
+                        return new PtyTerminal(launcher.command(), cwd, launcher.environment(), columns, rows);
+                    });
                     if (theme != null) {
                         view.setTheme(theme.theme());
                     }
