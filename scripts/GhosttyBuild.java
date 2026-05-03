@@ -19,8 +19,10 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Properties;
 import java.util.regex.Pattern;
+import java.util.zip.CRC32;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
+import java.util.zip.ZipOutputStream;
 
 public final class GhosttyBuild {
     private static final String GHOSTTY_SUBMODULE = "ghostty";
@@ -357,6 +359,8 @@ public final class GhosttyBuild {
         copyDirectory(cachedArtifact.resolve("src"), outputs.generatedSourcesDir);
         copyDirectory(cachedArtifact.resolve("resources"), outputs.generatedResourcesDir);
         copyDirectory(cachedArtifact, outputs.artifactDir);
+        ensureNativeZip(outputs.generatedResourcesDir, platform);
+        ensureNativeZip(outputs.artifactDir.resolve("resources"), platform);
         return true;
     }
 
@@ -436,6 +440,36 @@ public final class GhosttyBuild {
                 Files.createDirectories(Objects.requireNonNull(resolved.getParent()));
                 Files.copy(zip, resolved, StandardCopyOption.REPLACE_EXISTING);
             }
+        }
+    }
+
+    private static void writeStoredZip(Path source, String entryName, Path target) throws IOException {
+        var bytes = Files.readAllBytes(source);
+        var crc = new CRC32();
+        crc.update(bytes);
+        var entry = new ZipEntry(entryName);
+        entry.setMethod(ZipEntry.STORED);
+        entry.setSize(bytes.length);
+        entry.setCompressedSize(bytes.length);
+        entry.setCrc(crc.getValue());
+        entry.setTime(0);
+        Files.createDirectories(Objects.requireNonNull(target.getParent()));
+        try (var output = Files.newOutputStream(target);
+             var zip = new ZipOutputStream(output)) {
+            zip.putNextEntry(entry);
+            zip.write(bytes);
+            zip.closeEntry();
+        }
+    }
+
+    private static void ensureNativeZip(Path resourcesDir, PlatformSpec platform) throws IOException {
+        var nativeZip = resourcesDir.resolve("native").resolve(platform.id + ".zip");
+        if (Files.isRegularFile(nativeZip)) {
+            return;
+        }
+        var legacyLibrary = resourcesDir.resolve("native").resolve(platform.id).resolve(platform.packagedLibraryFileName);
+        if (Files.isRegularFile(legacyLibrary)) {
+            writeStoredZip(legacyLibrary, platform.packagedLibraryFileName, nativeZip);
         }
     }
 
@@ -644,12 +678,12 @@ public final class GhosttyBuild {
         deleteDirectory(outputs.artifactDir);
         var artifactSrcDir = outputs.artifactDir.resolve("src");
         var artifactResourcesDir = outputs.artifactDir.resolve("resources");
-        var artifactNativeDir = artifactResourcesDir.resolve("native").resolve(platform.id);
-        var generatedNativeDir = outputs.generatedResourcesDir.resolve("native").resolve(platform.id);
+        var artifactNativeZip = artifactResourcesDir.resolve("native").resolve(platform.id + ".zip");
+        var generatedNativeZip = outputs.generatedResourcesDir.resolve("native").resolve(platform.id + ".zip");
         Files.createDirectories(outputs.generatedSourcesDir);
-        Files.createDirectories(generatedNativeDir);
+        Files.createDirectories(Objects.requireNonNull(generatedNativeZip.getParent()));
         Files.createDirectories(artifactSrcDir);
-        Files.createDirectories(artifactNativeDir);
+        Files.createDirectories(Objects.requireNonNull(artifactNativeZip.getParent()));
 
         var ghosttyRoot = repo.resolve(GHOSTTY_SUBMODULE);
         var includeDir = ghosttyRoot.resolve("zig-out").resolve("include");
@@ -661,10 +695,9 @@ public final class GhosttyBuild {
         runJextract(repo, jextractHome, includeDir, outputs.generatedSourcesDir, header);
 
         var builtLibrary = repo.resolve(platform.builtLibraryRelativePath);
-        var generatedLibrary = generatedNativeDir.resolve(platform.packagedLibraryFileName);
-        Files.copy(builtLibrary, generatedLibrary, StandardCopyOption.REPLACE_EXISTING);
+        writeStoredZip(builtLibrary, platform.packagedLibraryFileName, generatedNativeZip);
         copyDirectory(outputs.generatedSourcesDir, artifactSrcDir);
-        Files.copy(generatedLibrary, artifactNativeDir.resolve(platform.packagedLibraryFileName), StandardCopyOption.REPLACE_EXISTING);
+        Files.copy(generatedNativeZip, artifactNativeZip, StandardCopyOption.REPLACE_EXISTING);
         writeMetadata(outputs.generatedResourcesDir.resolve("metadata.properties"), platform, artifactId, ghosttyCommit);
         Files.copy(
             outputs.generatedResourcesDir.resolve("metadata.properties"),
@@ -727,11 +760,12 @@ public final class GhosttyBuild {
         var artifactHeader = artifactDir.resolve("src")
             .resolve(JEXTRACT_TARGET_PACKAGE.replace('.', java.io.File.separatorChar))
             .resolve(JEXTRACT_HEADER_CLASS + ".java");
-        var artifactLibrary = artifactDir.resolve("resources")
-            .resolve("native")
-            .resolve(platform.id)
-            .resolve(platform.packagedLibraryFileName);
-        if (!Files.isRegularFile(metadataFile) || !Files.isRegularFile(artifactHeader) || !Files.isRegularFile(artifactLibrary)) {
+        var artifactResources = artifactDir.resolve("resources");
+        var artifactLibrary = artifactResources.resolve("native").resolve(platform.id + ".zip");
+        var legacyArtifactLibrary = artifactResources.resolve("native").resolve(platform.id).resolve(platform.packagedLibraryFileName);
+        if (!Files.isRegularFile(metadataFile)
+            || !Files.isRegularFile(artifactHeader)
+            || (!Files.isRegularFile(artifactLibrary) && !Files.isRegularFile(legacyArtifactLibrary))) {
             return false;
         }
 
@@ -755,7 +789,7 @@ public final class GhosttyBuild {
         var generatedHeader = outputs.generatedSourcesDir
             .resolve(JEXTRACT_TARGET_PACKAGE.replace('.', java.io.File.separatorChar))
             .resolve(JEXTRACT_HEADER_CLASS + ".java");
-        var nativeLibrary = outputs.generatedResourcesDir.resolve("native").resolve(platform.id).resolve(platform.packagedLibraryFileName);
+        var nativeLibrary = outputs.generatedResourcesDir.resolve("native").resolve(platform.id + ".zip");
         if (!Files.isRegularFile(metadataFile) || !Files.isRegularFile(generatedHeader) || !Files.isRegularFile(nativeLibrary)) {
             return false;
         }

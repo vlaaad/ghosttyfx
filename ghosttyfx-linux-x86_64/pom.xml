@@ -21,7 +21,6 @@
         <ghosttyfx.generated.resources.dir>${project.build.directory}/generated-resources/ghosttyfx</ghosttyfx.generated.resources.dir>
         <ghosttyfx.artifact.dir>${project.build.directory}/ghosttyfx-artifact</ghosttyfx.artifact.dir>
         <ghosttyfx.script>${project.parent.basedir}/scripts/GhosttyBuild.java</ghosttyfx.script>
-        <ghosttyfx.native.pattern>*.so</ghosttyfx.native.pattern>
     </properties>
 
     <build>
@@ -75,18 +74,18 @@
                 <artifactId>maven-resources-plugin</artifactId>
                 <executions>
                     <execution>
-                        <id>copy-native-library</id>
+                        <id>copy-native-zip</id>
                         <phase>process-resources</phase>
                         <goals>
                             <goal>copy-resources</goal>
                         </goals>
                         <configuration>
-                            <outputDirectory>${project.build.outputDirectory}/native/${ghosttyfx.platform.id}</outputDirectory>
+                            <outputDirectory>${project.build.outputDirectory}/native</outputDirectory>
                             <resources>
                                 <resource>
-                                    <directory>${ghosttyfx.generated.resources.dir}/native/${ghosttyfx.platform.id}</directory>
+                                    <directory>${ghosttyfx.generated.resources.dir}/native</directory>
                                     <includes>
-                                        <include>${ghosttyfx.native.pattern}</include>
+                                        <include>${ghosttyfx.platform.id}.zip</include>
                                     </includes>
                                 </resource>
                             </resources>
