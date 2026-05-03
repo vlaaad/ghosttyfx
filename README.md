@@ -29,6 +29,8 @@ Generated per-platform `jextract` bindings for `libghostty-vt`.
 
 ### v2
 6. kitty graphics
+7. check out `_get_multi` for perf
+8. explore backarrow key mode support
 
 ## Local Build
 
