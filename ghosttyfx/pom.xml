@@ -65,8 +65,14 @@
                         <configuration>
                             <target>
                                 <mkdir dir="${project.build.outputDirectory}/shell"/>
+                                <zip destfile="${project.build.outputDirectory}/shell/bash.zip"
+                                     basedir="${project.basedir}/src/main/resources/shell/bash"/>
+                                <zip destfile="${project.build.outputDirectory}/shell/fish.zip"
+                                     basedir="${project.basedir}/src/main/resources/shell/fish"/>
                                 <zip destfile="${project.build.outputDirectory}/shell/pwsh.zip"
                                      basedir="${project.basedir}/src/main/resources/shell/pwsh"/>
+                                <zip destfile="${project.build.outputDirectory}/shell/zsh.zip"
+                                     basedir="${project.basedir}/src/main/resources/shell/zsh"/>
                             </target>
                         </configuration>
                     </execution>

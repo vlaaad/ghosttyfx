@@ -20,13 +20,69 @@ final class ShellTest {
 
     @Test
     void unknownShellReturnsInputsUnchanged() {
-        var command = List.of("cmd.exe");
+        var command = List.of("nu");
         var environment = Map.of("A", "B");
 
         var launcher = Shell.integrate(command, environment);
 
         assertSame(command, launcher.command());
         assertSame(environment, launcher.environment());
+    }
+
+    @Test
+    void integratesBash() {
+        var environment = Map.of("A", "B");
+
+        var launcher = Shell.integrate(List.of("bash"), environment);
+
+        assertEquals(List.of("bash", "--posix"), launcher.command());
+        assertEquals("B", launcher.environment().get("A"));
+        assertTrue(launcher.environment().containsKey("GHOSTTY_BASH_INJECT"));
+        assertTrue(launcher.environment().containsKey("ENV"));
+        assertTrue(Files.isRegularFile(Path.of(launcher.environment().get("ENV"))));
+    }
+
+    @Test
+    void bashPreservesExistingEnvAndRcfile() {
+        var launcher = Shell.integrate(
+                List.of("bash", "--norc", "--rcfile", "custom.bash"),
+                Map.of("ENV", "existing.env"));
+
+        assertEquals(List.of("bash", "--posix"), launcher.command());
+        assertEquals("existing.env", launcher.environment().get("GHOSTTY_BASH_ENV"));
+        assertEquals("1 --norc", launcher.environment().get("GHOSTTY_BASH_INJECT"));
+        assertEquals("custom.bash", launcher.environment().get("GHOSTTY_BASH_RCFILE"));
+    }
+
+    @Test
+    void bashUnsupportedCommandModeReturnsInputsUnchanged() {
+        var command = List.of("bash", "-ic", "echo hi");
+        var environment = Map.of("A", "B");
+
+        var launcher = Shell.integrate(command, environment);
+
+        assertSame(command, launcher.command());
+        assertSame(environment, launcher.environment());
+    }
+
+    @Test
+    void integratesCmdPrompt() {
+        var launcher = Shell.integrate(List.of("cmd.exe"), Map.of("PROMPT", "$P$G"));
+
+        assertEquals(List.of("cmd.exe"), launcher.command());
+        assertEquals("$e]133;D$e\\$e]133;A;redraw=last;cl=line$e\\$e]9;9;$P$e\\$P$G$e]133;B$e\\",
+                launcher.environment().get("PROMPT"));
+    }
+
+    @Test
+    void integratesFish() {
+        var launcher = Shell.integrate(List.of("fish"), Map.of("XDG_DATA_DIRS", "/opt/share"));
+
+        assertEquals(List.of("fish"), launcher.command());
+        assertTrue(launcher.environment().containsKey("GHOSTTY_SHELL_INTEGRATION_XDG_DIR"));
+        assertTrue(launcher.environment().get("XDG_DATA_DIRS").endsWith("/opt/share"));
+        var integration = Path.of(launcher.environment().get("GHOSTTY_SHELL_INTEGRATION_XDG_DIR"));
+        assertTrue(Files.isRegularFile(integration.resolve("fish/vendor_conf.d/ghostty-shell-integration.fish")));
     }
 
     @Test
@@ -72,9 +128,26 @@ final class ShellTest {
     }
 
     @Test
-    void shipsPwshZipOnly() throws Exception {
+    void integratesZsh() {
+        var launcher = Shell.integrate(List.of("zsh"), Map.of("ZDOTDIR", "/home/me/.zsh"));
+
+        assertEquals(List.of("zsh"), launcher.command());
+        assertEquals("/home/me/.zsh", launcher.environment().get("GHOSTTY_ZSH_ZDOTDIR"));
+        var zdotdir = Path.of(launcher.environment().get("ZDOTDIR"));
+        assertTrue(Files.isRegularFile(zdotdir.resolve(".zshenv")));
+        assertTrue(Files.isRegularFile(zdotdir.resolve("ghostty-integration")));
+    }
+
+    @Test
+    void shipsShellZipsOnly() throws Exception {
+        assertTrue(Shell.class.getResource("/shell/bash.zip") != null);
+        assertTrue(Shell.class.getResource("/shell/fish.zip") != null);
         assertTrue(Shell.class.getResource("/shell/pwsh.zip") != null);
+        assertTrue(Shell.class.getResource("/shell/zsh.zip") != null);
+        assertTrue(Shell.class.getResource("/shell/bash/ghostty.bash") == null);
+        assertTrue(Shell.class.getResource("/shell/fish/fish/vendor_conf.d/ghostty-shell-integration.fish") == null);
         assertTrue(Shell.class.getResource("/shell/pwsh/ghosttyfx.ps1") == null);
+        assertTrue(Shell.class.getResource("/shell/zsh/ghostty-integration") == null);
 
         var extracted = ResourceCache.extractZip(Shell.class, "/shell/pwsh.zip");
         var script = extracted.resolve("ghosttyfx.ps1");
