@@ -695,6 +695,7 @@ public final class GhosttyBuild {
         runJextract(repo, jextractHome, includeDir, outputs.generatedSourcesDir, header);
 
         var builtLibrary = repo.resolve(platform.builtLibraryRelativePath);
+        stripNativeLibrary(platform, builtLibrary);
         writeStoredZip(builtLibrary, platform.packagedLibraryFileName, generatedNativeZip);
         copyDirectory(outputs.generatedSourcesDir, artifactSrcDir);
         Files.copy(generatedNativeZip, artifactNativeZip, StandardCopyOption.REPLACE_EXISTING);
@@ -704,6 +705,13 @@ public final class GhosttyBuild {
             artifactResourcesDir.resolve("metadata.properties"),
             StandardCopyOption.REPLACE_EXISTING
         );
+    }
+
+    private static void stripNativeLibrary(PlatformSpec platform, Path library) throws Exception {
+        if (!platform.id.startsWith("linux-")) {
+            return;
+        }
+        run(library.getParent(), Map.of(), "strip", "--strip-unneeded", library.getFileName().toString());
     }
 
     private static void runJextract(Path repo, Path jextractHome, Path includeDir, Path srcDir, Path header) throws Exception {
