@@ -17,7 +17,7 @@ Generated per-platform `jextract` bindings for `libghostty-vt`.
 
 ### v1
 14. Semantic prompt / shell integration UI (osc 133): libghostty parses semantic prompt data, but the view does not expose prompt navigation, command regions, or similar UI behavior.
-14.0.1. resize acceptance: with injected PowerShell/pwsh, prompt at 80 columns, resize to 6 columns, then back to 80; the cursor must return to the prompt end through the real PTY + libghostty path, not by a JavaFX-only workaround. - perhaps updating ghostty will help?
+14.0.1. resize acceptance: with injected PowerShell/pwsh, prompt at 80 columns, resize to 6 columns, then back to 80; the cursor must return to the prompt end through the real PTY + libghostty path, not by a JavaFX-only workaround.
 14.0.2. note: plain prompts without osc 133 markers reproduce libghostty cursor pin reflow behavior (`38,0 -> 5,0 -> 5,0`), so shell integration is required for prompt redraw after shrink/grow.
 14.0.3. more shells! which ones?
 14.1. prompt-aware navigation (ctrl+up/down) to jump to prev/next prompts.
