@@ -349,6 +349,33 @@ final class TerminalViewTest {
     }
 
     @Test
+    void builtInUrlRegexLinkIgnoresShellInputRegion() throws Exception {
+        var output = "\u001B]133;A\u0007> \u001B]133;B\u0007https://example.test";
+        try (var view = createView(output)) {
+            awaitText(view, "https://example.test");
+            runOnFxThread(() -> {
+                moveToCell(view, 5, 0);
+                assertSame(Cursor.DEFAULT, view.getCursor());
+                return null;
+            });
+        }
+    }
+
+    @Test
+    void customRegexLinksIgnoreShellInputRegion() throws Exception {
+        var output = "\u001B]133;A\u0007> \u001B]133;B\u0007issue-123";
+        try (var view = createView(output)) {
+            awaitText(view, "issue-123");
+            runOnFxThread(() -> {
+                view.getRegexLinks().add(new RegexLink(Pattern.compile("issue-(\\d+)"), _ -> {}));
+                moveToCell(view, 5, 0);
+                assertSame(Cursor.DEFAULT, view.getCursor());
+                return null;
+            });
+        }
+    }
+
+    @Test
     void copyDoesNotCopyLinkUnderCursorWithoutSelection() throws Exception {
         var clicks = new AtomicInteger();
         var clipboardContents = runOnFxThread(TerminalViewTest::snapshotClipboardContents);

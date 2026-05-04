@@ -30,7 +30,6 @@ licenses.
 14.1. prompt-aware navigation (ctrl+up/down) to jump to prev/next prompts.
 14.2. region selection (quadruple-click to select region)
 14.3. prompt marks in left edge
-14.4. regex url parsing: suppress on input regions
 20. doc
 21. release
 

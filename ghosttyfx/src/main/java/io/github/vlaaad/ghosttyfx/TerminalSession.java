@@ -674,7 +674,9 @@ final class TerminalSession implements AutoCloseable {
             var matcher = regexLink.pattern().matcher(line.text());
             while (matcher.find()) {
                 var selection = line.selection(matcher.start(), matcher.end());
-                if (!selection.isEmpty() && contains(selection, point)) {
+                if (!selection.isEmpty()
+                        && contains(selection, point)
+                        && !containsSemanticInput(selection)) {
                     return new MatchedRegexLink(i, regexLink, matcher.toMatchResult(), selection);
                 }
             }
@@ -717,7 +719,7 @@ final class TerminalSession implements AutoCloseable {
                 var matcher = regexLink.pattern().matcher(line.text());
                 while (matcher.find()) {
                     var selection = line.selection(matcher.start(), matcher.end());
-                    if (!selection.isEmpty()) {
+                    if (!selection.isEmpty() && !containsSemanticInput(selection)) {
                         selections.add(selection);
                     }
                 }
@@ -1616,6 +1618,52 @@ final class TerminalSession implements AutoCloseable {
     private String cellHyperlink(Selection.ScreenPoint point, Arena arena) {
         var gridRef = gridRef(point, arena);
         return gridRef == null ? null : hyperlinkUri(gridRef, arena);
+    }
+
+    private boolean containsSemanticInput(Selection selection) {
+        var normalized = selection.normalized();
+        if (normalized.isEmpty()) {
+            return false;
+        }
+
+        var columns = columnCount();
+        if (columns <= 0) {
+            return false;
+        }
+
+        try (var arena = Arena.ofConfined()) {
+            var point = normalized.from();
+            while (true) {
+                if (cellSemanticContent(point, arena) == ghostty_vt_h.GHOSTTY_CELL_SEMANTIC_INPUT()) {
+                    return true;
+                }
+                if (point.equals(normalized.to())) {
+                    return false;
+                }
+                point = next(point, columns);
+            }
+        }
+    }
+
+    private int cellSemanticContent(Selection.ScreenPoint point, Arena arena) {
+        var gridRef = gridRef(point, arena);
+        if (gridRef == null) {
+            return ghostty_vt_h.GHOSTTY_CELL_SEMANTIC_OUTPUT();
+        }
+
+        var cell = arena.allocate(ValueLayout.JAVA_LONG);
+        if (ghostty_vt_h.ghostty_grid_ref_cell(gridRef, cell) != GHOSTTY_SUCCESS) {
+            return ghostty_vt_h.GHOSTTY_CELL_SEMANTIC_OUTPUT();
+        }
+
+        var semanticContent = arena.allocate(ValueLayout.JAVA_INT);
+        requireGhosttySuccess(
+                ghostty_vt_h.ghostty_cell_get(
+                        cell.get(ValueLayout.JAVA_LONG, 0),
+                        ghostty_vt_h.GHOSTTY_CELL_DATA_SEMANTIC_CONTENT(),
+                        semanticContent),
+                "ghostty_cell_get(semantic_content)");
+        return semanticContent.get(ValueLayout.JAVA_INT, 0);
     }
 
     private boolean rowWrap(Selection.ScreenPoint point, Arena arena) {
