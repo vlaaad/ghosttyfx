@@ -1234,8 +1234,13 @@ final class TerminalSession implements AutoCloseable {
                             var baseTextColor = selected ? theme.selectionText() : toFxColor(foreground);
                             var textColor = applyOpacity(baseTextColor, faintFactor);
                             graphics.setFill(textColor);
-                            graphics.setFont(fonts.forStyle(GhosttyStyle.bold(style), GhosttyStyle.italic(style)));
-                            graphics.fillText(renderedText, x, baseline);
+                            var codePoint = codepoints.get(ValueLayout.JAVA_INT, 0);
+                            if (codePointCount == 1 && codePoint >= 0x2580 && codePoint <= 0x259F) {
+                                drawBlockElement(graphics, codePoint, x, y, metrics, textColor);
+                            } else {
+                                graphics.setFont(fonts.forStyle(GhosttyStyle.bold(style), GhosttyStyle.italic(style)));
+                                graphics.fillText(renderedText, x, baseline);
+                            }
                             drawTextDecorations(graphics, x, y, metrics, style, selected, baseTextColor, textColor, theme, faintFactor);
                             if (GhosttyStyle.underline(style) == ghostty_vt_h.GHOSTTY_SGR_UNDERLINE_NONE()
                                     && !GhosttyStyle.strikethrough(style)
@@ -1784,6 +1789,116 @@ final class TerminalSession implements AutoCloseable {
         return selected
                 ? theme.searchCurrentMatchColor()
                 : theme.searchMatchColor();
+    }
+
+    private static void drawBlockElement(
+            GraphicsContext graphics,
+            int codePoint,
+            double x,
+            double y,
+            TerminalView.CellMetrics metrics,
+            Color color) {
+        switch (codePoint) {
+            case 0x2580 -> drawUpperBlock(graphics, x, y, metrics, 0.5);
+            case 0x2581 -> drawLowerBlock(graphics, x, y, metrics, 0.125);
+            case 0x2582 -> drawLowerBlock(graphics, x, y, metrics, 0.25);
+            case 0x2583 -> drawLowerBlock(graphics, x, y, metrics, 0.375);
+            case 0x2584 -> drawLowerBlock(graphics, x, y, metrics, 0.5);
+            case 0x2585 -> drawLowerBlock(graphics, x, y, metrics, 0.625);
+            case 0x2586 -> drawLowerBlock(graphics, x, y, metrics, 0.75);
+            case 0x2587 -> drawLowerBlock(graphics, x, y, metrics, 0.875);
+            case 0x2588 -> drawFullBlock(graphics, x, y, metrics);
+            case 0x2589 -> drawLeftBlock(graphics, x, y, metrics, 0.875);
+            case 0x258A -> drawLeftBlock(graphics, x, y, metrics, 0.75);
+            case 0x258B -> drawLeftBlock(graphics, x, y, metrics, 0.625);
+            case 0x258C -> drawLeftBlock(graphics, x, y, metrics, 0.5);
+            case 0x258D -> drawLeftBlock(graphics, x, y, metrics, 0.375);
+            case 0x258E -> drawLeftBlock(graphics, x, y, metrics, 0.25);
+            case 0x258F -> drawLeftBlock(graphics, x, y, metrics, 0.125);
+            case 0x2590 -> drawRightBlock(graphics, x, y, metrics, 0.5);
+            case 0x2591 -> drawShadeBlock(graphics, x, y, metrics, color, 0.25);
+            case 0x2592 -> drawShadeBlock(graphics, x, y, metrics, color, 0.5);
+            case 0x2593 -> drawShadeBlock(graphics, x, y, metrics, color, 0.75);
+            case 0x2594 -> drawUpperBlock(graphics, x, y, metrics, 0.125);
+            case 0x2595 -> drawRightBlock(graphics, x, y, metrics, 0.125);
+            case 0x2596 -> drawQuadrants(graphics, x, y, metrics, true, false, false, false);
+            case 0x2597 -> drawQuadrants(graphics, x, y, metrics, false, true, false, false);
+            case 0x2598 -> drawQuadrants(graphics, x, y, metrics, false, false, true, false);
+            case 0x2599 -> drawQuadrants(graphics, x, y, metrics, true, true, true, false);
+            case 0x259A -> drawQuadrants(graphics, x, y, metrics, false, true, true, false);
+            case 0x259B -> drawQuadrants(graphics, x, y, metrics, true, false, true, true);
+            case 0x259C -> drawQuadrants(graphics, x, y, metrics, false, true, true, true);
+            case 0x259D -> drawQuadrants(graphics, x, y, metrics, false, false, false, true);
+            case 0x259E -> drawQuadrants(graphics, x, y, metrics, true, false, false, true);
+            case 0x259F -> drawQuadrants(graphics, x, y, metrics, true, true, false, true);
+            default -> throw new IllegalArgumentException("Expected block element codepoint: " + codePoint);
+        }
+    }
+
+    private static void drawUpperBlock(GraphicsContext graphics, double x, double y, TerminalView.CellMetrics metrics, double fraction) {
+        graphics.fillRect(x, y, metrics.cellWidthPx(), blockSize(metrics.cellHeightPx(), fraction));
+    }
+
+    private static void drawLowerBlock(GraphicsContext graphics, double x, double y, TerminalView.CellMetrics metrics, double fraction) {
+        var height = blockSize(metrics.cellHeightPx(), fraction);
+        graphics.fillRect(x, y + metrics.cellHeightPx() - height, metrics.cellWidthPx(), height);
+    }
+
+    private static void drawLeftBlock(GraphicsContext graphics, double x, double y, TerminalView.CellMetrics metrics, double fraction) {
+        graphics.fillRect(x, y, blockSize(metrics.cellWidthPx(), fraction), metrics.cellHeightPx());
+    }
+
+    private static void drawRightBlock(GraphicsContext graphics, double x, double y, TerminalView.CellMetrics metrics, double fraction) {
+        var width = blockSize(metrics.cellWidthPx(), fraction);
+        graphics.fillRect(x + metrics.cellWidthPx() - width, y, width, metrics.cellHeightPx());
+    }
+
+    private static void drawFullBlock(GraphicsContext graphics, double x, double y, TerminalView.CellMetrics metrics) {
+        graphics.fillRect(x, y, metrics.cellWidthPx(), metrics.cellHeightPx());
+    }
+
+    private static void drawShadeBlock(
+            GraphicsContext graphics,
+            double x,
+            double y,
+            TerminalView.CellMetrics metrics,
+            Color color,
+            double opacity) {
+        graphics.setFill(color.deriveColor(0, 1, 1, color.getOpacity() * opacity));
+        graphics.fillRect(x, y, metrics.cellWidthPx(), metrics.cellHeightPx());
+    }
+
+    private static void drawQuadrants(
+            GraphicsContext graphics,
+            double x,
+            double y,
+            TerminalView.CellMetrics metrics,
+            boolean bottomLeft,
+            boolean bottomRight,
+            boolean topLeft,
+            boolean topRight) {
+        var leftWidth = metrics.cellWidthPx() - blockSize(metrics.cellWidthPx(), 0.5);
+        var rightWidth = blockSize(metrics.cellWidthPx(), 0.5);
+        var topHeight = metrics.cellHeightPx() - blockSize(metrics.cellHeightPx(), 0.5);
+        var bottomHeight = blockSize(metrics.cellHeightPx(), 0.5);
+        var rightX = x + leftWidth;
+        var bottomY = y + topHeight;
+        if (topLeft) {
+            graphics.fillRect(x, y, leftWidth, topHeight);
+        }
+        if (topRight) {
+            graphics.fillRect(rightX, y, rightWidth, topHeight);
+        }
+        if (bottomLeft) {
+            graphics.fillRect(x, bottomY, leftWidth, bottomHeight);
+        }
+        if (bottomRight) {
+            graphics.fillRect(rightX, bottomY, rightWidth, bottomHeight);
+        }
+    }
+
+    private static int blockSize(int cellSize, double fraction) {
+        return Math.max(1, (int) Math.round(cellSize * fraction));
     }
 
     private void drawTextDecorations(
