@@ -879,6 +879,132 @@ final class TerminalSession implements AutoCloseable {
         }
     }
 
+    Selection regionSelection(Selection.ScreenPoint point) {
+        var columns = columnCount();
+        var rows = totalRowCount();
+        if (columns <= 0 || rows <= 0 || point.y() >= rows) {
+            return Selection.empty();
+        }
+
+        try (var arena = Arena.ofConfined()) {
+            var promptRow = promptRowAtOrBefore(point.y(), arena);
+            var startRow = Math.max(promptRow, 0);
+            var endRow = regionEndRow(startRow, rows, arena);
+            var semanticContent = cellSemanticContent(point, arena);
+
+            if (semanticContent == ghostty_vt_h.GHOSTTY_CELL_SEMANTIC_PROMPT()) {
+                var selection = promptRow < 0 ? Selection.empty() : promptRegionSelection(startRow, endRow, columns, arena);
+                return selection.isEmpty() || selectedText(selection).isEmpty()
+                        ? nearestSemanticRegionOrLine(point, startRow, endRow, columns, arena)
+                        : selection;
+            }
+
+            var selection = semanticRegionSelection(
+                    point,
+                    semanticContent,
+                    startRow,
+                    endRow,
+                    columns,
+                    arena,
+                    semanticContent != ghostty_vt_h.GHOSTTY_CELL_SEMANTIC_INPUT());
+            return nonEmptyRegionOrNearestSemanticRegion(point, selection, startRow, endRow, columns, arena);
+        }
+    }
+
+    private Selection nonEmptyRegionOrNearestSemanticRegion(
+            Selection.ScreenPoint point,
+            Selection selection,
+            int promptRow,
+            int endRow,
+            int columns,
+            Arena arena) {
+        var line = lineSelection(point);
+        if (!selection.isEmpty()
+                && !selectedText(selection).isEmpty()
+                && !selection.normalized().equals(line.normalized())) {
+            return selection;
+        }
+        return nearestSemanticRegionOrLine(point, promptRow, endRow, columns, arena);
+    }
+
+    private Selection nearestSemanticRegionOrLine(
+            Selection.ScreenPoint point,
+            int promptRow,
+            int endRow,
+            int columns,
+            Arena arena) {
+        var nearest = nearestSemanticRegionSelection(promptRow, endRow, columns, arena);
+        if (!nearest.isEmpty() && !selectedText(nearest).isEmpty()) {
+            return nearest;
+        }
+        return lineSelection(point);
+    }
+
+    private Selection nearestSemanticRegionSelection(int promptRow, int endRow, int columns, Arena arena) {
+        var start = firstTextPoint(promptRow, endRow, columns, arena);
+        var end = lastTextPoint(promptRow, endRow, columns, arena);
+        return start == null || end == null ? Selection.empty() : Selection.linear(start, end);
+    }
+
+    private Selection promptRegionSelection(int promptRow, int endRow, int columns, Arena arena) {
+        var start = new Selection.ScreenPoint(0, promptRow);
+        var end = start;
+        var point = start;
+        while (true) {
+            var semanticContent = cellSemanticContent(point, arena);
+            if (semanticContent == ghostty_vt_h.GHOSTTY_CELL_SEMANTIC_OUTPUT()) {
+                return Selection.linear(start, end);
+            }
+            end = point;
+            if (point.x() == columns - 1 && point.y() == endRow) {
+                return Selection.linear(start, end);
+            }
+            point = next(point, columns);
+        }
+    }
+
+    private Selection semanticRegionSelection(
+            Selection.ScreenPoint point,
+            int semanticContent,
+            int promptRow,
+            int endRow,
+            int columns,
+            Arena arena,
+            boolean trimToText) {
+        var lower = new Selection.ScreenPoint(0, promptRow);
+        var upper = new Selection.ScreenPoint(columns - 1, endRow);
+
+        var start = point;
+        while (!start.equals(lower)) {
+            var previous = previous(start, columns);
+            if (cellSemanticContent(previous, arena) != semanticContent) {
+                break;
+            }
+            start = previous;
+        }
+
+        var end = point;
+        while (!end.equals(upper)) {
+            var next = next(end, columns);
+            if (cellSemanticContent(next, arena) != semanticContent) {
+                break;
+            }
+            end = next;
+        }
+
+        if (!trimToText) {
+            return Selection.linear(start, end);
+        }
+
+        while (!start.equals(end) && !cellHasText(start, arena)) {
+            start = next(start, columns);
+        }
+        while (!end.equals(start) && !cellHasText(end, arena)) {
+            end = previous(end, columns);
+        }
+        return cellHasText(start, arena) ? Selection.linear(start, end) : Selection.empty();
+    }
+
     LogicalLine logicalLine(Selection.ScreenPoint point) {
         var columns = columnCount();
         var rows = totalRowCount();
@@ -1570,6 +1696,24 @@ final class TerminalSession implements AutoCloseable {
         return codePoint.get(ValueLayout.JAVA_INT, 0);
     }
 
+    private boolean cellHasText(Selection.ScreenPoint point, Arena arena) {
+        var gridRef = gridRef(point, arena);
+        if (gridRef == null) {
+            return false;
+        }
+
+        var cell = arena.allocate(ValueLayout.JAVA_LONG);
+        if (ghostty_vt_h.ghostty_grid_ref_cell(gridRef, cell) != GHOSTTY_SUCCESS) {
+            return false;
+        }
+
+        var hasText = arena.allocate(ValueLayout.JAVA_BOOLEAN);
+        requireGhosttySuccess(
+                ghostty_vt_h.ghostty_cell_get(cell.get(ValueLayout.JAVA_LONG, 0), ghostty_vt_h.GHOSTTY_CELL_DATA_HAS_TEXT(), hasText),
+                "ghostty_cell_get(has_text)");
+        return hasText.get(ValueLayout.JAVA_BOOLEAN, 0);
+    }
+
     private CellGrapheme cellGrapheme(Selection.ScreenPoint point, Arena arena) {
         var gridRef = gridRef(point, arena);
         if (gridRef == null) {
@@ -1664,6 +1808,45 @@ final class TerminalSession implements AutoCloseable {
                         semanticContent),
                 "ghostty_cell_get(semantic_content)");
         return semanticContent.get(ValueLayout.JAVA_INT, 0);
+    }
+
+    private int promptRowAtOrBefore(int row, Arena arena) {
+        for (var currentRow = row; currentRow >= 0; currentRow--) {
+            if (rowSemanticPrompt(currentRow, arena) == ghostty_vt_h.GHOSTTY_ROW_SEMANTIC_PROMPT()) {
+                return currentRow;
+            }
+        }
+        return -1;
+    }
+
+    private int regionEndRow(int promptRow, int rows, Arena arena) {
+        for (var row = promptRow + 1; row < rows; row++) {
+            if (rowSemanticPrompt(row, arena) == ghostty_vt_h.GHOSTTY_ROW_SEMANTIC_PROMPT()) {
+                return row - 1;
+            }
+        }
+        return rows - 1;
+    }
+
+    private int rowSemanticPrompt(int row, Arena arena) {
+        var gridRef = gridRef(new Selection.ScreenPoint(0, row), arena);
+        if (gridRef == null) {
+            return ghostty_vt_h.GHOSTTY_ROW_SEMANTIC_NONE();
+        }
+
+        var nativeRow = arena.allocate(ValueLayout.JAVA_LONG);
+        if (ghostty_vt_h.ghostty_grid_ref_row(gridRef, nativeRow) != GHOSTTY_SUCCESS) {
+            return ghostty_vt_h.GHOSTTY_ROW_SEMANTIC_NONE();
+        }
+
+        var semanticPrompt = arena.allocate(ValueLayout.JAVA_INT);
+        requireGhosttySuccess(
+                ghostty_vt_h.ghostty_row_get(
+                        nativeRow.get(ValueLayout.JAVA_LONG, 0),
+                        ghostty_vt_h.GHOSTTY_ROW_DATA_SEMANTIC_PROMPT(),
+                        semanticPrompt),
+                "ghostty_row_get(semantic_prompt)");
+        return semanticPrompt.get(ValueLayout.JAVA_INT, 0);
     }
 
     private boolean rowWrap(Selection.ScreenPoint point, Arena arena) {

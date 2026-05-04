@@ -1,5 +1,8 @@
 package io.github.vlaaad.ghosttyfx;
 
+import com.pty4j.PtyProcess;
+import com.pty4j.PtyProcessBuilder;
+import com.pty4j.WinSize;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -44,6 +47,7 @@ import javafx.scene.control.TextField;
 import javafx.scene.layout.HBox;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Assumptions;
 import javafx.scene.paint.Color;
 import javafx.scene.text.Font;
 
@@ -370,6 +374,111 @@ final class TerminalViewTest {
                 view.getRegexLinks().add(new RegexLink(Pattern.compile("issue-(\\d+)"), _ -> {}));
                 moveToCell(view, 5, 0);
                 assertSame(Cursor.DEFAULT, view.getCursor());
+                return null;
+            });
+        }
+    }
+
+    @Test
+    void quadrupleClickSelectsSemanticOutputRegion() throws Exception {
+        var output = "\u001B]133;A\u0007> \u001B]133;B\u0007echo one\r\n"
+                + "\u001B]133;C\u0007one\r\n"
+                + "two\r\n"
+                + "\u001B]133;D;0\u0007\u001B]133;A\u0007> \u001B]133;B\u0007echo next";
+        try (var view = createView(output)) {
+            awaitText(view, "echo next");
+            runOnFxThread(() -> {
+                clickCell(view, 0, 1, 4);
+                assertEquals("one\ntwo", view.getInputMethodRequests().getSelectedText());
+                return null;
+            });
+        }
+    }
+
+    @Test
+    void quadrupleClickSelectsSemanticPromptAndInputRegion() throws Exception {
+        var output = "\u001B]133;A\u0007> \u001B]133;B\u0007echo one\r\n"
+                + "\u001B]133;C\u0007one";
+        try (var view = createView(output)) {
+            awaitText(view, "one");
+            runOnFxThread(() -> {
+                clickCell(view, 1, 0, 4);
+                assertEquals("> echo one", view.getInputMethodRequests().getSelectedText());
+                return null;
+            });
+        }
+    }
+
+    @Test
+    void quadrupleClickSelectsClickedInputRegionWhenOutputStartMarkerIsMissing() throws Exception {
+        var output = "\u001B]133;A\u0007> \u001B]133;B\u0007echo one\r\n"
+                + "\u001B]133;B\u0007one\r\n"
+                + "\u001B]133;D;0\u0007\u001B]133;A\u0007> \u001B]133;B\u0007echo next";
+        try (var view = createView(output)) {
+            awaitText(view, "echo next");
+            runOnFxThread(() -> {
+                clickCell(view, 0, 1, 4);
+                assertEquals("> echo one\none", view.getInputMethodRequests().getSelectedText());
+                return null;
+            });
+        }
+    }
+
+    @Test
+    void quadrupleClickSelectsOutputRegionWithoutPriorPromptMarker() throws Exception {
+        var output = "one\r\ntwo";
+        try (var view = createView(output)) {
+            awaitText(view, "two");
+            runOnFxThread(() -> {
+                clickCell(view, 0, 1, 4);
+                assertEquals("one\ntwo", view.getInputMethodRequests().getSelectedText());
+                return null;
+            });
+        }
+    }
+
+    @Test
+    void quadrupleClickSelectsRealCmdDirOutput() throws Exception {
+        Assumptions.assumeTrue(isWindows());
+        var tempDirectory = Files.createTempDirectory("ghosttyfx-cmd-region-test-");
+        Files.writeString(tempDirectory.resolve("ghosttyfx-region-marker.txt"), "marker");
+        var executable = findExecutable(
+                List.of("cmd.exe"),
+                List.of(Path.of(System.getenv().getOrDefault("SystemRoot", "C:\\Windows"), "System32", "cmd.exe")));
+        var launcher = Shell.integrate(List.of(executable.toString()), Map.of("PROMPT", "$G"));
+        try (var view = createPtyView(launcher, tempDirectory)) {
+            runOnFxThread(() -> {
+                attachToScene(view);
+                return null;
+            });
+            awaitText(view, ">");
+            runOnFxThread(() -> {
+                view.sendText("dir ghosttyfx-region-marker.txt\r\n");
+                return null;
+            });
+
+            var rowAndColumn = await("cmd dir output row", START_TIMEOUT, () -> runOnFxThread(() -> {
+                fireShortcut(view, selectAllShortcut());
+                var text = view.getInputMethodRequests().getSelectedText();
+                if (text == null || !text.contains("ghosttyfx-region-marker.txt")) {
+                    return Optional.empty();
+                }
+                var row = 0;
+                for (var line : text.split("\\R", -1)) {
+                    var column = line.indexOf("ghosttyfx-region-marker.txt");
+                    if (column >= 0) {
+                        return Optional.of(new Selection.ScreenPoint(column, row));
+                    }
+                    row++;
+                }
+                return Optional.empty();
+            }));
+
+            runOnFxThread(() -> {
+                clickCell(view, 0, rowAndColumn.y(), 4);
+                var text = view.getInputMethodRequests().getSelectedText();
+                assertTrue(text != null && text.contains("ghosttyfx-region-marker.txt"), "Expected cmd dir output to be selected, got: " + text);
+                assertTrue(text.contains("dir ghosttyfx-region-marker.txt"), "Expected cmd region selection to include command context, got: " + text);
                 return null;
             });
         }
@@ -839,7 +948,15 @@ final class TerminalViewTest {
     }
 
     private static TerminalView createView(ShellCommand shell, Path cwd) throws IOException {
-        return new TerminalView((_, _) -> new ProcessTerminal(shell.command(), cwd));
+        return new TerminalView((_, _) -> new ProcessTerminal(shell.command(), Map.of(), cwd));
+    }
+
+    private static TerminalView createView(Shell.Launcher launcher, Path cwd) throws IOException {
+        return new TerminalView((_, _) -> new ProcessTerminal(launcher.command(), launcher.environment(), cwd));
+    }
+
+    private static TerminalView createPtyView(Shell.Launcher launcher, Path cwd) throws IOException {
+        return new TerminalView((columns, rows) -> new PtyTestTerminal(launcher.command(), launcher.environment(), cwd, columns, rows));
     }
 
     private static TerminalView createView(String output) throws IOException {
@@ -951,10 +1068,14 @@ final class TerminalViewTest {
     }
 
     private static void clickCell(TerminalView view, int column, int row) {
+        clickCell(view, column, row, 1);
+    }
+
+    private static void clickCell(TerminalView view, int column, int row, int clickCount) {
         var x = cellX(view, column, 0.5);
         var y = cellY(view, row, 0.5);
-        Event.fireEvent(view, mouseEvent(MouseEvent.MOUSE_PRESSED, x, y, true));
-        Event.fireEvent(view, mouseEvent(MouseEvent.MOUSE_RELEASED, x, y, false));
+        Event.fireEvent(view, mouseEvent(MouseEvent.MOUSE_PRESSED, x, y, true, clickCount));
+        Event.fireEvent(view, mouseEvent(MouseEvent.MOUSE_RELEASED, x, y, false, clickCount));
     }
 
     private static void moveToCell(TerminalView view, int column, int row) {
@@ -987,6 +1108,10 @@ final class TerminalViewTest {
     }
 
     private static MouseEvent mouseEvent(EventType<MouseEvent> eventType, double x, double y, boolean primaryButtonDown) {
+        return mouseEvent(eventType, x, y, primaryButtonDown, 1);
+    }
+
+    private static MouseEvent mouseEvent(EventType<MouseEvent> eventType, double x, double y, boolean primaryButtonDown, int clickCount) {
         return new MouseEvent(
                 eventType,
                 x,
@@ -994,7 +1119,7 @@ final class TerminalViewTest {
                 x,
                 y,
                 MouseButton.PRIMARY,
-                1,
+                clickCount,
                 false,
                 false,
                 false,
@@ -1192,10 +1317,55 @@ final class TerminalViewTest {
     private static final class ProcessTerminal implements Terminal {
         private final Process process;
 
-        private ProcessTerminal(List<String> command, Path cwd) throws IOException {
-            process = new ProcessBuilder(command)
+        private ProcessTerminal(List<String> command, Map<String, String> environment, Path cwd) throws IOException {
+            var builder = new ProcessBuilder(command)
                     .directory(cwd.toFile())
-                    .redirectErrorStream(true)
+                    .redirectErrorStream(true);
+            builder.environment().putAll(environment);
+            process = builder.start();
+        }
+
+        @Override
+        public InputStream output() {
+            return process.getInputStream();
+        }
+
+        @Override
+        public OutputStream input() {
+            return process.getOutputStream();
+        }
+
+        @Override
+        public void resize(int columns, int rows) {
+        }
+
+        @Override
+        public void close() {
+            process.destroy();
+            try {
+                if (!process.waitFor(2, TimeUnit.SECONDS)) {
+                    process.destroyForcibly();
+                    process.waitFor();
+                }
+            } catch (InterruptedException _) {
+                Thread.currentThread().interrupt();
+            }
+        }
+    }
+
+    private static final class PtyTestTerminal implements Terminal {
+        private final PtyProcess process;
+
+        private PtyTestTerminal(List<String> command, Map<String, String> environment, Path cwd, int columns, int rows) throws IOException {
+            process = (PtyProcess) new PtyProcessBuilder()
+                    .setCommand(command.toArray(String[]::new))
+                    .setConsole(false)
+                    .setRedirectErrorStream(true)
+                    .setDirectory(cwd.toString())
+                    .setEnvironment(environment)
+                    .setInitialColumns(columns)
+                    .setInitialRows(rows)
+                    .setUseWinConPty(true)
                     .start();
         }
 
@@ -1211,6 +1381,7 @@ final class TerminalViewTest {
 
         @Override
         public void resize(int columns, int rows) {
+            process.setWinSize(new WinSize(columns, rows));
         }
 
         @Override

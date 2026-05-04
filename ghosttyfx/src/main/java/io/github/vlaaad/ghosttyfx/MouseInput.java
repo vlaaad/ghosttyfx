@@ -120,10 +120,6 @@ final class MouseInput {
         return new Selection(start, end, rectangle);
     }
 
-    static int normalizeClickCount(int clickCount) {
-        return Math.clamp(clickCount, 1, 3);
-    }
-
     private static int compare(Selection.ScreenPoint left, Selection.ScreenPoint right) {
         var byY = Integer.compare(left.y(), right.y());
         return byY != 0 ? byY : Integer.compare(left.x(), right.x());

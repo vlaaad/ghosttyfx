@@ -505,7 +505,7 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
             return;
         }
 
-        var clickCount = MouseInput.normalizeClickCount(event.getClickCount());
+        var clickCount = Math.clamp(event.getClickCount(), 1, 4);
         var rectangle = isRectangleSelection(event);
         mouseInputState = mouseInputState.withPressGesture(new MouseInput.PressGesture(
                 TerminalSession.MouseButton.LEFT,
@@ -520,6 +520,7 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
             case 1 -> clearSelection();
             case 2 -> applySelection(terminalSession.wordSelection(hit.screenPoint()));
             case 3 -> applySelection(terminalSession.lineSelection(hit.screenPoint()));
+            case 4 -> applySelection(terminalSession.regionSelection(hit.screenPoint()));
             default -> throw new IllegalStateException("unsupported click count: " + clickCount);
         }
     }
@@ -568,6 +569,7 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
                     cellMetrics.get().cellWidthPx()));
             case 2 -> applyWordDragSelection(pressGesture, hit.screenPoint());
             case 3 -> applyLineDragSelection(pressGesture, hit.screenPoint());
+            case 4 -> applyRegionDragSelection(pressGesture, hit.screenPoint());
             default -> throw new IllegalStateException("unsupported click count: " + pressGesture.clickCount());
         }
     }
@@ -985,6 +987,19 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
         applySelection(compareScreenPoints(dragPoint, pressGesture.anchor()) < 0
                 ? Selection.linear(currentLine.normalized().from(), anchorLine.normalized().to())
                 : Selection.linear(anchorLine.normalized().from(), currentLine.normalized().to()));
+    }
+
+    private void applyRegionDragSelection(MouseInput.PressGesture pressGesture, Selection.ScreenPoint dragPoint) {
+        var anchorRegion = terminalSession.regionSelection(pressGesture.anchor());
+        var currentRegion = terminalSession.regionSelection(dragPoint);
+        if (anchorRegion.isEmpty() || currentRegion.isEmpty()) {
+            applySelection(Selection.empty());
+            return;
+        }
+
+        applySelection(compareScreenPoints(dragPoint, pressGesture.anchor()) < 0
+                ? Selection.linear(currentRegion.normalized().from(), anchorRegion.normalized().to())
+                : Selection.linear(anchorRegion.normalized().from(), currentRegion.normalized().to()));
     }
 
     private void writeReportedMousePress(MouseEvent event) {

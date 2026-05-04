@@ -10,14 +10,6 @@ final class MouseInputSelectionTest {
     private static final int CELL_WIDTH = 10;
 
     @Test
-    void clampsClickCountToSupportedRange() {
-        assertEquals(1, MouseInput.normalizeClickCount(0));
-        assertEquals(1, MouseInput.normalizeClickCount(1));
-        assertEquals(2, MouseInput.normalizeClickCount(2));
-        assertEquals(3, MouseInput.normalizeClickCount(5));
-    }
-
-    @Test
     void computesLeftToRightLinearSelectionWithThresholds() {
         var selection = MouseInput.selectionForDrag(
                 new Selection.ScreenPoint(3, 2),

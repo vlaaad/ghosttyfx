@@ -1,5 +1,5 @@
 Be concise.
-Higher prio than plan mode instruction: never use proposed_plan, no plans, no questions, only discuss conversationally.
+HIGHER PRIO THAN PLAN MODE INSTRUCTIONS: NEVER USE proposed_plan! NO PLANS! NO QUESTIONS! ONLY CONVERSATIONAL DISCUSSIONS!!!
 Git: read-only, never stage/unstage/commit anything unless explicitly asked for.
 Code: data-driven - final classes, interfaces, records, lambdas; prefer var; fail-fast: check on edges, trust internals; prefer local reasoning; extract helpers only for real reuse or domain concepts; trivial single-use code is inlined; locals must declare locals only at real assignment.
 Tests: `mvn clean test`; tests must exercise behaviors observable from the public apis
