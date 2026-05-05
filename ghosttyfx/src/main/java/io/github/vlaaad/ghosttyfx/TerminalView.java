@@ -67,6 +67,7 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
     static final double SCROLLBAR_ARC_PX = SCROLLBAR_WIDTH_PX;
     private static final double SCROLL_TOTAL_DELTA_EPSILON = 1e-6;
     private static final Duration BLINK_INTERVAL = Duration.millis(600);
+    private static final Duration PROMPT_NAVIGATION_HIGHLIGHT_DURATION = Duration.millis(700);
     private static final Font DEFAULT_FONT = Font.font("Monospaced", 14);
     private static final RegexLink BUILT_IN_REGEX_LINK = new RegexLink(
             Pattern.compile("(?i)\\bhttps?://(?:\\[[0-9a-f:]+(?:[:0-9a-f]*)+\\](?::[0-9]+)?|[\\w\\-.~:/?#@!$&*+,;=%]+(?:[\\(\\[]\\w*[\\)\\]])?)+(?<![,.])"),
@@ -77,10 +78,13 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
     private final AnimationTimer processOutputDrain;
     private final Timeline cursorBlinkTimeline;
     private final Timeline textBlinkTimeline;
+    private final Timeline promptNavigationHighlightTimeline;
     private KeyInput.State keyInputState = KeyInput.initialState();
     private MouseInput.State mouseInputState = MouseInput.initialState();
     private Selection selection = Selection.empty();
     private ActiveLink hoveredLink;
+    private int promptNavigationRow = -1;
+    private int promptNavigationHighlightRow = -1;
     private boolean cursorBlinkVisible = true;
     private boolean textBlinkVisible = true;
     private TerminalSession.BlinkState blinkState = TerminalSession.BlinkState.none();
@@ -153,6 +157,7 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
         cursorBlinkTimeline.setCycleCount(Animation.INDEFINITE);
         textBlinkTimeline = new Timeline(new KeyFrame(BLINK_INTERVAL, _ -> tickTextBlink()));
         textBlinkTimeline.setCycleCount(Animation.INDEFINITE);
+        promptNavigationHighlightTimeline = new Timeline(new KeyFrame(PROMPT_NAVIGATION_HIGHLIGHT_DURATION, _ -> clearPromptNavigationHighlight()));
         var initialCellMetrics = cellMetrics.get();
         var thisRef = new WeakReference<>(this);
         terminalSession = new TerminalSession(
@@ -223,7 +228,17 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
                         HostPlatform.CURRENT.os() == HostPlatform.OS.MACOS
                                 ? new KeyCodeCombination(KeyCode.END, KeyCombination.META_DOWN)
                                 : new KeyCodeCombination(KeyCode.END, KeyCombination.SHIFT_DOWN),
-                        this::scrollViewportToBottom));
+                        this::scrollViewportToBottom),
+                new Shortcut(
+                        HostPlatform.CURRENT.os() == HostPlatform.OS.MACOS
+                                ? new KeyCodeCombination(KeyCode.UP, KeyCombination.META_DOWN)
+                                : new KeyCodeCombination(KeyCode.UP, KeyCombination.CONTROL_DOWN, KeyCombination.SHIFT_DOWN),
+                        this::scrollViewportToPreviousPrompt),
+                new Shortcut(
+                        HostPlatform.CURRENT.os() == HostPlatform.OS.MACOS
+                                ? new KeyCodeCombination(KeyCode.DOWN, KeyCombination.META_DOWN)
+                                : new KeyCodeCombination(KeyCode.DOWN, KeyCombination.CONTROL_DOWN, KeyCombination.SHIFT_DOWN),
+                        this::scrollViewportToNextPrompt));
         if (HostPlatform.CURRENT.os() == HostPlatform.OS.MACOS) {
             shortcuts.addAll(
                     new Shortcut(new KeyCodeCombination(KeyCode.LEFT, KeyCombination.ALT_DOWN), () -> sendEsc("b")),
@@ -285,7 +300,10 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
         setOnInputMethodTextChanged(this::handleInputMethodTextChanged);
         setInputMethodRequests(new TerminalInputMethodRequests());
         setCursor(Cursor.DEFAULT);
-        sceneProperty().addListener((_, _, _) -> updateBlinkTimelines());
+        sceneProperty().addListener((_, _, _) -> {
+            updateBlinkTimelines();
+            updatePromptNavigationHighlightTimeline();
+        });
         terminalSession.applyTheme(getTheme());
         redraw();
         processOutputDrain.start();
@@ -786,6 +804,7 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
             return;
         }
 
+        promptNavigationRow = -1;
         terminalSession.scrollViewportBy(deltaRows);
         redraw();
     }
@@ -1251,6 +1270,14 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
         return true;
     }
 
+    public boolean scrollViewportToPreviousPrompt() {
+        return scrollViewportToPrompt(-1);
+    }
+
+    public boolean scrollViewportToNextPrompt() {
+        return scrollViewportToPrompt(1);
+    }
+
     public boolean toggleSearch() {
         if (searchUi.visible()) {
             closeSearch();
@@ -1306,6 +1333,83 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
 
         scrollViewportTo(nextOffset, scrollbar);
         return true;
+    }
+
+    private boolean scrollViewportToPrompt(int direction) {
+        var scrollbar = scrollbarInfo();
+        if (selection.isEmpty() && scrollbar != null && scrollbar.visible() > 0) {
+            var anchor = promptNavigationAnchor(direction, scrollbar);
+            if (anchor < 0 && direction < 0) {
+                return false;
+            }
+
+            var target = direction < 0
+                    ? terminalSession.promptRowBefore(anchor)
+                    : terminalSession.promptRowAfter(anchor);
+            if (target < 0) {
+                if (!terminalSession.isPromptRow(anchor)) {
+                    return false;
+                }
+                target = Math.toIntExact(anchor);
+            }
+
+            if (!rowDisplayed(target, scrollbar) && scrollbar.scrollable()) {
+                scrollViewportTo(target, scrollbar);
+            }
+            promptNavigationRow = target;
+            showPromptNavigationHighlight(target);
+            return true;
+        }
+        return false;
+    }
+
+    private long promptNavigationAnchor(int direction, TerminalSession.ScrollbarInfo scrollbar) {
+        if (promptNavigationRow >= 0 && rowDisplayed(promptNavigationRow, scrollbar)) {
+            return promptNavigationRow;
+        }
+        if (promptNavigationHighlightRow >= 0 && rowDisplayed(promptNavigationHighlightRow, scrollbar)) {
+            return promptNavigationHighlightRow;
+        }
+
+        var cursorPromptRow = cursorPromptRow(scrollbar);
+        if (cursorPromptRow < 0) {
+            return initialPromptNavigationAnchor(direction, scrollbar);
+        }
+        return cursorPromptRow;
+    }
+
+    private long cursorPromptRow(TerminalSession.ScrollbarInfo scrollbar) {
+        var cursorLocation = currentCursorLocation();
+        if (cursorLocation == null) {
+            return -1;
+        }
+
+        var row = scrollbar.offset() + cursorLocation.cellY();
+        return terminalSession.isPromptRow(row) ? row : -1;
+    }
+
+    private static long initialPromptNavigationAnchor(int direction, TerminalSession.ScrollbarInfo scrollbar) {
+        return direction < 0
+                ? scrollbar.offset() + scrollbar.visible()
+                : scrollbar.offset() - 1;
+    }
+
+    private static boolean rowDisplayed(long row, TerminalSession.ScrollbarInfo scrollbar) {
+        return row >= scrollbar.offset() && row < scrollbar.offset() + scrollbar.visible();
+    }
+
+    private void showPromptNavigationHighlight(int row) {
+        promptNavigationHighlightRow = row;
+        updatePromptNavigationHighlightTimeline();
+        redraw();
+    }
+
+    private void clearPromptNavigationHighlight() {
+        if (promptNavigationHighlightRow < 0) {
+            return;
+        }
+        promptNavigationHighlightRow = -1;
+        redraw();
     }
 
     private boolean searchMatchesAffectViewport(List<Selection> matches) {
@@ -1461,12 +1565,19 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
                 cursorBlinkVisible,
                 textBlinkVisible,
                 scrollbarReservedWidthPx(),
-                MIN_SCROLLBAR_HEIGHT_PX);
+                MIN_SCROLLBAR_HEIGHT_PX,
+                promptNavigationHighlightRow);
     }
 
     private void resetCursorBlink() {
         cursorBlinkVisible = true;
         updateCursorBlinkTimeline();
+    }
+
+    private void resetPromptNavigation() {
+        promptNavigationRow = -1;
+        promptNavigationHighlightRow = -1;
+        promptNavigationHighlightTimeline.stop();
     }
 
     private void updateCursorBlinkTimeline() {
@@ -1486,6 +1597,14 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
 
         updateCursorBlinkTimeline();
         textBlinkTimeline.play();
+    }
+
+    private void updatePromptNavigationHighlightTimeline() {
+        if (getScene() != null && promptNavigationHighlightRow >= 0) {
+            promptNavigationHighlightTimeline.playFromStart();
+        } else {
+            promptNavigationHighlightTimeline.stop();
+        }
     }
 
     private void tickCursorBlink() {
@@ -1563,6 +1682,7 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
 
                 if (bytes.length != 0) {
                     terminal.resetCursorBlink();
+                    terminal.resetPromptNavigation();
                     terminal.terminalSession.writeToTerminal(bytes);
                     if (terminal.searchUi.visible()) {
                         terminal.searchUi.refresh();

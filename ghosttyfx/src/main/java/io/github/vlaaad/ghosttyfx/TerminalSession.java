@@ -555,6 +555,49 @@ final class TerminalSession implements AutoCloseable {
         }
     }
 
+    int promptRowBefore(long row) {
+        var rows = totalRowCount();
+        if (rows <= 0 || row <= 0) {
+            return -1;
+        }
+
+        try (var arena = Arena.ofConfined()) {
+            for (var currentRow = Math.toIntExact(Math.min(row - 1, rows - 1L)); currentRow >= 0; currentRow--) {
+                if (rowSemanticPrompt(currentRow, arena) == ghostty_vt_h.GHOSTTY_ROW_SEMANTIC_PROMPT()) {
+                    return currentRow;
+                }
+            }
+            return -1;
+        }
+    }
+
+    int promptRowAfter(long row) {
+        var rows = totalRowCount();
+        if (rows <= 0 || row >= rows - 1L) {
+            return -1;
+        }
+
+        try (var arena = Arena.ofConfined()) {
+            for (var currentRow = Math.toIntExact(Math.max(0, row + 1)); currentRow < rows; currentRow++) {
+                if (rowSemanticPrompt(currentRow, arena) == ghostty_vt_h.GHOSTTY_ROW_SEMANTIC_PROMPT()) {
+                    return currentRow;
+                }
+            }
+            return -1;
+        }
+    }
+
+    boolean isPromptRow(long row) {
+        var rows = totalRowCount();
+        if (row < 0 || row >= rows) {
+            return false;
+        }
+
+        try (var arena = Arena.ofConfined()) {
+            return rowSemanticPrompt(Math.toIntExact(row), arena) == ghostty_vt_h.GHOSTTY_ROW_SEMANTIC_PROMPT();
+        }
+    }
+
     String selectedText(Selection selection) {
         if (selection.isEmpty()) {
             return "";
@@ -1177,7 +1220,8 @@ final class TerminalSession implements AutoCloseable {
             boolean cursorBlinkVisible,
             boolean textBlinkVisible,
             double scrollbarReservedWidthPx,
-            double minScrollbarHeightPx) {
+            double minScrollbarHeightPx,
+            int promptNavigationHighlightRow) {
         graphics.setFont(fonts.regular());
 
         try (var arena = Arena.ofConfined()) {
@@ -1217,6 +1261,10 @@ final class TerminalSession implements AutoCloseable {
                     SearchResult.empty(),
                     regexLinkSelections(regexLinks, viewportTop, viewportTop + visibleRows - 1),
                     columnCount());
+            var highlightedViewportRow = promptNavigationHighlightRow >= viewportTop
+                    && promptNavigationHighlightRow < viewportTop + visibleRows
+                    ? promptNavigationHighlightRow - viewportTop
+                    : -1;
             var cursor = cursorInfo(arena);
             var preeditCellCount = preedit.text().codePointCount(0, preedit.text().length());
             var text = new StringBuilder(MAX_GRAPHEME_CODEPOINTS * 2);
@@ -1231,6 +1279,11 @@ final class TerminalSession implements AutoCloseable {
             var hasTextBlink = false;
 
             while (ghostty_vt_h.ghostty_render_state_row_iterator_next(rowIterator)) {
+                if (viewportY == highlightedViewportRow) {
+                    graphics.setFill(applyOpacity(theme.foreground(), 0.16));
+                    graphics.fillRect(0, y, Math.max(0.0, width - scrollbarReservedWidthPx), metrics.cellHeightPx());
+                }
+
                 requireGhosttySuccess(
                         ghostty_vt_h.ghostty_render_state_row_get(
                                 rowIterator,

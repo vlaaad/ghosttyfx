@@ -627,6 +627,73 @@ final class TerminalViewTest {
     }
 
     @Test
+    void promptNavigationReportsUnavailableWithoutSemanticPrompts() throws Exception {
+        var tempDirectory = Files.createTempDirectory("ghosttyfx-prompt-navigation-unavailable-test-");
+        var pidFile = tempDirectory.resolve("shell.pid");
+        var shell = discoverOutputShell(pidFile, lineOutput(80));
+
+        try (var view = createView(shell, tempDirectory)) {
+            await("scrollable terminal output", START_TIMEOUT, () -> runOnFxThread(() ->
+                    view.scrollViewportToTop() ? Optional.of(Boolean.TRUE) : Optional.empty()));
+
+            runOnFxThread(() -> {
+                assertFalse(view.scrollViewportToPreviousPrompt());
+                assertFalse(view.scrollViewportToNextPrompt());
+                return null;
+            });
+        }
+    }
+
+    @Test
+    void promptNavigationMovesBetweenSemanticPrompts() throws Exception {
+        try (var view = createView(promptOutput(40))) {
+            await("terminal prompt output", START_TIMEOUT, () -> runOnFxThread(() ->
+                    view.scrollViewportToNextPrompt() ? Optional.of(Boolean.TRUE) : Optional.empty()));
+
+            runOnFxThread(() -> {
+                assertTrue(view.scrollViewportToNextPrompt());
+                assertTrue(view.scrollViewportToPreviousPrompt());
+                return null;
+            });
+        }
+    }
+
+    @Test
+    void promptNavigationNextStartsAtFirstSemanticPrompt() throws Exception {
+        try (var view = createView(promptOutput(3))) {
+            await("terminal prompt output", START_TIMEOUT, () -> runOnFxThread(() ->
+                    view.scrollViewportToNextPrompt() ? Optional.of(Boolean.TRUE) : Optional.empty()));
+        }
+    }
+
+    @Test
+    void promptNavigationHighlightsVisiblePromptsWithoutScrollbarAndDoesNotWrap() throws Exception {
+        try (var view = createView(promptOutput(3))) {
+            await("terminal prompt output", START_TIMEOUT, () -> runOnFxThread(() ->
+                    view.scrollViewportToPreviousPrompt() ? Optional.of(Boolean.TRUE) : Optional.empty()));
+
+            runOnFxThread(() -> {
+                assertTrue(view.scrollViewportToPreviousPrompt());
+                assertTrue(view.scrollViewportToPreviousPrompt());
+                assertTrue(view.scrollViewportToPreviousPrompt());
+                assertTrue(view.scrollViewportToPreviousPrompt());
+                assertTrue(view.scrollViewportToPreviousPrompt());
+                assertTrue(view.scrollViewportToNextPrompt());
+                assertTrue(view.scrollViewportToNextPrompt());
+                assertTrue(view.scrollViewportToNextPrompt());
+                assertTrue(view.scrollViewportToNextPrompt());
+                assertTrue(view.scrollViewportToNextPrompt());
+                return null;
+            });
+            Thread.sleep(900);
+            runOnFxThread(() -> {
+                assertTrue(view.scrollViewportToNextPrompt());
+                return null;
+            });
+        }
+    }
+
+    @Test
     void searchUsesSelectionAsInitialQueryAndNavigatesMatches() throws Exception {
         var marker = "ghosttyfx-search";
         var output = marker + "\nother\n" + marker;
@@ -1156,6 +1223,15 @@ final class TerminalViewTest {
                 lines.append('\n');
             }
             lines.append("line-").append(i);
+        }
+        return lines.toString();
+    }
+
+    private static String promptOutput(int count) {
+        var lines = new StringBuilder();
+        for (var i = 0; i < count; i++) {
+            lines.append("\u001B]133;A\u0007$ command-").append(i).append("\u001B]133;B\u0007\n");
+            lines.append("\u001B]133;C\u0007output-").append(i).append("\n\u001B]133;D;0\u0007");
         }
         return lines.toString();
     }
