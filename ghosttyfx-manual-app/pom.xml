@@ -7,13 +7,17 @@
     <parent>
         <groupId>io.github.vlaaad</groupId>
         <artifactId>ghosttyfx-parent</artifactId>
-        <version>1.0.0-SNAPSHOT</version>
+        <version>${revision}</version>
     </parent>
 
     <artifactId>ghosttyfx-manual-app</artifactId>
 
     <name>GhosttyFX Manual App</name>
     <description>Manual JavaFX launcher for GhosttyFX</description>
+
+    <properties>
+        <maven.deploy.skip>true</maven.deploy.skip>
+    </properties>
 
     <dependencies>
         <dependency>

@@ -29,7 +29,6 @@ licenses.
 14.0.2. note: plain prompts without osc 133 markers reproduce libghostty cursor pin reflow behavior (`38,0 -> 5,0 -> 5,0`), so shell integration is required for prompt redraw after shrink/grow.
 21. release
 21.0. publish to Maven Central through GitHub Actions and Sonatype Central Portal.
-21.0.3. release only library artifacts: `ghosttyfx-parent`, `ghosttyfx`, and the four platform binding modules; keep `ghosttyfx-manual-app` and `ghosttyfx-perf-app` out of Central or mark them skipped for deploy.
 21.0.4. use CI-friendly Maven versions: keep repo POMs on a placeholder revision and pass `-Drevision=1.0.<main-commit-count>` from CI, where the count is `git rev-list --count HEAD`.
 21.0.5. add Central Portal publishing config using `org.sonatype.central:central-publishing-maven-plugin`; store Central token credentials and GPG key/passphrase as GitHub Actions secrets.
 21.0.6. keep native builds split by runner as today, upload each `<platform-module>/target/ghosttyfx-artifact/`, then have one publish job download all four artifacts into `dist/<ghostty-commit-sha>/<artifactId>/` before running Maven deploy.

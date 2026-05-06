@@ -164,12 +164,6 @@ public final class GhosttyBuild {
         var platform = platform(args[1]);
         var artifactId = args[2];
         var buildDir = Path.of(args[3]).toAbsolutePath().normalize();
-        var hostPlatform = hostPlatformId();
-        if (!platform.id.equals(hostPlatform)) {
-            throw new IllegalStateException(
-                "requested platform '" + platform.id + "' does not match host '" + hostPlatform + "'"
-            );
-        }
 
         ensureRequiredSubmodules(repo);
         var ghosttyCommit = capture(repo.resolve(GHOSTTY_SUBMODULE), "git", "rev-parse", "HEAD").trim();
@@ -182,6 +176,15 @@ public final class GhosttyBuild {
             System.out.println("restored cached ghosttyfx artifact: " + outputs.artifactDir);
             return;
         }
+
+        var hostPlatform = hostPlatformId();
+        if (!platform.id.equals(hostPlatform)) {
+            throw new IllegalStateException(
+                "No cached artifact found for " + platform.id + " at ghostty commit " + ghosttyCommit
+                    + ", and this host can only build " + hostPlatform + "."
+            );
+        }
+
         if (!canBuildLocally()) {
             throw new IllegalStateException(
                 "No cached artifact found for ghostty commit " + ghosttyCommit + ". "

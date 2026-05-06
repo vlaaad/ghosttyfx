@@ -121,3 +121,73 @@ jobs:
           path: ghosttyfx-windows-x86_64/target/ghosttyfx-artifact/
           retention-days: 1
           compression-level: 0
+
+  publish:
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    needs:
+      - build-linux
+      - build-macos-arm64
+      - build-macos-x64
+      - build-windows
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6.0.0
+        with:
+          path: release-artifacts
+
+      - name: Stage cross-platform artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          ghostty_commit="$(git -C ghostty rev-parse HEAD)"
+          dist_dir="dist/${ghostty_commit}"
+          mkdir -p "${dist_dir}"
+
+          for artifact_id in \
+            ghosttyfx-linux-x86_64 \
+            ghosttyfx-macos-aarch64 \
+            ghosttyfx-macos-x86_64 \
+            ghosttyfx-windows-x86_64
+          do
+            source_dir="release-artifacts/${artifact_id}"
+            target_dir="${dist_dir}/${artifact_id}"
+            test -d "${source_dir}"
+            rm -rf "${target_dir}"
+            mkdir -p "${target_dir}"
+            cp -R "${source_dir}/." "${target_dir}/"
+          done
+
+      - name: Compute release version
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "GHOSTTYFX_VERSION=1.0.$(git rev-list --count HEAD)" >> "${GITHUB_ENV}"
+
+      - uses: actions/setup-java@be666c2fcd27ec809703dec50e508c2fdc7f6654 # v5.2.0
+        with:
+          distribution: temurin
+          java-version: "25"
+          cache: maven
+          server-id: central
+          server-username: CENTRAL_USERNAME
+          server-password: CENTRAL_PASSWORD
+          gpg-private-key: ${{ secrets.GPG_PRIVATE_KEY }}
+          gpg-passphrase: GPG_PASSPHRASE
+        env:
+          CENTRAL_USERNAME: ${{ secrets.CENTRAL_USERNAME }}
+          CENTRAL_PASSWORD: ${{ secrets.CENTRAL_PASSWORD }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+
+      - name: Publish to Central Portal
+        run: xvfb-run -a mvn -B -Prelease "-Drevision=${GHOSTTYFX_VERSION}" deploy
+        env:
+          CENTRAL_USERNAME: ${{ secrets.CENTRAL_USERNAME }}
+          CENTRAL_PASSWORD: ${{ secrets.CENTRAL_PASSWORD }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
