@@ -213,6 +213,7 @@ final class TerminalViewTest {
         try (var view = createView("")) {
             runOnFxThread(() -> {
                 var link = new TerminalLinkMatcher(Pattern.compile("issue-(\\d+)"), _ -> {});
+                assertFalse(view.getLinkMatchers().isEmpty());
                 view.getLinkMatchers().add(link);
                 assertTrue(view.getLinkMatchers().contains(link));
                 assertThrows(NullPointerException.class, () -> new TerminalLinkMatcher(null, _ -> {}));
@@ -283,12 +284,25 @@ final class TerminalViewTest {
     }
 
     @Test
-    void builtInUrlLinkMatcherIsAvailableAfterCustomLinks() throws Exception {
+    void builtInUrlLinkMatcherIsAvailableByDefault() throws Exception {
         try (var view = createView("https://example.test")) {
             awaitText(view, "https://example.test");
             runOnFxThread(() -> {
                 moveToCell(view, 4, 0);
                 assertSame(Cursor.HAND, view.getCursor());
+                return null;
+            });
+        }
+    }
+
+    @Test
+    void clearingLinkMatchersDisablesBuiltInUrlLinkMatcher() throws Exception {
+        try (var view = createView("https://example.test")) {
+            awaitText(view, "https://example.test");
+            runOnFxThread(() -> {
+                view.getLinkMatchers().clear();
+                moveToCell(view, 4, 0);
+                assertSame(Cursor.DEFAULT, view.getCursor());
                 return null;
             });
         }

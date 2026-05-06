@@ -5,7 +5,6 @@ import java.lang.ref.Cleaner;
 import java.lang.ref.WeakReference;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.function.DoubleSupplier;
@@ -260,6 +259,7 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
                     new TerminalShortcut(new KeyCodeCombination(KeyCode.RIGHT, KeyCombination.META_DOWN), () -> sendText("\u0005")),
                     new TerminalShortcut(new KeyCodeCombination(KeyCode.BACK_SPACE, KeyCombination.META_DOWN), () -> sendText("\u0015")));
         }
+        linkMatchers.add(BUILT_IN_LINK_MATCHER);
 
         setFocusTraversable(true);
         searchUi = new SearchUi(
@@ -446,8 +446,8 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
 
     /// Returns the terminal link matchers.
     ///
-    /// The list is mutable. Custom matchers are tried in list order before the
-    /// built-in web URL matcher.
+    /// The list is mutable. Matchers are tried in list order. The default list
+    /// includes the built-in web URL matcher.
     ///
     /// @return the mutable terminal link matcher list
     public ObservableList<TerminalLinkMatcher> getLinkMatchers() {
@@ -1017,7 +1017,7 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
             return new ActiveLink(new ActiveLink.Osc8(hit.hyperlinkUri()), selection, () -> openHyperlink(hit.hyperlinkUri()));
         }
 
-        var match = terminalSession.linkMatcherAt(hit.screenPoint(), allLinkMatchers());
+        var match = terminalSession.linkMatcherAt(hit.screenPoint(), getLinkMatchers());
         if (match == null || match.selection().isEmpty()) {
             return null;
         }
@@ -1026,13 +1026,6 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
                 new ActiveLink.Regex(match.index(), match.match().group()),
                 match.selection(),
                 () -> match.link().action().accept(match.match()));
-    }
-
-    private List<TerminalLinkMatcher> allLinkMatchers() {
-        var links = new ArrayList<TerminalLinkMatcher>(getLinkMatchers().size() + 1);
-        links.addAll(getLinkMatchers());
-        links.add(BUILT_IN_LINK_MATCHER);
-        return links;
     }
 
     private void refreshHover(MouseEvent event) {
@@ -1731,7 +1724,7 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
                 keyInputState.preedit(),
                 selection,
                 hoveredLink == null ? Selection.empty() : hoveredLink.selection(),
-                allLinkMatchers(),
+                getLinkMatchers(),
                 searchUi.visible() ? searchUi.result() : TerminalSession.SearchResult.empty(),
                 searchUi.visible() ? searchUi.selectedMatch() : -1,
                 isFocused(),

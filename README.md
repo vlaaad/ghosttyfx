@@ -1,112 +1,208 @@
 # GhosttyFX
 
-Generated per-platform `jextract` bindings for `libghostty-vt`.
+GhosttyFX is a JavaFX terminal control backed by Ghostty's terminal emulator.
+It renders terminal output in JavaFX and connects to a terminal backend supplied
+by your application.
 
-## Layout
+## Supported Platforms
 
-- `ghosttyfx`: shared Java module
-- `ghosttyfx-manual-app`: JavaFX launcher for manual testing
-- `ghosttyfx-linux-x86_64`
-- `ghosttyfx-macos-x86_64`
-- `ghosttyfx-macos-aarch64`
-- `ghosttyfx-windows-x86_64`
-- `ghostty`: pinned Git submodule for the upstream Ghostty source tree
-- `ghostling`: pinned Git submodule for the upstream Ghostling reference app
+GhosttyFX currently ships native bindings for Linux x86_64, macOS x86_64,
+macOS aarch64, and Windows x86_64.
 
-## Licenses
+## Usage
 
-GhosttyFX bundles shell integration scripts under `ghosttyfx/src/main/resources/shell`.
-The Bash and Zsh integration scripts are copied from Ghostty's shell integration
-and retain their GPLv3 license notices because they are derived from kitty's
-GPLv3 shell integration. Other GhosttyFX code and scripts keep their original
-licenses.
+This example uses pty4j as the PTY backend.
 
-## Next steps
+First, adapt pty4j to GhosttyFX's `Terminal` interface:
 
-### v1
-14. Semantic prompt / shell integration UI (osc 133): libghostty parses semantic prompt data, but the view does not expose prompt navigation, command regions, or similar UI behavior.
-14.0.1. resize acceptance: with injected PowerShell/pwsh, prompt at 80 columns, resize to 6 columns, then back to 80; the cursor must return to the prompt end through the real PTY + libghostty path, not by a JavaFX-only workaround.
-14.0.2. note: plain prompts without osc 133 markers reproduce libghostty cursor pin reflow behavior (`38,0 -> 5,0 -> 5,0`), so shell integration is required for prompt redraw after shrink/grow.
-20. doc
-21. release
+```java
+import com.pty4j.PtyProcess;
+import com.pty4j.PtyProcessBuilder;
+import com.pty4j.WinSize;
+import io.github.vlaaad.ghosttyfx.Terminal;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.nio.file.Path;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.TimeUnit;
 
-### v2
-6. kitty graphics
-7. check out `_get_multi` for perf
-8. explore backarrow key mode support
+final class PtyTerminal implements Terminal {
+    private final PtyProcess process;
 
-## Local Build
+    PtyTerminal(List<String> command, Path cwd, Map<String, String> environment, int columns, int rows) throws Exception {
+        process = (PtyProcess) new PtyProcessBuilder()
+                .setCommand(command.toArray(String[]::new))
+                .setConsole(false)
+                .setRedirectErrorStream(true)
+                .setDirectory(cwd.toString())
+                .setEnvironment(environment)
+                .setInitialColumns(columns)
+                .setInitialRows(rows)
+                .setUseWinConPty(true)
+                .start();
+    }
 
-Run:
+    @Override
+    public InputStream output() {
+        return process.getInputStream();
+    }
 
-`mvn clean test`
+    @Override
+    public OutputStream input() {
+        return process.getOutputStream();
+    }
 
-The Maven build invokes [scripts/GhosttyBuild.java](/C:/Users/Vlaaad/Projects/ghosttyfx/scripts/GhosttyBuild.java), which:
+    @Override
+    public void resize(int columns, int rows) {
+        process.setWinSize(new WinSize(columns, rows));
+    }
 
-- ensures the `ghostty` and `ghostling` submodules are initialized to their repo-pinned commits
-- downloads and caches Zig in `.tools/zig`
-- downloads and caches `jextract` in `.tools/jextract`
-- builds `libghostty-vt` for the current host platform
-- runs `jextract` with a shared Java package name
-- writes generated sources under `target/generated-sources/jextract`
-- writes generated resources under `target/generated-resources/ghosttyfx`
-- writes CI/download artifacts under `target/ghosttyfx-artifact`
+    @Override
+    public void close() throws Exception {
+        process.destroy();
+        if (!process.waitFor(2, TimeUnit.SECONDS)) {
+            process.destroyForcibly();
+            process.waitFor();
+        }
+    }
+}
+```
 
-If the local Windows toolchain is unavailable, the build will also look for a matching downloaded artifact cache under:
+Then create a `TerminalView` with a `TerminalFactory`. The factory is called on
+a background thread with the initial terminal size.
 
-- `dist/<ghostty-commit-sha>/<artifactId>/`
+```java
+import io.github.vlaaad.ghosttyfx.Shell;
+import io.github.vlaaad.ghosttyfx.TerminalView;
+import java.nio.file.Path;
+import java.util.List;
 
-Artifacts contain:
+var command = List.of("pwsh");
+var cwd = Path.of(System.getProperty("user.home"));
 
-- `src/`
-- `resources/`
+var view = new TerminalView((columns, rows) -> {
+    var launcher = Shell.integrate(command, System.getenv());
+    return new PtyTerminal(launcher.command(), cwd, launcher.environment(), columns, rows);
+});
+```
 
-## Downloaded Artifacts
+Finally, use `TerminalView` as a JavaFX node. For example, put it in a tab and
+bind the tab title to the terminal title:
 
-Run:
+```java
+tab.textProperty().bind(view.titleProperty());
+tab.setContent(view);
+```
 
-`mvn -N -Pdownload-cross-platform-artifacts exec:exec@download-cross-platform-artifacts`
+## Main Concepts
 
-That command:
+### TerminalView
 
-- requires a clean checkout synced to `origin/main`
-- triggers `build-lib.yml` on CI
-- downloads the produced artifact set into `dist/<ghostty-commit-sha>/`
-- validates that each artifact metadata file matches the current `ghostty` submodule commit
+`TerminalView` is the JavaFX control. It starts a terminal backend through a
+`TerminalFactory`, renders terminal output with Ghostty's terminal emulator, and
+sends keyboard, mouse, paste, and resize input back to the backend.
 
-After that, on Windows machines without MSVC Build Tools + Windows SDK, `mvn clean test` can reuse the downloaded artifact for the current host platform.
+### Terminal lifecycle
 
-## Manual App
+`TerminalFactory.open(columns, rows)` is called on a background thread, so it
+may start a process, open a PTY, or perform other blocking setup before
+returning a `Terminal`.
 
-The repository includes a JavaFX manual app in
-[GhosttyFxManualApp.java](/C:/Users/Vlaaad/Projects/ghosttyfx/ghosttyfx-manual-app/src/main/java/io/github/vlaaad/ghosttyfx/manualapp/GhosttyFxManualApp.java).
+GhosttyFX does not prescribe a PTY library. Your application can adapt pty4j,
+JNA, a native backend, or another process/session implementation to `Terminal`.
 
-From the repository root, launch it with:
+`TerminalView` owns the backend lifecycle. Call `TerminalView.close()` when the
+view is no longer needed; it can be called from the JavaFX UI thread, actual
+backend cleanup happens on the background terminal task, and repeated calls are
+harmless.
 
-`mvn -pl ghosttyfx-manual-app -am -Pmanual-app compile`
+Use `terminalStateProperty()` to observe whether the backend is running, closed,
+or failed.
 
-The app:
+### Shell integration
 
-- starts with an empty `TabPane`
-- auto-detects available terminal executables
-- lets you choose a working directory before opening a tab
-- creates each tab with `GhosttyFx.create(command, cwd, System.getenv())`
+`Shell.integrate(command, environment)` applies Ghostty shell integration before
+the shell starts. Integration lets the terminal observe shell lifecycle events,
+including prompts and command boundaries, which enables prompt navigation and
+better redraw behavior. Supported shells are Bash, Cmd, Fish, PowerShell, and
+Zsh. Unknown commands are returned unchanged.
 
-Close tabs or the window to tear down their PTY processes.
+## The View
 
-## CI
+`TerminalView` extends `AnchorPane`, so use it anywhere a JavaFX node can be
+used. Useful view APIs include:
 
-CI only needs to:
+- `titleProperty()`: terminal title reported by the running program
+- `terminalStateProperty()`: running, closed, or failed backend state
+- `copySelection()`, `pasteClipboard()`, `selectAll()`: common terminal actions
+- `sendText(...)`, `sendEsc(...)`: send text or escape-prefixed input
 
-1. check out this repository with submodules
-2. set up Java
-3. run `mvn clean test`
-4. upload `<platform-module>/target/ghosttyfx-artifact/`
+## Configuration
 
-## Notes
+### Font
 
-- Local generation is host-only.
-- Cross-platform artifact sets come from CI running the same build on each target host.
-- Local Windows source builds still require Visual Studio Build Tools plus the Windows SDK.
-- `ghostling` is for source reference only and is not part of the build path.
-- No extra gitignore entry is needed for generated bindings because they live under `target/`.
+Use `fontProperty()` or `setFont(...)` to configure the terminal font. The view
+uses the font to measure terminal cells, so changing it can change the view's
+preferred width and height. Bold, italic, and bold italic faces are derived from
+the configured font family and size.
+
+### Theme
+
+Use `themeProperty()` or `setTheme(...)` to configure colors used by the
+terminal, cursor, selection, scrollbar, and search highlights.
+
+`TerminalTheme.defaults()` uses a black background, white foreground, and the
+terminal emulator's default indexed palette. A custom palette may be empty, 16
+colors, or 256 colors. `faintOpacity` must be between `0.0` and `1.0`.
+
+### Cursor
+
+Use `cursorBlinkingProperty()` or `setCursorBlinking(...)` to allow or suppress
+cursor blinking. This controls whether blinking is allowed when the terminal
+requests it; it does not force every cursor to blink.
+
+### macOS Option key
+
+Use `macOptionAsAltProperty()` or `setMacOptionAsAlt(...)` on macOS when Option
+key combinations should be sent as terminal Alt input. The default is `false`,
+which lets Option-produced text behave like normal text input.
+
+### Search
+
+Use `searchPromptTextProperty()` or `setSearchPromptText(...)` to customize the
+placeholder shown in the search field. The search UI follows the terminal font
+and theme.
+
+Search can be controlled with `toggleSearch()`, `closeSearch()`, `searchNext()`,
+and `searchPrevious()`.
+
+### Shortcuts
+
+Use `getTerminalShortcuts()` to customize keyboard shortcuts handled by the
+view. The list is mutable, and shortcuts are tried in list order. A
+`TerminalShortcut` action returns `true` when it handled the key press.
+
+The default list includes copy, paste, select all, search, selection extension,
+scrolling, and prompt navigation shortcuts. Custom shortcuts can call view
+methods such as `sendText(...)`, `sendEsc(...)`, `copySelection()`, or
+`toggleSearch()`.
+
+### Links
+
+Use `getLinkMatchers()` to customize clickable text patterns. The list is
+mutable, and matchers are tried in list order. The default list includes a
+built-in web URL matcher. OSC 8 hyperlinks from terminal output take
+precedence over link matchers.
+
+A `TerminalLinkMatcher` receives the regex `MatchResult`, so actions can use
+capture groups.
+
+### Bell
+
+Use `setOnBell(...)` or `onBellProperty()` to run code when the terminal rings
+the bell. The value may be `null` to disable custom bell handling.
+
+## Development
+
+Internal build and repository notes live in [DEVELOPMENT.md](DEVELOPMENT.md).
