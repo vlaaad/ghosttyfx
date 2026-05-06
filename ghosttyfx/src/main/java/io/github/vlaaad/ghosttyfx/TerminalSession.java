@@ -702,8 +702,8 @@ final class TerminalSession implements AutoCloseable {
         return new SearchBatch(matches, searchLimit);
     }
 
-    MatchedRegexLink regexLinkAt(Selection.ScreenPoint point, List<RegexLink> regexLinks) {
-        if (regexLinks.isEmpty()) {
+    MatchedLinkMatcher linkMatcherAt(Selection.ScreenPoint point, List<LinkMatcher> linkMatchers) {
+        if (linkMatchers.isEmpty()) {
             return null;
         }
 
@@ -712,23 +712,23 @@ final class TerminalSession implements AutoCloseable {
             return null;
         }
 
-        for (var i = 0; i < regexLinks.size(); i++) {
-            var regexLink = regexLinks.get(i);
-            var matcher = regexLink.pattern().matcher(line.text());
+        for (var i = 0; i < linkMatchers.size(); i++) {
+            var linkMatcher = linkMatchers.get(i);
+            var matcher = linkMatcher.pattern().matcher(line.text());
             while (matcher.find()) {
                 var selection = line.selection(matcher.start(), matcher.end());
                 if (!selection.isEmpty()
                         && contains(selection, point)
                         && !containsSemanticInput(selection)) {
-                    return new MatchedRegexLink(i, regexLink, matcher.toMatchResult(), selection);
+                    return new MatchedLinkMatcher(i, linkMatcher, matcher.toMatchResult(), selection);
                 }
             }
         }
         return null;
     }
 
-    List<Selection> regexLinkSelections(List<RegexLink> regexLinks, int startRow, int endRow) {
-        if (regexLinks.isEmpty()) {
+    List<Selection> linkMatcherSelections(List<LinkMatcher> linkMatchers, int startRow, int endRow) {
+        if (linkMatchers.isEmpty()) {
             return List.of();
         }
 
@@ -758,8 +758,8 @@ final class TerminalSession implements AutoCloseable {
                 continue;
             }
 
-            for (var regexLink : regexLinks) {
-                var matcher = regexLink.pattern().matcher(line.text());
+            for (var linkMatcher : linkMatchers) {
+                var matcher = linkMatcher.pattern().matcher(line.text());
                 while (matcher.find()) {
                     var selection = line.selection(matcher.start(), matcher.end());
                     if (!selection.isEmpty() && !containsSemanticInput(selection)) {
@@ -1212,7 +1212,7 @@ final class TerminalSession implements AutoCloseable {
             KeyInput.Preedit preedit,
             Selection selection,
             Selection hoveredLink,
-            List<RegexLink> regexLinks,
+            List<LinkMatcher> linkMatchers,
             SearchResult searchResult,
             int selectedSearchMatch,
             boolean focused,
@@ -1259,7 +1259,7 @@ final class TerminalSession implements AutoCloseable {
             var visibleRows = Math.max(1, (int) Math.ceil(height / metrics.cellHeightPx()));
             var linkResult = SearchResult.append(
                     SearchResult.empty(),
-                    regexLinkSelections(regexLinks, viewportTop, viewportTop + visibleRows - 1),
+                    linkMatcherSelections(linkMatchers, viewportTop, viewportTop + visibleRows - 1),
                     columnCount());
             var highlightedViewportRow = promptNavigationHighlightRow >= viewportTop
                     && promptNavigationHighlightRow < viewportTop + visibleRows
@@ -2310,7 +2310,7 @@ final class TerminalSession implements AutoCloseable {
 
     }
 
-    record MatchedRegexLink(int index, RegexLink link, MatchResult match, Selection selection) {
+    record MatchedLinkMatcher(int index, LinkMatcher link, MatchResult match, Selection selection) {
     }
 
     record LogicalLine(String text, List<Selection.ScreenPoint> points) {

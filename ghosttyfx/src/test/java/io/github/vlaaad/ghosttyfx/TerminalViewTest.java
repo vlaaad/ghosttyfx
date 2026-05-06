@@ -157,15 +157,15 @@ final class TerminalViewTest {
     }
 
     @Test
-    void exposesShortcutList() throws Exception {
-        var tempDirectory = Files.createTempDirectory("ghosttyfx-selection-shortcuts-test-");
+    void exposesTerminalShortcutList() throws Exception {
+        var tempDirectory = Files.createTempDirectory("ghosttyfx-selection-terminalShortcuts-test-");
         var pidFile = tempDirectory.resolve("shell.pid");
         var shell = discoverShell(pidFile);
 
         try (var view = createView(shell, tempDirectory)) {
             runOnFxThread(() -> {
-                var combinations = view.getShortcuts().stream()
-                        .map(Shortcut::combination)
+                var combinations = view.getTerminalShortcuts().stream()
+                        .map(TerminalShortcut::combination)
                         .toList();
                 assertTrue(combinations.contains(isMac()
                         ? new KeyCodeCombination(KeyCode.C, KeyCombination.META_DOWN)
@@ -198,37 +198,37 @@ final class TerminalViewTest {
                     assertTrue(combinations.contains(new KeyCodeCombination(KeyCode.BACK_SPACE, KeyCombination.META_DOWN)));
                 }
 
-                var shortcut = new Shortcut(
+                var shortcut = new TerminalShortcut(
                         new KeyCodeCombination(KeyCode.B, KeyCombination.SHIFT_DOWN),
                         () -> false);
-                view.getShortcuts().add(shortcut);
-                assertTrue(view.getShortcuts().contains(shortcut));
+                view.getTerminalShortcuts().add(shortcut);
+                assertTrue(view.getTerminalShortcuts().contains(shortcut));
                 return null;
             });
         }
     }
 
     @Test
-    void exposesRegexLinkList() throws Exception {
+    void exposesLinkMatcherList() throws Exception {
         try (var view = createView("")) {
             runOnFxThread(() -> {
-                var link = new RegexLink(Pattern.compile("issue-(\\d+)"), _ -> {});
-                view.getRegexLinks().add(link);
-                assertTrue(view.getRegexLinks().contains(link));
-                assertThrows(NullPointerException.class, () -> new RegexLink(null, _ -> {}));
-                assertThrows(NullPointerException.class, () -> new RegexLink(Pattern.compile("x"), null));
+                var link = new LinkMatcher(Pattern.compile("issue-(\\d+)"), _ -> {});
+                view.getLinkMatchers().add(link);
+                assertTrue(view.getLinkMatchers().contains(link));
+                assertThrows(NullPointerException.class, () -> new LinkMatcher(null, _ -> {}));
+                assertThrows(NullPointerException.class, () -> new LinkMatcher(Pattern.compile("x"), null));
                 return null;
             });
         }
     }
 
     @Test
-    void customRegexLinkClickReceivesMatchResult() throws Exception {
+    void customLinkMatcherClickReceivesMatchResult() throws Exception {
         var group = new AtomicReference<String>();
         try (var view = createView("issue-123")) {
             awaitText(view, "issue-123");
             runOnFxThread(() -> {
-                view.getRegexLinks().add(new RegexLink(Pattern.compile("issue-(\\d+)"), match -> group.set(match.group(1))));
+                view.getLinkMatchers().add(new LinkMatcher(Pattern.compile("issue-(\\d+)"), match -> group.set(match.group(1))));
                 clickCell(view, 2, 0);
                 assertEquals("123", group.get());
                 return null;
@@ -237,13 +237,13 @@ final class TerminalViewTest {
     }
 
     @Test
-    void osc8LinkWinsOverCustomRegexLink() throws Exception {
+    void osc8LinkWinsOverCustomLinkMatcher() throws Exception {
         var clicks = new AtomicInteger();
         var output = "\u001B]8;;https://example.test\u001B\\abc\u001B]8;;\u001B\\";
         try (var view = createView(output)) {
             awaitText(view, "abc");
             runOnFxThread(() -> {
-                view.getRegexLinks().add(new RegexLink(Pattern.compile("abc"), _ -> clicks.incrementAndGet()));
+                view.getLinkMatchers().add(new LinkMatcher(Pattern.compile("abc"), _ -> clicks.incrementAndGet()));
                 moveToCell(view, 1, 0);
                 assertSame(Cursor.HAND, view.getCursor());
                 assertEquals(0, clicks.get());
@@ -253,13 +253,13 @@ final class TerminalViewTest {
     }
 
     @Test
-    void customRegexLinksUseUserOrder() throws Exception {
+    void customLinkMatchersUseUserOrder() throws Exception {
         var clicks = new AtomicReference<String>();
         try (var view = createView("abc")) {
             awaitText(view, "abc");
             runOnFxThread(() -> {
-                view.getRegexLinks().add(new RegexLink(Pattern.compile("ab"), _ -> clicks.set("first")));
-                view.getRegexLinks().add(new RegexLink(Pattern.compile("bc"), _ -> clicks.set("second")));
+                view.getLinkMatchers().add(new LinkMatcher(Pattern.compile("ab"), _ -> clicks.set("first")));
+                view.getLinkMatchers().add(new LinkMatcher(Pattern.compile("bc"), _ -> clicks.set("second")));
                 clickCell(view, 1, 0);
                 assertEquals("first", clicks.get());
                 return null;
@@ -268,13 +268,13 @@ final class TerminalViewTest {
     }
 
     @Test
-    void regexLinksMatchAcrossSoftWrappedLogicalLine() throws Exception {
+    void linkMatchersMatchAcrossSoftWrappedLogicalLine() throws Exception {
         var clicks = new AtomicReference<String>();
         var output = "a".repeat(79) + "XY";
         try (var view = createView(output)) {
             awaitText(view, "XY");
             runOnFxThread(() -> {
-                view.getRegexLinks().add(new RegexLink(Pattern.compile("XY"), match -> clicks.set(match.group())));
+                view.getLinkMatchers().add(new LinkMatcher(Pattern.compile("XY"), match -> clicks.set(match.group())));
                 clickCell(view, 79, 0);
                 assertEquals("XY", clicks.get());
                 return null;
@@ -283,7 +283,7 @@ final class TerminalViewTest {
     }
 
     @Test
-    void builtInUrlRegexLinkIsAvailableAfterCustomLinks() throws Exception {
+    void builtInUrlLinkMatcherIsAvailableAfterCustomLinks() throws Exception {
         try (var view = createView("https://example.test")) {
             awaitText(view, "https://example.test");
             runOnFxThread(() -> {
@@ -295,7 +295,7 @@ final class TerminalViewTest {
     }
 
     @Test
-    void builtInUrlRegexLinkExcludesTrailingSentencePunctuation() throws Exception {
+    void builtInUrlLinkMatcherExcludesTrailingSentencePunctuation() throws Exception {
         try (var view = createView("https://example.test/, foo")) {
             awaitText(view, "https://example.test/");
             runOnFxThread(() -> {
@@ -309,7 +309,7 @@ final class TerminalViewTest {
     }
 
     @Test
-    void builtInUrlRegexLinkHandlesMarkdownClosingParenthesis() throws Exception {
+    void builtInUrlLinkMatcherHandlesMarkdownClosingParenthesis() throws Exception {
         var output = "[docs](https://example.test/readme)";
         try (var view = createView(output)) {
             awaitText(view, "https://example.test/readme");
@@ -324,7 +324,7 @@ final class TerminalViewTest {
     }
 
     @Test
-    void builtInUrlRegexLinkKeepsBalancedParenthesis() throws Exception {
+    void builtInUrlLinkMatcherKeepsBalancedParenthesis() throws Exception {
         var output = "https://en.wikipedia.org/wiki/Rust_(video_game)";
         try (var view = createView(output)) {
             awaitText(view, output);
@@ -337,7 +337,7 @@ final class TerminalViewTest {
     }
 
     @Test
-    void builtInUrlRegexLinkDoesNotMatchFilePaths() throws Exception {
+    void builtInUrlLinkMatcherDoesNotMatchFilePaths() throws Exception {
         try (var view = createView("file:///tmp/a C:\\tmp\\a /tmp/a")) {
             awaitText(view, "file:///tmp/a");
             runOnFxThread(() -> {
@@ -353,7 +353,7 @@ final class TerminalViewTest {
     }
 
     @Test
-    void builtInUrlRegexLinkIgnoresShellInputRegion() throws Exception {
+    void builtInUrlLinkMatcherIgnoresShellInputRegion() throws Exception {
         var output = "\u001B]133;A\u0007> \u001B]133;B\u0007https://example.test";
         try (var view = createView(output)) {
             awaitText(view, "https://example.test");
@@ -366,12 +366,12 @@ final class TerminalViewTest {
     }
 
     @Test
-    void customRegexLinksIgnoreShellInputRegion() throws Exception {
+    void customLinkMatchersIgnoreShellInputRegion() throws Exception {
         var output = "\u001B]133;A\u0007> \u001B]133;B\u0007issue-123";
         try (var view = createView(output)) {
             awaitText(view, "issue-123");
             runOnFxThread(() -> {
-                view.getRegexLinks().add(new RegexLink(Pattern.compile("issue-(\\d+)"), _ -> {}));
+                view.getLinkMatchers().add(new LinkMatcher(Pattern.compile("issue-(\\d+)"), _ -> {}));
                 moveToCell(view, 5, 0);
                 assertSame(Cursor.DEFAULT, view.getCursor());
                 return null;
@@ -458,7 +458,7 @@ final class TerminalViewTest {
             });
 
             var rowAndColumn = await("cmd dir output row", START_TIMEOUT, () -> runOnFxThread(() -> {
-                fireShortcut(view, selectAllShortcut());
+                fireTerminalShortcut(view, selectAllTerminalShortcut());
                 var text = view.getInputMethodRequests().getSelectedText();
                 if (text == null || !text.contains("ghosttyfx-region-marker.txt")) {
                     return Optional.empty();
@@ -492,13 +492,13 @@ final class TerminalViewTest {
             try (var view = createView("issue-123")) {
                 awaitText(view, "issue-123");
                 runOnFxThread(() -> {
-                    view.getRegexLinks().add(new RegexLink(Pattern.compile("issue-(\\d+)"), _ -> clicks.incrementAndGet()));
+                    view.getLinkMatchers().add(new LinkMatcher(Pattern.compile("issue-(\\d+)"), _ -> clicks.incrementAndGet()));
                     var clipboard = Clipboard.getSystemClipboard();
                     var content = new javafx.scene.input.ClipboardContent();
                     content.putString("unchanged");
                     clipboard.setContent(content);
                     moveToCell(view, 2, 0);
-                    fireShortcut(view, copyShortcut());
+                    fireTerminalShortcut(view, copyTerminalShortcut());
                     assertEquals("unchanged", clipboard.getString());
                     assertEquals(0, clicks.get());
                     return null;
@@ -526,7 +526,7 @@ final class TerminalViewTest {
     }
 
     @Test
-    void sendTextAndSendEscExposeShortcutActions() throws Exception {
+    void sendTextAndSendEscExposeTerminalShortcutActions() throws Exception {
         var tempDirectory = Files.createTempDirectory("ghosttyfx-send-text-test-");
         var pidFile = tempDirectory.resolve("shell.pid");
         var shell = discoverShell(pidFile);
@@ -539,24 +539,24 @@ final class TerminalViewTest {
                 assertThrows(NullPointerException.class, () -> view.sendText(null));
                 assertThrows(NullPointerException.class, () -> view.sendEsc(null));
 
-                var textShortcut = new KeyCodeCombination(KeyCode.B, KeyCombination.ALT_DOWN);
-                var sendTextShortcut = new Shortcut(textShortcut, () -> view.sendText("B"));
-                view.getShortcuts().add(sendTextShortcut);
-                assertTrue(view.getShortcuts().contains(sendTextShortcut));
-                assertTrue(sendTextShortcut.action().getAsBoolean());
+                var textTerminalShortcut = new KeyCodeCombination(KeyCode.B, KeyCombination.ALT_DOWN);
+                var sendTextTerminalShortcut = new TerminalShortcut(textTerminalShortcut, () -> view.sendText("B"));
+                view.getTerminalShortcuts().add(sendTextTerminalShortcut);
+                assertTrue(view.getTerminalShortcuts().contains(sendTextTerminalShortcut));
+                assertTrue(sendTextTerminalShortcut.action().getAsBoolean());
 
-                var escShortcut = new KeyCodeCombination(KeyCode.F, KeyCombination.ALT_DOWN);
-                var sendEscShortcut = new Shortcut(escShortcut, () -> view.sendEsc("f"));
-                view.getShortcuts().add(sendEscShortcut);
-                assertTrue(view.getShortcuts().contains(sendEscShortcut));
-                assertTrue(sendEscShortcut.action().getAsBoolean());
+                var escTerminalShortcut = new KeyCodeCombination(KeyCode.F, KeyCombination.ALT_DOWN);
+                var sendEscTerminalShortcut = new TerminalShortcut(escTerminalShortcut, () -> view.sendEsc("f"));
+                view.getTerminalShortcuts().add(sendEscTerminalShortcut);
+                assertTrue(view.getTerminalShortcuts().contains(sendEscTerminalShortcut));
+                assertTrue(sendEscTerminalShortcut.action().getAsBoolean());
                 return null;
             });
         }
     }
 
     @Test
-    void shiftArrowShortcutsExtendExistingSelection() throws Exception {
+    void shiftArrowTerminalShortcutsExtendExistingSelection() throws Exception {
         var marker = "ghosttyfx-selection";
         var tempDirectory = Files.createTempDirectory("ghosttyfx-selection-test-");
         var pidFile = tempDirectory.resolve("shell.pid");
@@ -564,7 +564,7 @@ final class TerminalViewTest {
 
         try (var view = createView(shell, tempDirectory)) {
             await("terminal output to be addressable", START_TIMEOUT, () -> runOnFxThread(() -> {
-                fireShortcut(view, selectAllShortcut());
+                fireTerminalShortcut(view, selectAllTerminalShortcut());
                 return marker.equals(view.getInputMethodRequests().getSelectedText())
                         ? Optional.of(Boolean.TRUE)
                         : Optional.empty();
@@ -572,16 +572,16 @@ final class TerminalViewTest {
 
             runOnFxThread(() -> {
                 dragSelection(view, 1, 1);
-                fireShortcut(view, new KeyCodeCombination(KeyCode.RIGHT, KeyCombination.SHIFT_DOWN));
+                fireTerminalShortcut(view, new KeyCodeCombination(KeyCode.RIGHT, KeyCombination.SHIFT_DOWN));
                 assertEquals(marker.substring(1, 3), view.getInputMethodRequests().getSelectedText());
 
-                fireShortcut(view, new KeyCodeCombination(KeyCode.LEFT, KeyCombination.SHIFT_DOWN));
+                fireTerminalShortcut(view, new KeyCodeCombination(KeyCode.LEFT, KeyCombination.SHIFT_DOWN));
                 assertEquals(marker.substring(1, 2), view.getInputMethodRequests().getSelectedText());
 
-                fireShortcut(view, new KeyCodeCombination(KeyCode.HOME, KeyCombination.SHIFT_DOWN));
+                fireTerminalShortcut(view, new KeyCodeCombination(KeyCode.HOME, KeyCombination.SHIFT_DOWN));
                 assertEquals(marker.substring(0, 2), view.getInputMethodRequests().getSelectedText());
 
-                fireShortcut(view, new KeyCodeCombination(KeyCode.END, KeyCombination.SHIFT_DOWN));
+                fireTerminalShortcut(view, new KeyCodeCombination(KeyCode.END, KeyCombination.SHIFT_DOWN));
                 assertEquals(marker.substring(1), view.getInputMethodRequests().getSelectedText());
                 return null;
             });
@@ -589,8 +589,8 @@ final class TerminalViewTest {
     }
 
     @Test
-    void viewportScrollShortcutsReportUnavailableWithoutScrollableViewport() throws Exception {
-        var tempDirectory = Files.createTempDirectory("ghosttyfx-viewport-scroll-shortcuts-test-");
+    void viewportScrollTerminalShortcutsReportUnavailableWithoutScrollableViewport() throws Exception {
+        var tempDirectory = Files.createTempDirectory("ghosttyfx-viewport-scroll-terminalShortcuts-test-");
         var pidFile = tempDirectory.resolve("shell.pid");
         var shell = discoverShell(pidFile);
 
@@ -606,8 +606,8 @@ final class TerminalViewTest {
     }
 
     @Test
-    void viewportScrollShortcutsConsumeAtScrollableBoundaries() throws Exception {
-        var tempDirectory = Files.createTempDirectory("ghosttyfx-viewport-scroll-boundary-shortcuts-test-");
+    void viewportScrollTerminalShortcutsConsumeAtScrollableBoundaries() throws Exception {
+        var tempDirectory = Files.createTempDirectory("ghosttyfx-viewport-scroll-boundary-terminalShortcuts-test-");
         var pidFile = tempDirectory.resolve("shell.pid");
         var shell = discoverOutputShell(pidFile, lineOutput(80));
 
@@ -703,7 +703,7 @@ final class TerminalViewTest {
 
         try (var view = createView(shell, tempDirectory)) {
             await("terminal output to become searchable", START_TIMEOUT, () -> runOnFxThread(() -> {
-                fireShortcut(view, selectAllShortcut());
+                fireTerminalShortcut(view, selectAllTerminalShortcut());
                 var text = view.getInputMethodRequests().getSelectedText();
                 return text != null && text.contains(marker) ? Optional.of(Boolean.TRUE) : Optional.empty();
             }));
@@ -714,25 +714,25 @@ final class TerminalViewTest {
                 assertEquals(marker, view.getInputMethodRequests().getSelectedText());
 
                 assertTrue(view.toggleSearch());
-                assertEquals(marker, view.getSearchText());
+                assertEquals(marker, view.searchText());
                 assertEquals("...", ((Label) view.lookup("#ghosttyfx-search-count")).getText());
                 return null;
             });
 
             await("search matches", START_TIMEOUT, () -> runOnFxThread(() ->
-                    view.getSearchMatchCount() == 2 ? Optional.of(Boolean.TRUE) : Optional.empty()));
+                    view.searchMatchCount() == 2 ? Optional.of(Boolean.TRUE) : Optional.empty()));
 
             runOnFxThread(() -> {
-                assertEquals(2, view.getSearchMatchCount());
-                assertEquals(0, view.getSelectedSearchMatchIndex());
+                assertEquals(2, view.searchMatchCount());
+                assertEquals(0, view.selectedSearchMatchIndex());
 
                 assertTrue(view.searchNext());
-                assertEquals(1, view.getSelectedSearchMatchIndex());
+                assertEquals(1, view.selectedSearchMatchIndex());
                 assertTrue(view.searchPrevious());
-                assertEquals(0, view.getSelectedSearchMatchIndex());
+                assertEquals(0, view.selectedSearchMatchIndex());
 
-                fireShortcut(view, new KeyCodeCombination(KeyCode.ESCAPE));
-                assertEquals(-1, view.getSelectedSearchMatchIndex());
+                fireTerminalShortcut(view, new KeyCodeCombination(KeyCode.ESCAPE));
+                assertEquals(-1, view.selectedSearchMatchIndex());
                 return null;
             });
         }
@@ -745,7 +745,7 @@ final class TerminalViewTest {
 
         try (var view = createView(output)) {
             await("terminal grapheme output to become searchable", START_TIMEOUT, () -> runOnFxThread(() -> {
-                fireShortcut(view, selectAllShortcut());
+                fireTerminalShortcut(view, selectAllTerminalShortcut());
                 var text = view.getInputMethodRequests().getSelectedText();
                 return text != null && text.contains(marker) ? Optional.of(Boolean.TRUE) : Optional.empty();
             }));
@@ -755,17 +755,17 @@ final class TerminalViewTest {
                 dragSelection(view, 0, 1);
                 assertEquals(marker, view.getInputMethodRequests().getSelectedText());
                 assertTrue(view.toggleSearch());
-                assertEquals(marker, view.getSearchText());
+                assertEquals(marker, view.searchText());
                 assertEquals("...", ((Label) view.lookup("#ghosttyfx-search-count")).getText());
                 return null;
             });
 
             await("grapheme search matches", START_TIMEOUT, () -> runOnFxThread(() ->
-                    view.getSearchMatchCount() == 2 ? Optional.of(Boolean.TRUE) : Optional.empty()));
+                    view.searchMatchCount() == 2 ? Optional.of(Boolean.TRUE) : Optional.empty()));
 
             runOnFxThread(() -> {
-                assertEquals(2, view.getSearchMatchCount());
-                assertEquals(0, view.getSelectedSearchMatchIndex());
+                assertEquals(2, view.searchMatchCount());
+                assertEquals(0, view.selectedSearchMatchIndex());
                 return null;
             });
         }
@@ -778,7 +778,7 @@ final class TerminalViewTest {
 
         try (var view = createView(output)) {
             await("terminal wide output to become searchable", START_TIMEOUT, () -> runOnFxThread(() -> {
-                fireShortcut(view, selectAllShortcut());
+                fireTerminalShortcut(view, selectAllTerminalShortcut());
                 var text = view.getInputMethodRequests().getSelectedText();
                 return text != null && text.contains(marker) ? Optional.of(Boolean.TRUE) : Optional.empty();
             }));
@@ -788,17 +788,17 @@ final class TerminalViewTest {
                 dragSelection(view, 0, 2);
                 assertEquals(marker, view.getInputMethodRequests().getSelectedText());
                 assertTrue(view.toggleSearch());
-                assertEquals(marker, view.getSearchText());
+                assertEquals(marker, view.searchText());
                 assertEquals("...", ((Label) view.lookup("#ghosttyfx-search-count")).getText());
                 return null;
             });
 
             await("wide search matches", START_TIMEOUT, () -> runOnFxThread(() ->
-                    view.getSearchMatchCount() == 2 ? Optional.of(Boolean.TRUE) : Optional.empty()));
+                    view.searchMatchCount() == 2 ? Optional.of(Boolean.TRUE) : Optional.empty()));
 
             runOnFxThread(() -> {
-                assertEquals(2, view.getSearchMatchCount());
-                assertEquals(0, view.getSelectedSearchMatchIndex());
+                assertEquals(2, view.searchMatchCount());
+                assertEquals(0, view.selectedSearchMatchIndex());
                 return null;
             });
         }
@@ -847,7 +847,7 @@ final class TerminalViewTest {
     }
 
     @Test
-    void searchFieldUpdatesMatchesAndConsumesNavigationShortcuts() throws Exception {
+    void searchFieldUpdatesMatchesAndConsumesNavigationTerminalShortcuts() throws Exception {
         var output = "alpha\nbeta\nalpha";
         var tempDirectory = Files.createTempDirectory("ghosttyfx-search-field-navigation-test-");
         var pidFile = tempDirectory.resolve("shell.pid");
@@ -855,7 +855,7 @@ final class TerminalViewTest {
 
         try (var view = createView(shell, tempDirectory)) {
             await("terminal output to become searchable", START_TIMEOUT, () -> runOnFxThread(() -> {
-                fireShortcut(view, selectAllShortcut());
+                fireTerminalShortcut(view, selectAllTerminalShortcut());
                 var text = view.getInputMethodRequests().getSelectedText();
                 return text != null && text.contains("beta") ? Optional.of(Boolean.TRUE) : Optional.empty();
             }));
@@ -871,37 +871,37 @@ final class TerminalViewTest {
             });
 
             await("search matches", START_TIMEOUT, () -> runOnFxThread(() ->
-                    view.getSearchMatchCount() == 2 ? Optional.of(Boolean.TRUE) : Optional.empty()));
+                    view.searchMatchCount() == 2 ? Optional.of(Boolean.TRUE) : Optional.empty()));
 
             runOnFxThread(() -> {
                 var count = (Label) view.lookup("#ghosttyfx-search-count");
                 var field = (TextField) view.lookup("#ghosttyfx-search-field");
-                assertEquals(0, view.getSelectedSearchMatchIndex());
+                assertEquals(0, view.selectedSearchMatchIndex());
                 assertEquals("1/2", count.getText());
 
                 field.fireEvent(keyEvent(new KeyCodeCombination(KeyCode.ENTER)));
-                assertEquals(1, view.getSelectedSearchMatchIndex());
+                assertEquals(1, view.selectedSearchMatchIndex());
                 field.fireEvent(keyEvent(new KeyCodeCombination(KeyCode.ENTER)));
-                assertEquals(1, view.getSelectedSearchMatchIndex());
+                assertEquals(1, view.selectedSearchMatchIndex());
 
                 field.fireEvent(keyEvent(new KeyCodeCombination(KeyCode.ENTER, KeyCombination.SHIFT_DOWN)));
-                assertEquals(0, view.getSelectedSearchMatchIndex());
+                assertEquals(0, view.selectedSearchMatchIndex());
                 field.fireEvent(keyEvent(new KeyCodeCombination(KeyCode.ENTER, KeyCombination.SHIFT_DOWN)));
-                assertEquals(0, view.getSelectedSearchMatchIndex());
+                assertEquals(0, view.selectedSearchMatchIndex());
 
                 field.positionCaret(2);
                 field.fireEvent(keyEvent(new KeyCodeCombination(KeyCode.DOWN)));
-                assertEquals(1, view.getSelectedSearchMatchIndex());
+                assertEquals(1, view.selectedSearchMatchIndex());
                 assertEquals(2, field.getCaretPosition());
                 field.fireEvent(keyEvent(new KeyCodeCombination(KeyCode.DOWN)));
-                assertEquals(1, view.getSelectedSearchMatchIndex());
+                assertEquals(1, view.selectedSearchMatchIndex());
                 assertEquals(2, field.getCaretPosition());
 
                 field.fireEvent(keyEvent(new KeyCodeCombination(KeyCode.UP)));
-                assertEquals(0, view.getSelectedSearchMatchIndex());
+                assertEquals(0, view.selectedSearchMatchIndex());
                 assertEquals(2, field.getCaretPosition());
                 field.fireEvent(keyEvent(new KeyCodeCombination(KeyCode.UP)));
-                assertEquals(0, view.getSelectedSearchMatchIndex());
+                assertEquals(0, view.selectedSearchMatchIndex());
                 assertEquals(2, field.getCaretPosition());
                 return null;
             });
@@ -919,13 +919,13 @@ final class TerminalViewTest {
         try {
             try (var view = createView(shell, tempDirectory)) {
                 var selectedText = await("terminal output to become selectable", START_TIMEOUT, () -> runOnFxThread(() -> {
-                    fireShortcut(view, selectAllShortcut());
+                    fireTerminalShortcut(view, selectAllTerminalShortcut());
                     var text = view.getInputMethodRequests().getSelectedText();
                     return text != null && text.contains(marker) ? Optional.of(text) : Optional.empty();
                 }));
 
                 runOnFxThread(() -> {
-                    fireShortcut(view, copyShortcut());
+                    fireTerminalShortcut(view, copyTerminalShortcut());
                     var clipboard = Clipboard.getSystemClipboard();
                     assertTrue(selectedText.equals(clipboard.getString()), "Expected copied text to match current selection");
                     var remainingSelection = view.getInputMethodRequests().getSelectedText();
@@ -951,7 +951,7 @@ final class TerminalViewTest {
             var handle = await("shell process to start", START_TIMEOUT, () -> readAliveProcess(pidFile));
             try {
                 var selectedText = await("terminal output to become selectable", START_TIMEOUT, () -> runOnFxThread(() -> {
-                    fireShortcut(view, selectAllShortcut());
+                    fireTerminalShortcut(view, selectAllTerminalShortcut());
                     var text = view.getInputMethodRequests().getSelectedText();
                     return text != null && text.contains(marker) ? Optional.of(text) : Optional.empty();
                 }));
@@ -979,7 +979,7 @@ final class TerminalViewTest {
             var handle = await("shell process to start", START_TIMEOUT, () -> readAliveProcess(pidFile));
             try {
                 await("terminal output to become searchable", START_TIMEOUT, () -> runOnFxThread(() -> {
-                    fireShortcut(view, selectAllShortcut());
+                    fireTerminalShortcut(view, selectAllTerminalShortcut());
                     var text = view.getInputMethodRequests().getSelectedText();
                     return text != null && text.contains(marker) ? Optional.of(Boolean.TRUE) : Optional.empty();
                 }));
@@ -1081,25 +1081,25 @@ final class TerminalViewTest {
         clipboard.setContent(clipboardContents);
     }
 
-    private static KeyCombination copyShortcut() {
+    private static KeyCombination copyTerminalShortcut() {
         return isMac()
                 ? new KeyCodeCombination(KeyCode.C, KeyCombination.META_DOWN)
                 : new KeyCodeCombination(KeyCode.C, KeyCombination.CONTROL_DOWN);
     }
 
-    private static KeyCombination selectAllShortcut() {
+    private static KeyCombination selectAllTerminalShortcut() {
         return isMac()
                 ? new KeyCodeCombination(KeyCode.A, KeyCombination.META_DOWN)
                 : new KeyCodeCombination(KeyCode.A, KeyCombination.CONTROL_DOWN, KeyCombination.SHIFT_DOWN);
     }
 
-    private static KeyCombination searchShortcut() {
+    private static KeyCombination searchTerminalShortcut() {
         return isMac()
                 ? new KeyCodeCombination(KeyCode.F, KeyCombination.META_DOWN)
                 : new KeyCodeCombination(KeyCode.F, KeyCombination.CONTROL_DOWN, KeyCombination.SHIFT_DOWN);
     }
 
-    private static KeyEvent fireShortcut(EventTarget target, KeyCombination shortcut) {
+    private static KeyEvent fireTerminalShortcut(EventTarget target, KeyCombination shortcut) {
         var event = keyEvent(shortcut);
         Event.fireEvent(target, event);
         return event;
@@ -1123,7 +1123,7 @@ final class TerminalViewTest {
 
     private static void awaitText(TerminalView view, String expected) throws Exception {
         await("terminal output containing " + expected, START_TIMEOUT, () -> runOnFxThread(() -> {
-            fireShortcut(view, selectAllShortcut());
+            fireTerminalShortcut(view, selectAllTerminalShortcut());
             var text = view.getInputMethodRequests().getSelectedText();
             return text != null && text.contains(expected) ? Optional.of(Boolean.TRUE) : Optional.empty();
         }));

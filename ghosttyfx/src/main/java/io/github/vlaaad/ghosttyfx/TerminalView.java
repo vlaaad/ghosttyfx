@@ -22,6 +22,8 @@ import javafx.beans.property.BooleanProperty;
 import javafx.beans.property.ObjectProperty;
 import javafx.beans.property.ReadOnlyObjectProperty;
 import javafx.beans.property.ReadOnlyObjectWrapper;
+import javafx.beans.property.ReadOnlyStringProperty;
+import javafx.beans.property.ReadOnlyStringWrapper;
 import javafx.beans.property.SimpleBooleanProperty;
 import javafx.beans.property.SimpleObjectProperty;
 import javafx.beans.property.SimpleStringProperty;
@@ -69,7 +71,7 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
     private static final Duration BLINK_INTERVAL = Duration.millis(600);
     private static final Duration PROMPT_NAVIGATION_HIGHLIGHT_DURATION = Duration.millis(700);
     private static final Font DEFAULT_FONT = Font.font("Monospaced", 14);
-    private static final RegexLink BUILT_IN_REGEX_LINK = new RegexLink(
+    private static final LinkMatcher BUILT_IN_LINK_MATCHER = new LinkMatcher(
             Pattern.compile("(?i)\\bhttps?://(?:\\[[0-9a-f:]+(?:[:0-9a-f]*)+\\](?::[0-9]+)?|[\\w\\-.~:/?#@!$&*+,;=%]+(?:[\\(\\[]\\w*[\\)\\]])?)+(?<![,.])"),
             match -> openBuiltInWebPageUrl(match.group()));
 
@@ -89,7 +91,7 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
     private boolean textBlinkVisible = true;
     private TerminalSession.BlinkState blinkState = TerminalSession.BlinkState.none();
     private final SearchUi searchUi;
-    private final StringProperty title;
+    private final ReadOnlyStringWrapper title;
     private final ObjectProperty<Runnable> onBell = new SimpleObjectProperty<>(this, "onBell");
     private final ObjectProperty<TerminalTheme> theme = new SimpleObjectProperty<>(this, "theme", TerminalTheme.defaults()) {
         @Override
@@ -120,8 +122,8 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
                 Font.font(font.getFamily(), FontWeight.BOLD, FontPosture.ITALIC, font.getSize()));
     }, font);
     private final BooleanProperty macOptionAsAlt = new SimpleBooleanProperty(this, "macOptionAsAlt", false);
-    private final ObservableList<Shortcut> shortcuts = FXCollections.observableArrayList();
-    private final ObservableList<RegexLink> regexLinks = FXCollections.observableArrayList();
+    private final ObservableList<TerminalShortcut> terminalShortcuts = FXCollections.observableArrayList();
+    private final ObservableList<LinkMatcher> linkMatchers = FXCollections.observableArrayList();
     private final ReadOnlyObjectWrapper<TerminalState> terminalState =
             new ReadOnlyObjectWrapper<>(this, "terminalState", new TerminalState.Running());
 
@@ -150,7 +152,7 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
 
     public TerminalView(TerminalFactory terminalFactory) {
         NativeLibrary.ensureLoaded();
-        title = new SimpleStringProperty(this, "title", "Terminal");
+        title = new ReadOnlyStringWrapper(this, "title", "Terminal");
         ptySession = new PtySession(Objects.requireNonNull(terminalFactory, "terminalFactory"), INITIAL_COLUMNS, INITIAL_ROWS);
         processOutputDrain = new ProcessOutputDrain(this);
         cursorBlinkTimeline = new Timeline(new KeyFrame(BLINK_INTERVAL, _ -> tickCursorBlink()));
@@ -180,72 +182,72 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
                         }
                     }
                 });
-        shortcuts.addAll(
-                new Shortcut(
+        terminalShortcuts.addAll(
+                new TerminalShortcut(
                         HostPlatform.CURRENT.os() == HostPlatform.OS.MACOS
                                 ? new KeyCodeCombination(KeyCode.C, KeyCombination.META_DOWN)
                                 : new KeyCodeCombination(KeyCode.C, KeyCombination.CONTROL_DOWN),
                         this::copySelection),
-                new Shortcut(
+                new TerminalShortcut(
                         HostPlatform.CURRENT.os() == HostPlatform.OS.MACOS
                                 ? new KeyCodeCombination(KeyCode.V, KeyCombination.META_DOWN)
                                 : new KeyCodeCombination(KeyCode.V, KeyCombination.CONTROL_DOWN),
                         this::pasteClipboard),
-                new Shortcut(
+                new TerminalShortcut(
                         HostPlatform.CURRENT.os() == HostPlatform.OS.MACOS
                                 ? new KeyCodeCombination(KeyCode.A, KeyCombination.META_DOWN)
                                 : new KeyCodeCombination(KeyCode.A, KeyCombination.CONTROL_DOWN, KeyCombination.SHIFT_DOWN),
                         this::selectAll),
-                new Shortcut(
+                new TerminalShortcut(
                         HostPlatform.CURRENT.os() == HostPlatform.OS.MACOS
                                 ? new KeyCodeCombination(KeyCode.F, KeyCombination.META_DOWN)
                                 : new KeyCodeCombination(KeyCode.F, KeyCombination.CONTROL_DOWN, KeyCombination.SHIFT_DOWN),
                         this::toggleSearch),
-                new Shortcut(new KeyCodeCombination(KeyCode.LEFT, KeyCombination.SHIFT_DOWN), this::extendSelectionLeft),
-                new Shortcut(new KeyCodeCombination(KeyCode.RIGHT, KeyCombination.SHIFT_DOWN), this::extendSelectionRight),
-                new Shortcut(new KeyCodeCombination(KeyCode.UP, KeyCombination.SHIFT_DOWN), this::extendSelectionUp),
-                new Shortcut(new KeyCodeCombination(KeyCode.DOWN, KeyCombination.SHIFT_DOWN), this::extendSelectionDown),
-                new Shortcut(new KeyCodeCombination(KeyCode.PAGE_UP, KeyCombination.SHIFT_DOWN), this::extendSelectionPageUp),
-                new Shortcut(new KeyCodeCombination(KeyCode.PAGE_DOWN, KeyCombination.SHIFT_DOWN), this::extendSelectionPageDown),
-                new Shortcut(new KeyCodeCombination(KeyCode.HOME, KeyCombination.SHIFT_DOWN), this::extendSelectionHome),
-                new Shortcut(new KeyCodeCombination(KeyCode.END, KeyCombination.SHIFT_DOWN), this::extendSelectionEnd),
-                new Shortcut(
+                new TerminalShortcut(new KeyCodeCombination(KeyCode.LEFT, KeyCombination.SHIFT_DOWN), this::extendSelectionLeft),
+                new TerminalShortcut(new KeyCodeCombination(KeyCode.RIGHT, KeyCombination.SHIFT_DOWN), this::extendSelectionRight),
+                new TerminalShortcut(new KeyCodeCombination(KeyCode.UP, KeyCombination.SHIFT_DOWN), this::extendSelectionUp),
+                new TerminalShortcut(new KeyCodeCombination(KeyCode.DOWN, KeyCombination.SHIFT_DOWN), this::extendSelectionDown),
+                new TerminalShortcut(new KeyCodeCombination(KeyCode.PAGE_UP, KeyCombination.SHIFT_DOWN), this::extendSelectionPageUp),
+                new TerminalShortcut(new KeyCodeCombination(KeyCode.PAGE_DOWN, KeyCombination.SHIFT_DOWN), this::extendSelectionPageDown),
+                new TerminalShortcut(new KeyCodeCombination(KeyCode.HOME, KeyCombination.SHIFT_DOWN), this::extendSelectionHome),
+                new TerminalShortcut(new KeyCodeCombination(KeyCode.END, KeyCombination.SHIFT_DOWN), this::extendSelectionEnd),
+                new TerminalShortcut(
                         HostPlatform.CURRENT.os() == HostPlatform.OS.MACOS
                                 ? new KeyCodeCombination(KeyCode.PAGE_UP, KeyCombination.META_DOWN)
                                 : new KeyCodeCombination(KeyCode.PAGE_UP, KeyCombination.SHIFT_DOWN),
                         this::scrollViewportPageUp),
-                new Shortcut(
+                new TerminalShortcut(
                         HostPlatform.CURRENT.os() == HostPlatform.OS.MACOS
                                 ? new KeyCodeCombination(KeyCode.PAGE_DOWN, KeyCombination.META_DOWN)
                                 : new KeyCodeCombination(KeyCode.PAGE_DOWN, KeyCombination.SHIFT_DOWN),
                         this::scrollViewportPageDown),
-                new Shortcut(
+                new TerminalShortcut(
                         HostPlatform.CURRENT.os() == HostPlatform.OS.MACOS
                                 ? new KeyCodeCombination(KeyCode.HOME, KeyCombination.META_DOWN)
                                 : new KeyCodeCombination(KeyCode.HOME, KeyCombination.SHIFT_DOWN),
                         this::scrollViewportToTop),
-                new Shortcut(
+                new TerminalShortcut(
                         HostPlatform.CURRENT.os() == HostPlatform.OS.MACOS
                                 ? new KeyCodeCombination(KeyCode.END, KeyCombination.META_DOWN)
                                 : new KeyCodeCombination(KeyCode.END, KeyCombination.SHIFT_DOWN),
                         this::scrollViewportToBottom),
-                new Shortcut(
+                new TerminalShortcut(
                         HostPlatform.CURRENT.os() == HostPlatform.OS.MACOS
                                 ? new KeyCodeCombination(KeyCode.UP, KeyCombination.META_DOWN)
                                 : new KeyCodeCombination(KeyCode.UP, KeyCombination.CONTROL_DOWN, KeyCombination.SHIFT_DOWN),
                         this::scrollViewportToPreviousPrompt),
-                new Shortcut(
+                new TerminalShortcut(
                         HostPlatform.CURRENT.os() == HostPlatform.OS.MACOS
                                 ? new KeyCodeCombination(KeyCode.DOWN, KeyCombination.META_DOWN)
                                 : new KeyCodeCombination(KeyCode.DOWN, KeyCombination.CONTROL_DOWN, KeyCombination.SHIFT_DOWN),
                         this::scrollViewportToNextPrompt));
         if (HostPlatform.CURRENT.os() == HostPlatform.OS.MACOS) {
-            shortcuts.addAll(
-                    new Shortcut(new KeyCodeCombination(KeyCode.LEFT, KeyCombination.ALT_DOWN), () -> sendEsc("b")),
-                    new Shortcut(new KeyCodeCombination(KeyCode.RIGHT, KeyCombination.ALT_DOWN), () -> sendEsc("f")),
-                    new Shortcut(new KeyCodeCombination(KeyCode.LEFT, KeyCombination.META_DOWN), () -> sendText("\u0001")),
-                    new Shortcut(new KeyCodeCombination(KeyCode.RIGHT, KeyCombination.META_DOWN), () -> sendText("\u0005")),
-                    new Shortcut(new KeyCodeCombination(KeyCode.BACK_SPACE, KeyCombination.META_DOWN), () -> sendText("\u0015")));
+            terminalShortcuts.addAll(
+                    new TerminalShortcut(new KeyCodeCombination(KeyCode.LEFT, KeyCombination.ALT_DOWN), () -> sendEsc("b")),
+                    new TerminalShortcut(new KeyCodeCombination(KeyCode.RIGHT, KeyCombination.ALT_DOWN), () -> sendEsc("f")),
+                    new TerminalShortcut(new KeyCodeCombination(KeyCode.LEFT, KeyCombination.META_DOWN), () -> sendText("\u0001")),
+                    new TerminalShortcut(new KeyCodeCombination(KeyCode.RIGHT, KeyCombination.META_DOWN), () -> sendText("\u0005")),
+                    new TerminalShortcut(new KeyCodeCombination(KeyCode.BACK_SPACE, KeyCombination.META_DOWN), () -> sendText("\u0015")));
         }
 
         setFocusTraversable(true);
@@ -272,7 +274,7 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
         resize(prefWidth(-1), prefHeight(-1));
         cellMetrics.addListener((_, _, _) -> handleResize());
         terminalFonts.addListener((_, _, _) -> redraw());
-        regexLinks.addListener((ListChangeListener<RegexLink>) _ -> redraw());
+        linkMatchers.addListener((ListChangeListener<LinkMatcher>) _ -> redraw());
         cursorBlinking.addListener((_, _, value) -> {
             terminalSession.setCursorBlinking(value);
             cursorBlinkVisible = true;
@@ -374,20 +376,20 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
         return macOptionAsAlt;
     }
 
-    public ObservableList<Shortcut> getShortcuts() {
-        return shortcuts;
+    public ObservableList<TerminalShortcut> getTerminalShortcuts() {
+        return terminalShortcuts;
     }
 
-    public ObservableList<RegexLink> getRegexLinks() {
-        return regexLinks;
+    public ObservableList<LinkMatcher> getLinkMatchers() {
+        return linkMatchers;
     }
 
     public String getTitle() {
         return title.get();
     }
 
-    public StringProperty titleProperty() {
-        return title;
+    public ReadOnlyStringProperty titleProperty() {
+        return title.getReadOnlyProperty();
     }
 
     public Runnable getOnBell() {
@@ -457,7 +459,7 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
             event.consume();
             return;
         }
-        if (handleShortcut(event) || applyTransition(KeyInput.onKeyPressed(
+        if (handleTerminalShortcut(event) || applyTransition(KeyInput.onKeyPressed(
                 keyInputState,
                 HostPlatform.CURRENT,
                 isMacOptionAsAlt(),
@@ -916,7 +918,7 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
             return new ActiveLink(new ActiveLink.Osc8(hit.hyperlinkUri()), selection, () -> openHyperlink(hit.hyperlinkUri()));
         }
 
-        var match = terminalSession.regexLinkAt(hit.screenPoint(), allRegexLinks());
+        var match = terminalSession.linkMatcherAt(hit.screenPoint(), allLinkMatchers());
         if (match == null || match.selection().isEmpty()) {
             return null;
         }
@@ -927,10 +929,10 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
                 () -> match.link().action().accept(match.match()));
     }
 
-    private List<RegexLink> allRegexLinks() {
-        var links = new ArrayList<RegexLink>(getRegexLinks().size() + 1);
-        links.addAll(getRegexLinks());
-        links.add(BUILT_IN_REGEX_LINK);
+    private List<LinkMatcher> allLinkMatchers() {
+        var links = new ArrayList<LinkMatcher>(getLinkMatchers().size() + 1);
+        links.addAll(getLinkMatchers());
+        links.add(BUILT_IN_LINK_MATCHER);
         return links;
     }
 
@@ -1123,8 +1125,8 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
         }
     }
 
-    private boolean handleShortcut(KeyEvent event) {
-        for (var shortcut : getShortcuts()) {
+    private boolean handleTerminalShortcut(KeyEvent event) {
+        for (var shortcut : getTerminalShortcuts()) {
             if (shortcut.combination().match(event) && shortcut.action().getAsBoolean()) {
                 return true;
             }
@@ -1308,15 +1310,15 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
         return searchUi.selectPrevious(true);
     }
 
-    public String getSearchText() {
+    String searchText() {
         return searchUi.text();
     }
 
-    public int getSearchMatchCount() {
+    int searchMatchCount() {
         return searchUi.matchCount();
     }
 
-    public int getSelectedSearchMatchIndex() {
+    int selectedSearchMatchIndex() {
         return searchUi.selectedMatch();
     }
 
@@ -1557,7 +1559,7 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
                 keyInputState.preedit(),
                 selection,
                 hoveredLink == null ? Selection.empty() : hoveredLink.selection(),
-                allRegexLinks(),
+                allLinkMatchers(),
                 searchUi.visible() ? searchUi.result() : TerminalSession.SearchResult.empty(),
                 searchUi.visible() ? searchUi.selectedMatch() : -1,
                 isFocused(),

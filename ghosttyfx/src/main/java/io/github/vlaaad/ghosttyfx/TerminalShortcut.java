@@ -5,8 +5,8 @@ import java.util.function.BooleanSupplier;
 
 import javafx.scene.input.KeyCombination;
 
-public record Shortcut(KeyCombination combination, BooleanSupplier action) {
-    public Shortcut {
+public record TerminalShortcut(KeyCombination combination, BooleanSupplier action) {
+    public TerminalShortcut {
         Objects.requireNonNull(combination, "combination");
         Objects.requireNonNull(action, "action");
     }
