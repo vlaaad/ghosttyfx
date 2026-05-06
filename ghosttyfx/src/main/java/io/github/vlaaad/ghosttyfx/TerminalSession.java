@@ -702,7 +702,7 @@ final class TerminalSession implements AutoCloseable {
         return new SearchBatch(matches, searchLimit);
     }
 
-    MatchedLinkMatcher linkMatcherAt(Selection.ScreenPoint point, List<LinkMatcher> linkMatchers) {
+    MatchedLinkMatcher linkMatcherAt(Selection.ScreenPoint point, List<TerminalLinkMatcher> linkMatchers) {
         if (linkMatchers.isEmpty()) {
             return null;
         }
@@ -727,7 +727,7 @@ final class TerminalSession implements AutoCloseable {
         return null;
     }
 
-    List<Selection> linkMatcherSelections(List<LinkMatcher> linkMatchers, int startRow, int endRow) {
+    List<Selection> linkMatcherSelections(List<TerminalLinkMatcher> linkMatchers, int startRow, int endRow) {
         if (linkMatchers.isEmpty()) {
             return List.of();
         }
@@ -1212,7 +1212,7 @@ final class TerminalSession implements AutoCloseable {
             KeyInput.Preedit preedit,
             Selection selection,
             Selection hoveredLink,
-            List<LinkMatcher> linkMatchers,
+            List<TerminalLinkMatcher> linkMatchers,
             SearchResult searchResult,
             int selectedSearchMatch,
             boolean focused,
@@ -2310,7 +2310,7 @@ final class TerminalSession implements AutoCloseable {
 
     }
 
-    record MatchedLinkMatcher(int index, LinkMatcher link, MatchResult match, Selection selection) {
+    record MatchedLinkMatcher(int index, TerminalLinkMatcher link, MatchResult match, Selection selection) {
     }
 
     record LogicalLine(String text, List<Selection.ScreenPoint> points) {

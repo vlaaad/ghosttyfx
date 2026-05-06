@@ -4,6 +4,22 @@ import java.util.List;
 import java.util.Objects;
 import javafx.scene.paint.Color;
 
+/// Colors and rendering parameters used by [TerminalView].
+///
+/// The palette may be empty to use the terminal emulator defaults, or contain
+/// exactly 16 or 256 colors.
+///
+/// @param background the default terminal background color
+/// @param foreground the default terminal foreground color
+/// @param palette the indexed terminal color palette
+/// @param cursorColor the cursor color
+/// @param cursorText the text color used for text covered by the cursor
+/// @param selectionColor the selected text background color
+/// @param selectionText the selected text foreground color
+/// @param faintOpacity the opacity multiplier for faint text, from `0.0` to `1.0`
+/// @param scrollbarColor the scrollbar thumb color
+/// @param searchMatchColor the background color for search matches
+/// @param searchCurrentMatchColor the background color for the selected search match
 public record TerminalTheme(
         Color background,
         Color foreground,
@@ -40,6 +56,9 @@ public record TerminalTheme(
         }
     }
 
+    /// Returns the default terminal theme.
+    ///
+    /// @return the default terminal theme
     public static TerminalTheme defaults() {
         var background = Color.BLACK;
         var foreground = Color.WHITE;

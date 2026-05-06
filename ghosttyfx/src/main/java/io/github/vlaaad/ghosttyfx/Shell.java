@@ -8,9 +8,26 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 
+/// Utilities for applying Ghostty shell integration to a shell launch command.
+///
+/// Shell integration augments supported interactive shells so the terminal can
+/// observe shell lifecycle events such as prompts and command boundaries.
 public final class Shell {
     private Shell() {}
 
+    /// Applies shell integration to a launch command when the shell is supported.
+    ///
+    /// The returned launcher may contain a modified command, modified
+    /// environment, or both. If the command is not recognized as a supported
+    /// shell, the original command and environment are returned unchanged.
+    ///
+    /// Supported shells are Bash, Cmd, Fish, PowerShell, and Zsh.
+    ///
+    /// @param command the command used to start the shell
+    /// @param environment the environment used to start the shell
+    /// @return the command and environment to use when launching the shell
+    /// @throws NullPointerException if `command` or `environment` is `null`
+    /// @throws IllegalArgumentException if `command` is empty
     public static Launcher integrate(List<String> command, Map<String, String> environment) {
         Objects.requireNonNull(command, "command");
         Objects.requireNonNull(environment, "environment");
@@ -126,5 +143,9 @@ public final class Shell {
         return new Launcher(command, integratedEnvironment);
     }
 
+    /// A shell launch command and environment.
+    ///
+    /// @param command the command used to start the shell
+    /// @param environment the environment used to start the shell
     public record Launcher(List<String> command, Map<String, String> environment) {}
 }

@@ -54,6 +54,11 @@ import javafx.scene.text.Text;
 import javafx.scene.text.TextBoundsType;
 import javafx.util.Duration;
 
+/// A JavaFX terminal control backed by Ghostty's terminal emulator.
+///
+/// `TerminalView` starts a [Terminal] through a [TerminalFactory], renders its
+/// output, and sends keyboard, mouse, paste, and resize input back to the
+/// terminal backend.
 public final class TerminalView extends AnchorPane implements AutoCloseable {
 
     private static final Cleaner CLEANER = Cleaner.create();
@@ -71,7 +76,7 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
     private static final Duration BLINK_INTERVAL = Duration.millis(600);
     private static final Duration PROMPT_NAVIGATION_HIGHLIGHT_DURATION = Duration.millis(700);
     private static final Font DEFAULT_FONT = Font.font("Monospaced", 14);
-    private static final LinkMatcher BUILT_IN_LINK_MATCHER = new LinkMatcher(
+    private static final TerminalLinkMatcher BUILT_IN_LINK_MATCHER = new TerminalLinkMatcher(
             Pattern.compile("(?i)\\bhttps?://(?:\\[[0-9a-f:]+(?:[:0-9a-f]*)+\\](?::[0-9]+)?|[\\w\\-.~:/?#@!$&*+,;=%]+(?:[\\(\\[]\\w*[\\)\\]])?)+(?<![,.])"),
             match -> openBuiltInWebPageUrl(match.group()));
 
@@ -123,7 +128,7 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
     }, font);
     private final BooleanProperty macOptionAsAlt = new SimpleBooleanProperty(this, "macOptionAsAlt", false);
     private final ObservableList<TerminalShortcut> terminalShortcuts = FXCollections.observableArrayList();
-    private final ObservableList<LinkMatcher> linkMatchers = FXCollections.observableArrayList();
+    private final ObservableList<TerminalLinkMatcher> linkMatchers = FXCollections.observableArrayList();
     private final ReadOnlyObjectWrapper<TerminalState> terminalState =
             new ReadOnlyObjectWrapper<>(this, "terminalState", new TerminalState.Running());
 
@@ -150,6 +155,12 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
             () -> INITIAL_COLUMNS * cellMetrics.get().cellWidthPx() + scrollbarReservedWidthPx(),
             () -> INITIAL_ROWS * cellMetrics.get().cellHeightPx());
 
+    /// Creates a terminal view and opens its terminal backend.
+    ///
+    /// The supplied factory is invoked on a background thread.
+    ///
+    /// @param terminalFactory the factory used to open the terminal backend
+    /// @throws NullPointerException if `terminalFactory` is `null`
     public TerminalView(TerminalFactory terminalFactory) {
         NativeLibrary.ensureLoaded();
         title = new ReadOnlyStringWrapper(this, "title", "Terminal");
@@ -274,7 +285,7 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
         resize(prefWidth(-1), prefHeight(-1));
         cellMetrics.addListener((_, _, _) -> handleResize());
         terminalFonts.addListener((_, _, _) -> redraw());
-        linkMatchers.addListener((ListChangeListener<LinkMatcher>) _ -> redraw());
+        linkMatchers.addListener((ListChangeListener<TerminalLinkMatcher>) _ -> redraw());
         cursorBlinking.addListener((_, _, value) -> {
             terminalSession.setCursorBlinking(value);
             cursorBlinkVisible = true;
@@ -316,102 +327,190 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
         CLEANER.register(this, new Cleanup(terminalSession, ptySession));
     }
 
+    /// Returns the font used to measure and render terminal cells.
+    ///
+    /// @return the terminal font
     public Font getFont() {
         return font.get();
     }
 
+    /// Sets the font used to measure and render terminal cells.
+    ///
+    /// @param value the terminal font
+    /// @throws NullPointerException if `value` is `null`
     public void setFont(Font value) {
         font.set(value);
     }
 
+    /// The font used to measure and render terminal cells.
+    ///
+    /// @return the font property
     public ObjectProperty<Font> fontProperty() {
         return font;
     }
 
+    /// Returns whether the cursor may blink when the terminal requests blinking.
+    ///
+    /// @return whether cursor blinking is enabled
     public boolean isCursorBlinking() {
         return cursorBlinking.get();
     }
 
+    /// Sets whether the cursor may blink when the terminal requests blinking.
+    ///
+    /// @param value whether cursor blinking is enabled
     public void setCursorBlinking(boolean value) {
         cursorBlinking.set(value);
     }
 
+    /// Whether the cursor may blink when the terminal requests blinking.
+    ///
+    /// @return the cursor blinking property
     public BooleanProperty cursorBlinkingProperty() {
         return cursorBlinking;
     }
 
+    /// Returns the placeholder text shown in the search field.
+    ///
+    /// @return the search prompt text
     public String getSearchPromptText() {
         return searchPromptText.get();
     }
 
+    /// Sets the placeholder text shown in the search field.
+    ///
+    /// @param value the search prompt text
+    /// @throws NullPointerException if `value` is `null`
     public void setSearchPromptText(String value) {
         searchPromptText.set(value);
     }
 
+    /// The placeholder text shown in the search field.
+    ///
+    /// @return the search prompt text property
     public StringProperty searchPromptTextProperty() {
         return searchPromptText;
     }
 
+    /// Returns the terminal theme.
+    ///
+    /// @return the terminal theme
     public TerminalTheme getTheme() {
         return theme.get();
     }
 
+    /// Sets the terminal theme.
+    ///
+    /// @param value the terminal theme
+    /// @throws NullPointerException if `value` is `null`
     public void setTheme(TerminalTheme value) {
         theme.set(value);
     }
 
+    /// The terminal theme.
+    ///
+    /// @return the theme property
     public ObjectProperty<TerminalTheme> themeProperty() {
         return theme;
     }
 
+    /// Returns whether Option is sent as Alt on macOS.
+    ///
+    /// @return whether Option is sent as Alt on macOS
     public boolean isMacOptionAsAlt() {
         return macOptionAsAlt.get();
     }
 
+    /// Sets whether Option is sent as Alt on macOS.
+    ///
+    /// @param value whether Option is sent as Alt on macOS
     public void setMacOptionAsAlt(boolean value) {
         macOptionAsAlt.set(value);
     }
 
+    /// Whether Option is sent as Alt on macOS.
+    ///
+    /// @return the macOS Option-as-Alt property
     public BooleanProperty macOptionAsAltProperty() {
         return macOptionAsAlt;
     }
 
+    /// Returns the terminal shortcuts.
+    ///
+    /// The list is mutable. Shortcuts are tried in list order.
+    ///
+    /// @return the mutable terminal shortcut list
     public ObservableList<TerminalShortcut> getTerminalShortcuts() {
         return terminalShortcuts;
     }
 
-    public ObservableList<LinkMatcher> getLinkMatchers() {
+    /// Returns the terminal link matchers.
+    ///
+    /// The list is mutable. Custom matchers are tried in list order before the
+    /// built-in web URL matcher.
+    ///
+    /// @return the mutable terminal link matcher list
+    public ObservableList<TerminalLinkMatcher> getLinkMatchers() {
         return linkMatchers;
     }
 
+    /// Returns the terminal title.
+    ///
+    /// @return the terminal title
     public String getTitle() {
         return title.get();
     }
 
+    /// The terminal title reported by the terminal backend.
+    ///
+    /// @return the read-only title property
     public ReadOnlyStringProperty titleProperty() {
         return title.getReadOnlyProperty();
     }
 
+    /// Returns the handler invoked when the terminal rings the bell.
+    ///
+    /// @return the bell handler, or `null`
     public Runnable getOnBell() {
         return onBell.get();
     }
 
+    /// Sets the handler invoked when the terminal rings the bell.
+    ///
+    /// @param value the bell handler, or `null`
     public void setOnBell(Runnable value) {
         onBell.set(value);
     }
 
+    /// The handler invoked when the terminal rings the bell.
+    ///
+    /// @return the bell handler property
     public ObjectProperty<Runnable> onBellProperty() {
         return onBell;
     }
 
+    /// Returns the terminal backend state.
+    ///
+    /// @return the terminal backend state
     public TerminalState getTerminalState() {
         return terminalState.get();
     }
 
+    /// The terminal backend state.
+    ///
+    /// @return the read-only terminal state property
     public ReadOnlyObjectProperty<TerminalState> terminalStateProperty() {
         return terminalState.getReadOnlyProperty();
     }
 
+    /// Closes the terminal backend owned by this view.
+    ///
+    /// This stops the terminal process or backend opened through the
+    /// [TerminalFactory]. It does not remove this node from the scene graph and
+    /// does not immediately discard the rendered terminal state; the last
+    /// terminal contents remain available while the view is reachable.
+    ///
+    /// Repeated calls have the same effect as a single close.
     @Override
     public void close() {
         // Closing the view is a process-lifecycle operation only. Native terminal state stays available until the
@@ -929,8 +1028,8 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
                 () -> match.link().action().accept(match.match()));
     }
 
-    private List<LinkMatcher> allLinkMatchers() {
-        var links = new ArrayList<LinkMatcher>(getLinkMatchers().size() + 1);
+    private List<TerminalLinkMatcher> allLinkMatchers() {
+        var links = new ArrayList<TerminalLinkMatcher>(getLinkMatchers().size() + 1);
         links.addAll(getLinkMatchers());
         links.add(BUILT_IN_LINK_MATCHER);
         return links;
@@ -1134,6 +1233,9 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
         return false;
     }
 
+    /// Copies the current selection to the system clipboard.
+    ///
+    /// @return `true` if there was a selection to copy; otherwise `false`
     public boolean copySelection() {
         if (selection.isEmpty()) {
             return false;
@@ -1147,6 +1249,9 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
         return true;
     }
 
+    /// Pastes the system clipboard text into the terminal.
+    ///
+    /// @return `true` if clipboard text was sent; otherwise `false`
     public boolean pasteClipboard() {
         var text = Clipboard.getSystemClipboard().getString();
         if (text == null || text.isEmpty()) {
@@ -1158,11 +1263,21 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
         return true;
     }
 
+    /// Sends an escape-prefixed text sequence to the terminal.
+    ///
+    /// @param text the text to send after the escape character
+    /// @return `true` if bytes were sent; otherwise `false`
+    /// @throws NullPointerException if `text` is `null`
     public boolean sendEsc(String text) {
         Objects.requireNonNull(text, "text");
         return sendText("\u001B" + text);
     }
 
+    /// Sends text to the terminal as UTF-8 bytes.
+    ///
+    /// @param text the text to send
+    /// @return `true` if bytes were sent; otherwise `false`
+    /// @throws NullPointerException if `text` is `null`
     public boolean sendText(String text) {
         Objects.requireNonNull(text, "text");
         if (!writeBytes(text.getBytes(StandardCharsets.UTF_8))) {
@@ -1174,6 +1289,9 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
         return true;
     }
 
+    /// Selects all terminal text.
+    ///
+    /// @return `true`
     public boolean selectAll() {
         var nextSelection = terminalSession.selectAllSelection();
         if (!nextSelection.equals(selection)) {
@@ -1184,6 +1302,9 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
         return true;
     }
 
+    /// Extends the current selection one cell to the left.
+    ///
+    /// @return `true` if there was a selection to extend; otherwise `false`
     public boolean extendSelectionLeft() {
         if (selection.isEmpty()) {
             return false;
@@ -1200,6 +1321,9 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
         return extendSelectionTo(selection.to());
     }
 
+    /// Extends the current selection one cell to the right.
+    ///
+    /// @return `true` if there was a selection to extend; otherwise `false`
     public boolean extendSelectionRight() {
         if (selection.isEmpty()) {
             return false;
@@ -1216,38 +1340,65 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
         return extendSelectionTo(selection.to());
     }
 
+    /// Extends the current selection one row up.
+    ///
+    /// @return `true` if there was a selection to extend; otherwise `false`
     public boolean extendSelectionUp() {
         return !selection.isEmpty() && extendSelectionTo(moveScreenPointRows(selection.to(), terminalSession.columnCount(), terminalSession.totalRowCount(), -1));
     }
 
+    /// Extends the current selection one row down.
+    ///
+    /// @return `true` if there was a selection to extend; otherwise `false`
     public boolean extendSelectionDown() {
         return !selection.isEmpty() && extendSelectionTo(moveScreenPointRows(selection.to(), terminalSession.columnCount(), terminalSession.totalRowCount(), 1));
     }
 
+    /// Extends the current selection one viewport page up.
+    ///
+    /// @return `true` if there was a selection to extend; otherwise `false`
     public boolean extendSelectionPageUp() {
         return !selection.isEmpty() && extendSelectionTo(moveScreenPointRows(selection.to(), terminalSession.columnCount(), terminalSession.totalRowCount(), -viewportRowCount()));
     }
 
+    /// Extends the current selection one viewport page down.
+    ///
+    /// @return `true` if there was a selection to extend; otherwise `false`
     public boolean extendSelectionPageDown() {
         return !selection.isEmpty() && extendSelectionTo(moveScreenPointRows(selection.to(), terminalSession.columnCount(), terminalSession.totalRowCount(), viewportRowCount()));
     }
 
+    /// Extends the current selection to the beginning of its focus row.
+    ///
+    /// @return `true` if there was a selection to extend; otherwise `false`
     public boolean extendSelectionHome() {
         return !selection.isEmpty() && extendSelectionTo(new Selection.ScreenPoint(0, selection.to().y()));
     }
 
+    /// Extends the current selection to the end of its focus row.
+    ///
+    /// @return `true` if there was a selection to extend; otherwise `false`
     public boolean extendSelectionEnd() {
         return !selection.isEmpty() && extendSelectionTo(new Selection.ScreenPoint(Math.max(0, terminalSession.columnCount() - 1), selection.to().y()));
     }
 
+    /// Scrolls the viewport one page up.
+    ///
+    /// @return `true` if scrolling was available; otherwise `false`
     public boolean scrollViewportPageUp() {
         return scrollViewportWithoutSelection(-viewportRowCount());
     }
 
+    /// Scrolls the viewport one page down.
+    ///
+    /// @return `true` if scrolling was available; otherwise `false`
     public boolean scrollViewportPageDown() {
         return scrollViewportWithoutSelection(viewportRowCount());
     }
 
+    /// Scrolls the viewport to the top of the scrollback.
+    ///
+    /// @return `true` if scrolling was available; otherwise `false`
     public boolean scrollViewportToTop() {
         var scrollbar = scrollbarInfo();
         if (!viewportScrollAvailable(scrollbar)) {
@@ -1260,6 +1411,9 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
         return true;
     }
 
+    /// Scrolls the viewport to the bottom of the scrollback.
+    ///
+    /// @return `true` if scrolling was available; otherwise `false`
     public boolean scrollViewportToBottom() {
         var scrollbar = scrollbarInfo();
         if (!viewportScrollAvailable(scrollbar)) {
@@ -1272,14 +1426,23 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
         return true;
     }
 
+    /// Scrolls the viewport to the previous shell prompt.
+    ///
+    /// @return `true` if a prompt target was found; otherwise `false`
     public boolean scrollViewportToPreviousPrompt() {
         return scrollViewportToPrompt(-1);
     }
 
+    /// Scrolls the viewport to the next shell prompt.
+    ///
+    /// @return `true` if a prompt target was found; otherwise `false`
     public boolean scrollViewportToNextPrompt() {
         return scrollViewportToPrompt(1);
     }
 
+    /// Opens search, or closes it if it is already open.
+    ///
+    /// @return `true`
     public boolean toggleSearch() {
         if (searchUi.visible()) {
             closeSearch();
@@ -1292,6 +1455,9 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
         return true;
     }
 
+    /// Closes search.
+    ///
+    /// @return `true` if search was open; otherwise `false`
     public boolean closeSearch() {
         if (!searchUi.visible()) {
             return false;
@@ -1302,10 +1468,16 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
         return true;
     }
 
+    /// Selects the next search match.
+    ///
+    /// @return `true` if the selected match changed; otherwise `false`
     public boolean searchNext() {
         return searchUi.selectNext(true);
     }
 
+    /// Selects the previous search match.
+    ///
+    /// @return `true` if the selected match changed; otherwise `false`
     public boolean searchPrevious() {
         return searchUi.selectPrevious(true);
     }

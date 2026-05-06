@@ -212,11 +212,11 @@ final class TerminalViewTest {
     void exposesLinkMatcherList() throws Exception {
         try (var view = createView("")) {
             runOnFxThread(() -> {
-                var link = new LinkMatcher(Pattern.compile("issue-(\\d+)"), _ -> {});
+                var link = new TerminalLinkMatcher(Pattern.compile("issue-(\\d+)"), _ -> {});
                 view.getLinkMatchers().add(link);
                 assertTrue(view.getLinkMatchers().contains(link));
-                assertThrows(NullPointerException.class, () -> new LinkMatcher(null, _ -> {}));
-                assertThrows(NullPointerException.class, () -> new LinkMatcher(Pattern.compile("x"), null));
+                assertThrows(NullPointerException.class, () -> new TerminalLinkMatcher(null, _ -> {}));
+                assertThrows(NullPointerException.class, () -> new TerminalLinkMatcher(Pattern.compile("x"), null));
                 return null;
             });
         }
@@ -228,7 +228,7 @@ final class TerminalViewTest {
         try (var view = createView("issue-123")) {
             awaitText(view, "issue-123");
             runOnFxThread(() -> {
-                view.getLinkMatchers().add(new LinkMatcher(Pattern.compile("issue-(\\d+)"), match -> group.set(match.group(1))));
+                view.getLinkMatchers().add(new TerminalLinkMatcher(Pattern.compile("issue-(\\d+)"), match -> group.set(match.group(1))));
                 clickCell(view, 2, 0);
                 assertEquals("123", group.get());
                 return null;
@@ -243,7 +243,7 @@ final class TerminalViewTest {
         try (var view = createView(output)) {
             awaitText(view, "abc");
             runOnFxThread(() -> {
-                view.getLinkMatchers().add(new LinkMatcher(Pattern.compile("abc"), _ -> clicks.incrementAndGet()));
+                view.getLinkMatchers().add(new TerminalLinkMatcher(Pattern.compile("abc"), _ -> clicks.incrementAndGet()));
                 moveToCell(view, 1, 0);
                 assertSame(Cursor.HAND, view.getCursor());
                 assertEquals(0, clicks.get());
@@ -258,8 +258,8 @@ final class TerminalViewTest {
         try (var view = createView("abc")) {
             awaitText(view, "abc");
             runOnFxThread(() -> {
-                view.getLinkMatchers().add(new LinkMatcher(Pattern.compile("ab"), _ -> clicks.set("first")));
-                view.getLinkMatchers().add(new LinkMatcher(Pattern.compile("bc"), _ -> clicks.set("second")));
+                view.getLinkMatchers().add(new TerminalLinkMatcher(Pattern.compile("ab"), _ -> clicks.set("first")));
+                view.getLinkMatchers().add(new TerminalLinkMatcher(Pattern.compile("bc"), _ -> clicks.set("second")));
                 clickCell(view, 1, 0);
                 assertEquals("first", clicks.get());
                 return null;
@@ -274,7 +274,7 @@ final class TerminalViewTest {
         try (var view = createView(output)) {
             awaitText(view, "XY");
             runOnFxThread(() -> {
-                view.getLinkMatchers().add(new LinkMatcher(Pattern.compile("XY"), match -> clicks.set(match.group())));
+                view.getLinkMatchers().add(new TerminalLinkMatcher(Pattern.compile("XY"), match -> clicks.set(match.group())));
                 clickCell(view, 79, 0);
                 assertEquals("XY", clicks.get());
                 return null;
@@ -371,7 +371,7 @@ final class TerminalViewTest {
         try (var view = createView(output)) {
             awaitText(view, "issue-123");
             runOnFxThread(() -> {
-                view.getLinkMatchers().add(new LinkMatcher(Pattern.compile("issue-(\\d+)"), _ -> {}));
+                view.getLinkMatchers().add(new TerminalLinkMatcher(Pattern.compile("issue-(\\d+)"), _ -> {}));
                 moveToCell(view, 5, 0);
                 assertSame(Cursor.DEFAULT, view.getCursor());
                 return null;
@@ -492,7 +492,7 @@ final class TerminalViewTest {
             try (var view = createView("issue-123")) {
                 awaitText(view, "issue-123");
                 runOnFxThread(() -> {
-                    view.getLinkMatchers().add(new LinkMatcher(Pattern.compile("issue-(\\d+)"), _ -> clicks.incrementAndGet()));
+                    view.getLinkMatchers().add(new TerminalLinkMatcher(Pattern.compile("issue-(\\d+)"), _ -> clicks.incrementAndGet()));
                     var clipboard = Clipboard.getSystemClipboard();
                     var content = new javafx.scene.input.ClipboardContent();
                     content.putString("unchanged");
