@@ -27,13 +27,7 @@ licenses.
 14. Semantic prompt / shell integration UI (osc 133): libghostty parses semantic prompt data, but the view does not expose prompt navigation, command regions, or similar UI behavior.
 14.0.1. resize acceptance: with injected PowerShell/pwsh, prompt at 80 columns, resize to 6 columns, then back to 80; the cursor must return to the prompt end through the real PTY + libghostty path, not by a JavaFX-only workaround.
 14.0.2. note: plain prompts without osc 133 markers reproduce libghostty cursor pin reflow behavior (`38,0 -> 5,0 -> 5,0`), so shell integration is required for prompt redraw after shrink/grow.
-21. release
-21.0. publish to Maven Central through GitHub Actions and Sonatype Central Portal.
-21.0.4. use CI-friendly Maven versions: keep repo POMs on a placeholder revision and pass `-Drevision=1.0.<main-commit-count>` from CI, where the count is `git rev-list --count HEAD`.
-21.0.5. add Central Portal publishing config using `org.sonatype.central:central-publishing-maven-plugin`; store Central token credentials and GPG key/passphrase as GitHub Actions secrets.
-21.0.6. keep native builds split by runner as today, upload each `<platform-module>/target/ghosttyfx-artifact/`, then have one publish job download all four artifacts into `dist/<ghostty-commit-sha>/<artifactId>/` before running Maven deploy.
-21.0.7. publish job must verify `mvn clean test` and a clean consumer dependency smoke test before deploying, because Maven Central versions are immutable.
-21.0.8. start with `workflow_dispatch` only and Central manual publish approval; after the first successful dry run/release, switch the same workflow to `push` on `main` with Central auto-publish enabled.
+22. make platform-specific artifacts match javafx
 
 ### v2
 6. kitty graphics
