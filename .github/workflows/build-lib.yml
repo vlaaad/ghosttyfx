@@ -186,7 +186,11 @@ jobs:
           GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
 
       - name: Publish to Central Portal
-        run: xvfb-run -a mvn -B -Prelease "-Drevision=${GHOSTTYFX_VERSION}" deploy
+        run: >
+          xvfb-run -a mvn -B -Prelease
+          -pl :ghosttyfx-parent,:ghosttyfx,:ghosttyfx-linux-x86_64,:ghosttyfx-macos-aarch64,:ghosttyfx-macos-x86_64,:ghosttyfx-windows-x86_64
+          "-Drevision=${GHOSTTYFX_VERSION}"
+          deploy
         env:
           CENTRAL_USERNAME: ${{ secrets.CENTRAL_USERNAME }}
           CENTRAL_PASSWORD: ${{ secrets.CENTRAL_PASSWORD }}

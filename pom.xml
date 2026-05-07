@@ -222,6 +222,7 @@
         <profile>
             <id>release</id>
             <modules>
+                <module>ghosttyfx-linux-x86_64</module>
                 <module>ghosttyfx-macos-aarch64</module>
                 <module>ghosttyfx-macos-x86_64</module>
                 <module>ghosttyfx-windows-x86_64</module>
@@ -279,6 +280,7 @@
                                 </goals>
                                 <configuration>
                                     <flattenMode>resolveCiFriendliesOnly</flattenMode>
+                                    <updatePomFile>true</updatePomFile>
                                 </configuration>
                             </execution>
                             <execution>
