@@ -168,7 +168,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          echo "GHOSTTYFX_VERSION=1.0.$(git rev-list --count HEAD)" >> "${GITHUB_ENV}"
+          echo "GHOSTTYFX_VERSION=0.1.$(git rev-list --count HEAD)" >> "${GITHUB_ENV}"
 
       - uses: actions/setup-java@be666c2fcd27ec809703dec50e508c2fdc7f6654 # v5.2.0
         with:
