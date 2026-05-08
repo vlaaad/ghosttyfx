@@ -1,8 +1,19 @@
 # GhosttyFX
 
+[![Build](https://github.com/vlaaad/ghosttyfx/actions/workflows/build-lib.yml/badge.svg)](https://github.com/vlaaad/ghosttyfx/actions/workflows/build-lib.yml)
+[![Maven Central](https://img.shields.io/maven-central/v/io.github.vlaaad/ghosttyfx.svg)](https://central.sonatype.com/artifact/io.github.vlaaad/ghosttyfx)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Sponsor](https://img.shields.io/badge/Sponsor-vlaaad-ea4aaa?logo=githubsponsors)](https://github.com/sponsors/vlaaad)
+
 GhosttyFX is a JavaFX terminal control backed by Ghostty's terminal emulator.
 It renders terminal output in JavaFX and connects to a terminal backend supplied
 by your application.
+
+## Funding
+
+If you use GhosttyFX in your project, please consider [sponsoring](https://github.com/sponsors/vlaaad) 
+its development. Your sponsorship helps keep the JavaFX integration and terminal
+behavior work moving.
 
 ## Supported Platforms
 
