@@ -6,8 +6,11 @@ by your application.
 
 ## Supported Platforms
 
-GhosttyFX currently ships native bindings for Linux x86_64, macOS x86_64,
-macOS aarch64, and Windows x86_64.
+GhosttyFX currently ships native bindings for:
+
+- Linux: x86_64, aarch64
+- macOS: x86_64, aarch64
+- Windows: x86_64
 
 ## Usage
 
