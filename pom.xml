@@ -49,6 +49,7 @@
     <modules>
         <module>ghosttyfx</module>
         <module>ghosttyfx-manual-app</module>
+        <module>ghosttyfx-nord-app</module>
         <module>ghosttyfx-perf-app</module>
     </modules>
 

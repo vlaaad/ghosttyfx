@@ -3,29 +3,23 @@
 [![Build](https://github.com/vlaaad/ghosttyfx/actions/workflows/build-lib.yml/badge.svg)](https://github.com/vlaaad/ghosttyfx/actions/workflows/build-lib.yml)
 [![Maven Central](https://img.shields.io/maven-central/v/io.github.vlaaad/ghosttyfx.svg)](https://central.sonatype.com/artifact/io.github.vlaaad/ghosttyfx)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Sponsor](https://img.shields.io/badge/Sponsor-vlaaad-ea4aaa?logo=githubsponsors)](https://github.com/sponsors/vlaaad)
+[![Sponsor](https://img.shields.io/badge/Sponsor-vlaaad-ea4aaa.svg?logo=github-sponsors)](https://github.com/sponsors/vlaaad)
 
 GhosttyFX is a JavaFX terminal control backed by Ghostty's terminal emulator.
 It renders terminal output in JavaFX and connects to a terminal backend supplied
 by your application.
 
+![](/image.png)
+
 ## Funding
 
-If you use GhosttyFX in your project, please consider [sponsoring](https://github.com/sponsors/vlaaad) 
+If you use GhosttyFX in your project, please consider [sponsoring](https://github.com/sponsors/vlaaad)
 its development. Your sponsorship helps keep the JavaFX integration and terminal
 behavior work moving.
 
-## Supported Platforms
+## Getting Started
 
-GhosttyFX currently ships native bindings for:
-
-- Linux: x86_64, aarch64
-- macOS: x86_64, aarch64
-- Windows: x86_64
-
-## Usage
-
-This example uses pty4j as the PTY backend.
+GhosttyFX is pty-agnostic; this example uses [pty4j](https://github.com/JetBrains/pty4j/) as the PTY backend.
 
 First, adapt pty4j to GhosttyFX's `Terminal` interface:
 
@@ -100,6 +94,9 @@ var view = new TerminalView((columns, rows) -> {
     return new PtyTerminal(launcher.command(), cwd, launcher.environment(), columns, rows);
 });
 ```
+
+Shell integration is an optional adjustment to the launched shell that enables some
+quality of life improvements like shortcuts for jumping between prompts.
 
 Finally, use `TerminalView` as a JavaFX node. For example, put it in a tab and
 bind the tab title to the terminal title:
@@ -216,6 +213,14 @@ capture groups.
 
 Use `setOnBell(...)` or `onBellProperty()` to run code when the terminal rings
 the bell. The value may be `null` to disable custom bell handling.
+
+## Supported Platforms
+
+GhosttyFX currently ships native bindings for:
+
+- Linux: x86_64, aarch64
+- macOS: x86_64, aarch64
+- Windows: x86_64
 
 ## Development
 
