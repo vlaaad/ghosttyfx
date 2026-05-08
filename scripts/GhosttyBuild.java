@@ -66,6 +66,31 @@ public final class GhosttyBuild {
             "ghostty/zig-out/lib/libghostty-vt.so.0.1.0",
             "libghostty-vt-linux-x86_64.so"
         ),
+        "linux-aarch64",
+        new PlatformSpec(
+            "linux-aarch64",
+            "aarch64-linux-gnu",
+            new DownloadSpec(
+                "zig",
+                "https://ziglang.org/download/0.15.2/zig-aarch64-linux-0.15.2.tar.xz",
+                "958ed7d1e00d0ea76590d27666efbf7a932281b3d7ba0c6b01b0ff26498f667f",
+                "zig-aarch64-linux-0.15.2.tar.xz",
+                "zig-aarch64-linux-0.15.2",
+                "zig",
+                ArchiveType.TAR
+            ),
+            new DownloadSpec(
+                "jextract",
+                "https://download.java.net/java/early_access/jextract/25/2/openjdk-25-jextract+2-4_linux-aarch64_bin.tar.gz",
+                "0e25e6f6efa042f8758eaec65a873887fd2247fcf2e3e22dcfd7e4179fc8b0ae",
+                "openjdk-25-jextract+2-4_linux-aarch64_bin.tar.gz",
+                "jextract-25",
+                "bin/jextract",
+                ArchiveType.TAR
+            ),
+            "ghostty/zig-out/lib/libghostty-vt.so.0.1.0",
+            "libghostty-vt-linux-aarch64.so"
+        ),
         "macos-x86_64",
         new PlatformSpec(
             "macos-x86_64",

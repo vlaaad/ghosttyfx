@@ -7,6 +7,7 @@ Generated per-platform `jextract` bindings for `libghostty-vt`.
 - `ghosttyfx`: shared Java module
 - `ghosttyfx-manual-app`: JavaFX launcher for manual testing
 - `ghosttyfx-linux-x86_64`
+- `ghosttyfx-linux-aarch64`
 - `ghosttyfx-macos-x86_64`
 - `ghosttyfx-macos-aarch64`
 - `ghosttyfx-windows-x86_64`

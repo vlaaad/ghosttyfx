@@ -97,6 +97,38 @@
             </properties>
         </profile>
         <profile>
+            <id>linux-aarch64</id>
+            <activation>
+                <os>
+                    <family>unix</family>
+                    <name>Linux</name>
+                    <arch>aarch64</arch>
+                </os>
+            </activation>
+            <modules>
+                <module>ghosttyfx-linux-aarch64</module>
+            </modules>
+            <properties>
+                <ghosttyfx.bindings.artifactId>ghosttyfx-linux-aarch64</ghosttyfx.bindings.artifactId>
+            </properties>
+        </profile>
+        <profile>
+            <id>linux-arm64</id>
+            <activation>
+                <os>
+                    <family>unix</family>
+                    <name>Linux</name>
+                    <arch>arm64</arch>
+                </os>
+            </activation>
+            <modules>
+                <module>ghosttyfx-linux-aarch64</module>
+            </modules>
+            <properties>
+                <ghosttyfx.bindings.artifactId>ghosttyfx-linux-aarch64</ghosttyfx.bindings.artifactId>
+            </properties>
+        </profile>
+        <profile>
             <id>macos-aarch64</id>
             <activation>
                 <os>
@@ -223,6 +255,7 @@
             <id>release</id>
             <modules>
                 <module>ghosttyfx-linux-x86_64</module>
+                <module>ghosttyfx-linux-aarch64</module>
                 <module>ghosttyfx-macos-aarch64</module>
                 <module>ghosttyfx-macos-x86_64</module>
                 <module>ghosttyfx-windows-x86_64</module>
