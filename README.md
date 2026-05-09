@@ -17,6 +17,27 @@ If you use GhosttyFX in your project, please consider [sponsoring](https://githu
 its development. Your sponsorship helps keep the JavaFX integration and terminal
 behavior work moving.
 
+## Installation
+
+GhosttyFX is published to Maven Central. Add the shared JavaFX control artifact:
+
+```xml
+<dependency>
+    <groupId>io.github.vlaaad</groupId>
+    <artifactId>ghosttyfx</artifactId>
+    <version>...</version>
+</dependency>
+```
+
+Use the [Maven Central artifact page](https://central.sonatype.com/artifact/io.github.vlaaad/ghosttyfx)
+to find the latest version.
+
+The `ghosttyfx` artifact depends on the native binding artifact for the current
+platform. Supported platforms are Linux x86_64/aarch64, macOS x86_64/aarch64,
+and Windows x86_64.
+
+GhosttyFX requires Java 25 and JavaFX 25.
+
 ## Getting Started
 
 GhosttyFX is pty-agnostic; this example uses [pty4j](https://github.com/JetBrains/pty4j/) as the PTY backend.
@@ -213,14 +234,6 @@ capture groups.
 
 Use `setOnBell(...)` or `onBellProperty()` to run code when the terminal rings
 the bell. The value may be `null` to disable custom bell handling.
-
-## Supported Platforms
-
-GhosttyFX currently ships native bindings for:
-
-- Linux: x86_64, aarch64
-- macOS: x86_64, aarch64
-- Windows: x86_64
 
 ## Development
 
