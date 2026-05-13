@@ -192,74 +192,8 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
                         }
                     }
                 });
-        terminalShortcuts.addAll(
-                new TerminalShortcut(
-                        HostPlatform.CURRENT.os() == HostPlatform.OS.MACOS
-                                ? new KeyCodeCombination(KeyCode.C, KeyCombination.META_DOWN)
-                                : new KeyCodeCombination(KeyCode.C, KeyCombination.CONTROL_DOWN),
-                        this::copySelection),
-                new TerminalShortcut(
-                        HostPlatform.CURRENT.os() == HostPlatform.OS.MACOS
-                                ? new KeyCodeCombination(KeyCode.V, KeyCombination.META_DOWN)
-                                : new KeyCodeCombination(KeyCode.V, KeyCombination.CONTROL_DOWN),
-                        this::pasteClipboard),
-                new TerminalShortcut(
-                        HostPlatform.CURRENT.os() == HostPlatform.OS.MACOS
-                                ? new KeyCodeCombination(KeyCode.A, KeyCombination.META_DOWN)
-                                : new KeyCodeCombination(KeyCode.A, KeyCombination.CONTROL_DOWN, KeyCombination.SHIFT_DOWN),
-                        this::selectAll),
-                new TerminalShortcut(
-                        HostPlatform.CURRENT.os() == HostPlatform.OS.MACOS
-                                ? new KeyCodeCombination(KeyCode.F, KeyCombination.META_DOWN)
-                                : new KeyCodeCombination(KeyCode.F, KeyCombination.CONTROL_DOWN, KeyCombination.SHIFT_DOWN),
-                        this::toggleSearch),
-                new TerminalShortcut(new KeyCodeCombination(KeyCode.LEFT, KeyCombination.SHIFT_DOWN), this::extendSelectionLeft),
-                new TerminalShortcut(new KeyCodeCombination(KeyCode.RIGHT, KeyCombination.SHIFT_DOWN), this::extendSelectionRight),
-                new TerminalShortcut(new KeyCodeCombination(KeyCode.UP, KeyCombination.SHIFT_DOWN), this::extendSelectionUp),
-                new TerminalShortcut(new KeyCodeCombination(KeyCode.DOWN, KeyCombination.SHIFT_DOWN), this::extendSelectionDown),
-                new TerminalShortcut(new KeyCodeCombination(KeyCode.PAGE_UP, KeyCombination.SHIFT_DOWN), this::extendSelectionPageUp),
-                new TerminalShortcut(new KeyCodeCombination(KeyCode.PAGE_DOWN, KeyCombination.SHIFT_DOWN), this::extendSelectionPageDown),
-                new TerminalShortcut(new KeyCodeCombination(KeyCode.HOME, KeyCombination.SHIFT_DOWN), this::extendSelectionHome),
-                new TerminalShortcut(new KeyCodeCombination(KeyCode.END, KeyCombination.SHIFT_DOWN), this::extendSelectionEnd),
-                new TerminalShortcut(
-                        HostPlatform.CURRENT.os() == HostPlatform.OS.MACOS
-                                ? new KeyCodeCombination(KeyCode.PAGE_UP, KeyCombination.META_DOWN)
-                                : new KeyCodeCombination(KeyCode.PAGE_UP, KeyCombination.SHIFT_DOWN),
-                        this::scrollViewportPageUp),
-                new TerminalShortcut(
-                        HostPlatform.CURRENT.os() == HostPlatform.OS.MACOS
-                                ? new KeyCodeCombination(KeyCode.PAGE_DOWN, KeyCombination.META_DOWN)
-                                : new KeyCodeCombination(KeyCode.PAGE_DOWN, KeyCombination.SHIFT_DOWN),
-                        this::scrollViewportPageDown),
-                new TerminalShortcut(
-                        HostPlatform.CURRENT.os() == HostPlatform.OS.MACOS
-                                ? new KeyCodeCombination(KeyCode.HOME, KeyCombination.META_DOWN)
-                                : new KeyCodeCombination(KeyCode.HOME, KeyCombination.SHIFT_DOWN),
-                        this::scrollViewportToTop),
-                new TerminalShortcut(
-                        HostPlatform.CURRENT.os() == HostPlatform.OS.MACOS
-                                ? new KeyCodeCombination(KeyCode.END, KeyCombination.META_DOWN)
-                                : new KeyCodeCombination(KeyCode.END, KeyCombination.SHIFT_DOWN),
-                        this::scrollViewportToBottom),
-                new TerminalShortcut(
-                        HostPlatform.CURRENT.os() == HostPlatform.OS.MACOS
-                                ? new KeyCodeCombination(KeyCode.UP, KeyCombination.META_DOWN)
-                                : new KeyCodeCombination(KeyCode.UP, KeyCombination.CONTROL_DOWN, KeyCombination.SHIFT_DOWN),
-                        this::scrollViewportToPreviousPrompt),
-                new TerminalShortcut(
-                        HostPlatform.CURRENT.os() == HostPlatform.OS.MACOS
-                                ? new KeyCodeCombination(KeyCode.DOWN, KeyCombination.META_DOWN)
-                                : new KeyCodeCombination(KeyCode.DOWN, KeyCombination.CONTROL_DOWN, KeyCombination.SHIFT_DOWN),
-                        this::scrollViewportToNextPrompt));
-        if (HostPlatform.CURRENT.os() == HostPlatform.OS.MACOS) {
-            terminalShortcuts.addAll(
-                    new TerminalShortcut(new KeyCodeCombination(KeyCode.LEFT, KeyCombination.ALT_DOWN), () -> sendEsc("b")),
-                    new TerminalShortcut(new KeyCodeCombination(KeyCode.RIGHT, KeyCombination.ALT_DOWN), () -> sendEsc("f")),
-                    new TerminalShortcut(new KeyCodeCombination(KeyCode.LEFT, KeyCombination.META_DOWN), () -> sendText("\u0001")),
-                    new TerminalShortcut(new KeyCodeCombination(KeyCode.RIGHT, KeyCombination.META_DOWN), () -> sendText("\u0005")),
-                    new TerminalShortcut(new KeyCodeCombination(KeyCode.BACK_SPACE, KeyCombination.META_DOWN), () -> sendText("\u0015")));
-        }
-        linkMatchers.add(BUILT_IN_LINK_MATCHER);
+        terminalShortcuts.addAll(defaultTerminalShortcuts());
+        linkMatchers.addAll(defaultLinkMatchers());
 
         setFocusTraversable(true);
         searchUi = new SearchUi(
@@ -433,6 +367,70 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
     /// @return the macOS Option-as-Alt property
     public BooleanProperty macOptionAsAltProperty() {
         return macOptionAsAlt;
+    }
+
+    /// Returns the default terminal shortcuts for this view.
+    ///
+    /// The returned list is immutable. Shortcut actions are bound to this
+    /// `TerminalView` instance.
+    ///
+    /// @return the immutable default terminal shortcut list
+    public List<TerminalShortcut> defaultTerminalShortcuts() {
+        if (HostPlatform.CURRENT.os() == HostPlatform.OS.MACOS) {
+            return List.of(
+                    new TerminalShortcut(new KeyCodeCombination(KeyCode.C, KeyCombination.META_DOWN), this::copySelection),
+                    new TerminalShortcut(new KeyCodeCombination(KeyCode.V, KeyCombination.META_DOWN), this::pasteClipboard),
+                    new TerminalShortcut(new KeyCodeCombination(KeyCode.A, KeyCombination.META_DOWN), this::selectAll),
+                    new TerminalShortcut(new KeyCodeCombination(KeyCode.F, KeyCombination.META_DOWN), this::toggleSearch),
+                    new TerminalShortcut(new KeyCodeCombination(KeyCode.LEFT, KeyCombination.SHIFT_DOWN), this::extendSelectionLeft),
+                    new TerminalShortcut(new KeyCodeCombination(KeyCode.RIGHT, KeyCombination.SHIFT_DOWN), this::extendSelectionRight),
+                    new TerminalShortcut(new KeyCodeCombination(KeyCode.UP, KeyCombination.SHIFT_DOWN), this::extendSelectionUp),
+                    new TerminalShortcut(new KeyCodeCombination(KeyCode.DOWN, KeyCombination.SHIFT_DOWN), this::extendSelectionDown),
+                    new TerminalShortcut(new KeyCodeCombination(KeyCode.PAGE_UP, KeyCombination.SHIFT_DOWN), this::extendSelectionPageUp),
+                    new TerminalShortcut(new KeyCodeCombination(KeyCode.PAGE_DOWN, KeyCombination.SHIFT_DOWN), this::extendSelectionPageDown),
+                    new TerminalShortcut(new KeyCodeCombination(KeyCode.HOME, KeyCombination.SHIFT_DOWN), this::extendSelectionHome),
+                    new TerminalShortcut(new KeyCodeCombination(KeyCode.END, KeyCombination.SHIFT_DOWN), this::extendSelectionEnd),
+                    new TerminalShortcut(new KeyCodeCombination(KeyCode.PAGE_UP, KeyCombination.META_DOWN), this::scrollViewportPageUp),
+                    new TerminalShortcut(new KeyCodeCombination(KeyCode.PAGE_DOWN, KeyCombination.META_DOWN), this::scrollViewportPageDown),
+                    new TerminalShortcut(new KeyCodeCombination(KeyCode.HOME, KeyCombination.META_DOWN), this::scrollViewportToTop),
+                    new TerminalShortcut(new KeyCodeCombination(KeyCode.END, KeyCombination.META_DOWN), this::scrollViewportToBottom),
+                    new TerminalShortcut(new KeyCodeCombination(KeyCode.UP, KeyCombination.META_DOWN), this::scrollViewportToPreviousPrompt),
+                    new TerminalShortcut(new KeyCodeCombination(KeyCode.DOWN, KeyCombination.META_DOWN), this::scrollViewportToNextPrompt),
+                    new TerminalShortcut(new KeyCodeCombination(KeyCode.LEFT, KeyCombination.ALT_DOWN), () -> sendEsc("b")),
+                    new TerminalShortcut(new KeyCodeCombination(KeyCode.RIGHT, KeyCombination.ALT_DOWN), () -> sendEsc("f")),
+                    new TerminalShortcut(new KeyCodeCombination(KeyCode.LEFT, KeyCombination.META_DOWN), () -> sendText("\u0001")),
+                    new TerminalShortcut(new KeyCodeCombination(KeyCode.RIGHT, KeyCombination.META_DOWN), () -> sendText("\u0005")),
+                    new TerminalShortcut(new KeyCodeCombination(KeyCode.BACK_SPACE, KeyCombination.META_DOWN), () -> sendText("\u0015")));
+        }
+        return List.of(
+                new TerminalShortcut(new KeyCodeCombination(KeyCode.C, KeyCombination.CONTROL_DOWN), this::copySelection),
+                new TerminalShortcut(new KeyCodeCombination(KeyCode.V, KeyCombination.CONTROL_DOWN), this::pasteClipboard),
+                new TerminalShortcut(new KeyCodeCombination(KeyCode.A, KeyCombination.CONTROL_DOWN, KeyCombination.SHIFT_DOWN), this::selectAll),
+                new TerminalShortcut(new KeyCodeCombination(KeyCode.F, KeyCombination.CONTROL_DOWN, KeyCombination.SHIFT_DOWN), this::toggleSearch),
+                new TerminalShortcut(new KeyCodeCombination(KeyCode.LEFT, KeyCombination.SHIFT_DOWN), this::extendSelectionLeft),
+                new TerminalShortcut(new KeyCodeCombination(KeyCode.RIGHT, KeyCombination.SHIFT_DOWN), this::extendSelectionRight),
+                new TerminalShortcut(new KeyCodeCombination(KeyCode.UP, KeyCombination.SHIFT_DOWN), this::extendSelectionUp),
+                new TerminalShortcut(new KeyCodeCombination(KeyCode.DOWN, KeyCombination.SHIFT_DOWN), this::extendSelectionDown),
+                new TerminalShortcut(new KeyCodeCombination(KeyCode.PAGE_UP, KeyCombination.SHIFT_DOWN), this::extendSelectionPageUp),
+                new TerminalShortcut(new KeyCodeCombination(KeyCode.PAGE_DOWN, KeyCombination.SHIFT_DOWN), this::extendSelectionPageDown),
+                new TerminalShortcut(new KeyCodeCombination(KeyCode.HOME, KeyCombination.SHIFT_DOWN), this::extendSelectionHome),
+                new TerminalShortcut(new KeyCodeCombination(KeyCode.END, KeyCombination.SHIFT_DOWN), this::extendSelectionEnd),
+                new TerminalShortcut(new KeyCodeCombination(KeyCode.PAGE_UP, KeyCombination.SHIFT_DOWN), this::scrollViewportPageUp),
+                new TerminalShortcut(new KeyCodeCombination(KeyCode.PAGE_DOWN, KeyCombination.SHIFT_DOWN), this::scrollViewportPageDown),
+                new TerminalShortcut(new KeyCodeCombination(KeyCode.HOME, KeyCombination.SHIFT_DOWN), this::scrollViewportToTop),
+                new TerminalShortcut(new KeyCodeCombination(KeyCode.END, KeyCombination.SHIFT_DOWN), this::scrollViewportToBottom),
+                new TerminalShortcut(new KeyCodeCombination(KeyCode.UP, KeyCombination.CONTROL_DOWN, KeyCombination.SHIFT_DOWN), this::scrollViewportToPreviousPrompt),
+                new TerminalShortcut(new KeyCodeCombination(KeyCode.DOWN, KeyCombination.CONTROL_DOWN, KeyCombination.SHIFT_DOWN), this::scrollViewportToNextPrompt));
+    }
+
+    /// Returns the default terminal link matchers for this view.
+    ///
+    /// The returned list is immutable. The default list includes the built-in
+    /// web URL matcher.
+    ///
+    /// @return the immutable default terminal link matcher list
+    public List<TerminalLinkMatcher> defaultLinkMatchers() {
+        return List.of(BUILT_IN_LINK_MATCHER);
     }
 
     /// Returns the terminal shortcuts.

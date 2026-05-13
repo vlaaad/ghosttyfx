@@ -164,9 +164,13 @@ final class TerminalViewTest {
 
         try (var view = createView(shell, tempDirectory)) {
             runOnFxThread(() -> {
+                var defaultShortcuts = view.defaultTerminalShortcuts();
                 var combinations = view.getTerminalShortcuts().stream()
                         .map(TerminalShortcut::combination)
                         .toList();
+                assertEquals(
+                        defaultShortcuts.stream().map(TerminalShortcut::combination).toList(),
+                        combinations);
                 assertTrue(combinations.contains(isMac()
                         ? new KeyCodeCombination(KeyCode.C, KeyCombination.META_DOWN)
                         : new KeyCodeCombination(KeyCode.C, KeyCombination.CONTROL_DOWN)));
@@ -201,6 +205,7 @@ final class TerminalViewTest {
                 var shortcut = new TerminalShortcut(
                         new KeyCodeCombination(KeyCode.B, KeyCombination.SHIFT_DOWN),
                         () -> false);
+                assertThrows(UnsupportedOperationException.class, () -> defaultShortcuts.add(shortcut));
                 view.getTerminalShortcuts().add(shortcut);
                 assertTrue(view.getTerminalShortcuts().contains(shortcut));
                 return null;
@@ -213,6 +218,10 @@ final class TerminalViewTest {
         try (var view = createView("")) {
             runOnFxThread(() -> {
                 var link = new TerminalLinkMatcher(Pattern.compile("issue-(\\d+)"), _ -> {});
+                var defaultLinkMatchers = view.defaultLinkMatchers();
+                assertFalse(defaultLinkMatchers.isEmpty());
+                assertEquals(defaultLinkMatchers, List.copyOf(view.getLinkMatchers()));
+                assertThrows(UnsupportedOperationException.class, () -> defaultLinkMatchers.add(link));
                 assertFalse(view.getLinkMatchers().isEmpty());
                 view.getLinkMatchers().add(link);
                 assertTrue(view.getLinkMatchers().contains(link));
@@ -288,6 +297,12 @@ final class TerminalViewTest {
         try (var view = createView("https://example.test")) {
             awaitText(view, "https://example.test");
             runOnFxThread(() -> {
+                moveToCell(view, 4, 0);
+                assertSame(Cursor.HAND, view.getCursor());
+                view.getLinkMatchers().clear();
+                moveToCell(view, 4, 0);
+                assertSame(Cursor.DEFAULT, view.getCursor());
+                view.getLinkMatchers().setAll(view.defaultLinkMatchers());
                 moveToCell(view, 4, 0);
                 assertSame(Cursor.HAND, view.getCursor());
                 return null;
