@@ -56,6 +56,7 @@ public final class GhosttyFxNordApp {
                 color("#434c5e"),
                 foreground,
                 0.5,
+                foreground.deriveColor(0, 1, 1, 0.25),
                 foreground.deriveColor(0, 1, 1, 0.45),
                 foreground.deriveColor(0, 1, 1, 0.18),
                 foreground.deriveColor(0, 1, 1, 0.35));

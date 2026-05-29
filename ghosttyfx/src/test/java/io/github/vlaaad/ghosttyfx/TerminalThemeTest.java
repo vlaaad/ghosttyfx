@@ -23,8 +23,16 @@ final class TerminalThemeTest {
         assertEquals(theme.background(), theme.selectionText());
         assertEquals(0.5, theme.faintOpacity());
         assertEquals(theme.foreground().deriveColor(0, 1, 1, 0.45), theme.scrollbarColor());
+        assertEquals(theme.scrollbarColor(), theme.scrollbarActiveColor());
         assertEquals(theme.foreground().deriveColor(0, 1, 1, 0.18), theme.searchMatchColor());
         assertEquals(theme.foreground().deriveColor(0, 1, 1, 0.35), theme.searchCurrentMatchColor());
+    }
+
+    @Test
+    void oldConstructorUsesScrollbarColorForActiveScrollbar() {
+        var theme = newTheme(List.of());
+
+        assertEquals(theme.scrollbarColor(), theme.scrollbarActiveColor());
     }
 
     @Test
@@ -53,6 +61,19 @@ final class TerminalThemeTest {
                 Color.BLACK,
                 0.5,
                 Color.WHITE,
+                Color.WHITE,
+                Color.WHITE));
+        assertThrows(NullPointerException.class, () -> new TerminalTheme(
+                Color.BLACK,
+                Color.WHITE,
+                List.of(),
+                Color.WHITE,
+                Color.BLACK,
+                Color.WHITE,
+                Color.BLACK,
+                0.5,
+                Color.WHITE,
+                null,
                 Color.WHITE,
                 Color.WHITE));
         assertThrows(NullPointerException.class, () -> newTheme(List.of(Color.BLACK, null)));

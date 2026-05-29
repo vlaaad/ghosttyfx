@@ -604,6 +604,7 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
         }
 
         if (terminalSession.mouseTrackingEnabled() && !isInScrollbar(event.getX())) {
+            setScrollbarHovered(false);
             clearHover(true);
             clearSelection();
             mouseInputState = mouseInputState.withPressGesture(null);
@@ -646,7 +647,8 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
         event.consume();
         if (mouseInputState.scrollbarDragging()) {
             if (!event.isPrimaryButtonDown()) {
-                mouseInputState = MouseInput.stopScrollbarDrag(mouseInputState);
+                stopScrollbarDrag();
+                refreshHover(event);
                 return;
             }
 
@@ -655,6 +657,7 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
         }
 
         if (terminalSession.mouseTrackingEnabled() && !isInScrollbar(event.getX())) {
+            setScrollbarHovered(false);
             clearHover(true);
             writeReportedMouseMotion(event);
             return;
@@ -694,6 +697,7 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
     private void handleMouseMoved(MouseEvent event) {
         event.consume();
         if (terminalSession.mouseTrackingEnabled() && !isInScrollbar(event.getX())) {
+            setScrollbarHovered(false);
             clearHover(true);
             writeReportedMouseMotion(event);
             return;
@@ -704,12 +708,10 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
 
     private void handleMouseReleased(MouseEvent event) {
         event.consume();
-        var nextMouseInputState = MouseInput.stopScrollbarDrag(mouseInputState);
-        if (!nextMouseInputState.equals(mouseInputState)) {
-            mouseInputState = nextMouseInputState;
-        }
+        stopScrollbarDrag();
 
         if (terminalSession.mouseTrackingEnabled() && !isInScrollbar(event.getX())) {
+            setScrollbarHovered(false);
             clearHover(true);
             writeReportedMouseRelease(event);
             mouseInputState = mouseInputState.withPressGesture(null);
@@ -741,6 +743,7 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
 
     private void handleMouseExited(MouseEvent event) {
         event.consume();
+        setScrollbarHovered(false);
         clearHover(true);
         if (terminalSession.mouseTrackingEnabled() && anyMouseButtonDown(event)) {
             writeReportedMouseMotion(event);
@@ -1027,6 +1030,12 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
     }
 
     private void refreshHover(MouseEvent event) {
+        var scrollbar = scrollbarInfo();
+        setScrollbarHovered(isInScrollbar(event.getX())
+                && event.getY() >= 0
+                && event.getY() <= getHeight()
+                && scrollbar != null
+                && scrollbar.scrollable());
         var pressGesture = mouseInputState.pressGesture();
         if (pressGesture != null && pressGesture.button() == TerminalSession.MouseButton.LEFT) {
             var hit = contentHit(event);
@@ -1053,6 +1062,22 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
             redraw();
         }
         setCursor(Cursor.HAND);
+    }
+
+    private void setScrollbarHovered(boolean scrollbarHovered) {
+        var nextMouseInputState = MouseInput.setScrollbarHovered(mouseInputState, scrollbarHovered);
+        if (!nextMouseInputState.equals(mouseInputState)) {
+            mouseInputState = nextMouseInputState;
+            redraw();
+        }
+    }
+
+    private void stopScrollbarDrag() {
+        var nextMouseInputState = MouseInput.stopScrollbarDrag(mouseInputState);
+        if (!nextMouseInputState.equals(mouseInputState)) {
+            mouseInputState = nextMouseInputState;
+            redraw();
+        }
     }
 
     private void clearHover(boolean redraw) {
@@ -1729,6 +1754,7 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
                 getTheme(),
                 cursorBlinkVisible,
                 textBlinkVisible,
+                mouseInputState.scrollbarHovered() || mouseInputState.scrollbarDragging(),
                 scrollbarReservedWidthPx(),
                 MIN_SCROLLBAR_HEIGHT_PX,
                 promptNavigationHighlightRow);

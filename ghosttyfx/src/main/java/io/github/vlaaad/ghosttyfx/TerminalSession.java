@@ -1219,6 +1219,7 @@ final class TerminalSession implements AutoCloseable {
             TerminalTheme theme,
             boolean cursorBlinkVisible,
             boolean textBlinkVisible,
+            boolean scrollbarActive,
             double scrollbarReservedWidthPx,
             double minScrollbarHeightPx,
             int promptNavigationHighlightRow) {
@@ -1446,7 +1447,7 @@ final class TerminalSession implements AutoCloseable {
 
             var scrollbarInfo = scrollbarInfo(width, height, scrollbarReservedWidthPx, minScrollbarHeightPx);
             if (scrollbarInfo != null && scrollbarInfo.scrollable()) {
-                graphics.setFill(theme.scrollbarColor());
+                graphics.setFill(scrollbarActive ? theme.scrollbarActiveColor() : theme.scrollbarColor());
                 graphics.fillRoundRect(
                         scrollbarInfo.thumbX(),
                         scrollbarInfo.thumbY(),

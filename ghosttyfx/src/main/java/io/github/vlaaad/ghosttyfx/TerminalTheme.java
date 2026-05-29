@@ -18,6 +18,7 @@ import javafx.scene.paint.Color;
 /// @param selectionText the selected text foreground color
 /// @param faintOpacity the opacity multiplier for faint text, from `0.0` to `1.0`
 /// @param scrollbarColor the scrollbar thumb color
+/// @param scrollbarActiveColor the scrollbar thumb color while hovered or dragged
 /// @param searchMatchColor the background color for search matches
 /// @param searchCurrentMatchColor the background color for the selected search match
 public record TerminalTheme(
@@ -30,8 +31,36 @@ public record TerminalTheme(
         Color selectionText,
         double faintOpacity,
         Color scrollbarColor,
+        Color scrollbarActiveColor,
         Color searchMatchColor,
         Color searchCurrentMatchColor) {
+
+    public TerminalTheme(
+            Color background,
+            Color foreground,
+            List<Color> palette,
+            Color cursorColor,
+            Color cursorText,
+            Color selectionColor,
+            Color selectionText,
+            double faintOpacity,
+            Color scrollbarColor,
+            Color searchMatchColor,
+            Color searchCurrentMatchColor) {
+        this(
+                background,
+                foreground,
+                palette,
+                cursorColor,
+                cursorText,
+                selectionColor,
+                selectionText,
+                faintOpacity,
+                scrollbarColor,
+                scrollbarColor,
+                searchMatchColor,
+                searchCurrentMatchColor);
+    }
 
     public TerminalTheme {
         Objects.requireNonNull(background, "background");
@@ -42,6 +71,7 @@ public record TerminalTheme(
         Objects.requireNonNull(selectionColor, "selectionColor");
         Objects.requireNonNull(selectionText, "selectionText");
         Objects.requireNonNull(scrollbarColor, "scrollbarColor");
+        Objects.requireNonNull(scrollbarActiveColor, "scrollbarActiveColor");
         Objects.requireNonNull(searchMatchColor, "searchMatchColor");
         Objects.requireNonNull(searchCurrentMatchColor, "searchCurrentMatchColor");
         if (!Double.isFinite(faintOpacity) || faintOpacity < 0.0 || faintOpacity > 1.0) {
@@ -62,6 +92,7 @@ public record TerminalTheme(
     public static TerminalTheme defaults() {
         var background = Color.BLACK;
         var foreground = Color.WHITE;
+        var scrollbarColor = foreground.deriveColor(0, 1, 1, 0.45);
         return new TerminalTheme(
                 background,
                 foreground,
@@ -71,7 +102,8 @@ public record TerminalTheme(
                 foreground,
                 background,
                 0.5,
-                foreground.deriveColor(0, 1, 1, 0.45),
+                scrollbarColor,
+                scrollbarColor,
                 foreground.deriveColor(0, 1, 1, 0.18),
                 foreground.deriveColor(0, 1, 1, 0.35));
     }

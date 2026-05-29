@@ -38,6 +38,12 @@ final class MouseInput {
                 : state;
     }
 
+    static State setScrollbarHovered(State state, boolean scrollbarHovered) {
+        return state.scrollbarHovered() == scrollbarHovered
+                ? state
+                : state.withScrollbarHovered(scrollbarHovered);
+    }
+
     static ScrollUpdate accumulateDiscreteScroll(State state, double deltaTicks) {
         if (deltaTicks == 0 || !Double.isFinite(deltaTicks)) {
             return new ScrollUpdate(state, 0);
@@ -152,34 +158,39 @@ final class MouseInput {
             double smoothScrollRemainderRows,
             boolean scrollGestureActive,
             boolean scrollbarDragging,
+            boolean scrollbarHovered,
             double scrollbarThumbGrabRatio,
             PressGesture pressGesture) {
         static State initial() {
-            return new State(0, 0, false, false, 0, null);
+            return new State(0, 0, false, false, false, 0, null);
         }
 
         State withDiscreteScrollRemainder(double discreteScrollRemainder) {
-            return new State(discreteScrollRemainder, smoothScrollRemainderRows, scrollGestureActive, scrollbarDragging, scrollbarThumbGrabRatio, pressGesture);
+            return new State(discreteScrollRemainder, smoothScrollRemainderRows, scrollGestureActive, scrollbarDragging, scrollbarHovered, scrollbarThumbGrabRatio, pressGesture);
         }
 
         State withSmoothScrollRemainderRows(double smoothScrollRemainderRows) {
-            return new State(discreteScrollRemainder, smoothScrollRemainderRows, scrollGestureActive, scrollbarDragging, scrollbarThumbGrabRatio, pressGesture);
+            return new State(discreteScrollRemainder, smoothScrollRemainderRows, scrollGestureActive, scrollbarDragging, scrollbarHovered, scrollbarThumbGrabRatio, pressGesture);
         }
 
         State withScrollGestureActive(boolean scrollGestureActive) {
-            return new State(discreteScrollRemainder, smoothScrollRemainderRows, scrollGestureActive, scrollbarDragging, scrollbarThumbGrabRatio, pressGesture);
+            return new State(discreteScrollRemainder, smoothScrollRemainderRows, scrollGestureActive, scrollbarDragging, scrollbarHovered, scrollbarThumbGrabRatio, pressGesture);
         }
 
         State withScrollbarDragging(boolean scrollbarDragging) {
-            return new State(discreteScrollRemainder, smoothScrollRemainderRows, scrollGestureActive, scrollbarDragging, scrollbarThumbGrabRatio, pressGesture);
+            return new State(discreteScrollRemainder, smoothScrollRemainderRows, scrollGestureActive, scrollbarDragging, scrollbarHovered, scrollbarThumbGrabRatio, pressGesture);
+        }
+
+        State withScrollbarHovered(boolean scrollbarHovered) {
+            return new State(discreteScrollRemainder, smoothScrollRemainderRows, scrollGestureActive, scrollbarDragging, scrollbarHovered, scrollbarThumbGrabRatio, pressGesture);
         }
 
         State withScrollbarThumbGrabRatio(double scrollbarThumbGrabRatio) {
-            return new State(discreteScrollRemainder, smoothScrollRemainderRows, scrollGestureActive, scrollbarDragging, scrollbarThumbGrabRatio, pressGesture);
+            return new State(discreteScrollRemainder, smoothScrollRemainderRows, scrollGestureActive, scrollbarDragging, scrollbarHovered, scrollbarThumbGrabRatio, pressGesture);
         }
 
         State withPressGesture(PressGesture pressGesture) {
-            return new State(discreteScrollRemainder, smoothScrollRemainderRows, scrollGestureActive, scrollbarDragging, scrollbarThumbGrabRatio, pressGesture);
+            return new State(discreteScrollRemainder, smoothScrollRemainderRows, scrollGestureActive, scrollbarDragging, scrollbarHovered, scrollbarThumbGrabRatio, pressGesture);
         }
     }
 
