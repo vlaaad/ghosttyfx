@@ -25,14 +25,38 @@ final class TerminalThemeTest {
         assertEquals(theme.foreground().deriveColor(0, 1, 1, 0.45), theme.scrollbarColor());
         assertEquals(theme.scrollbarColor(), theme.scrollbarActiveColor());
         assertEquals(theme.foreground().deriveColor(0, 1, 1, 0.18), theme.searchMatchColor());
+        assertEquals(theme.foreground(), theme.searchMatchBorderColor());
         assertEquals(theme.foreground().deriveColor(0, 1, 1, 0.35), theme.searchCurrentMatchColor());
+        assertEquals(theme.foreground(), theme.searchCurrentMatchBorderColor());
     }
 
     @Test
-    void oldConstructorUsesScrollbarColorForActiveScrollbar() {
+    void oldConstructorUsesScrollbarAndSearchColorsForNewFields() {
         var theme = newTheme(List.of());
 
         assertEquals(theme.scrollbarColor(), theme.scrollbarActiveColor());
+        assertEquals(theme.searchMatchColor(), theme.searchMatchBorderColor());
+        assertEquals(theme.searchCurrentMatchColor(), theme.searchCurrentMatchBorderColor());
+    }
+
+    @Test
+    void activeScrollbarConstructorUsesSearchColorsForBorderColors() {
+        var theme = new TerminalTheme(
+                Color.BLACK,
+                Color.WHITE,
+                List.of(),
+                Color.WHITE,
+                Color.BLACK,
+                Color.WHITE,
+                Color.BLACK,
+                0.5,
+                Color.gray(0.5),
+                Color.gray(0.55),
+                Color.gray(0.6),
+                Color.gray(0.7));
+
+        assertEquals(Color.gray(0.6), theme.searchMatchBorderColor());
+        assertEquals(Color.gray(0.7), theme.searchCurrentMatchBorderColor());
     }
 
     @Test
@@ -76,6 +100,36 @@ final class TerminalThemeTest {
                 null,
                 Color.WHITE,
                 Color.WHITE));
+        assertThrows(NullPointerException.class, () -> new TerminalTheme(
+                Color.BLACK,
+                Color.WHITE,
+                List.of(),
+                Color.WHITE,
+                Color.BLACK,
+                Color.WHITE,
+                Color.BLACK,
+                0.5,
+                Color.WHITE,
+                Color.WHITE,
+                Color.WHITE,
+                null,
+                Color.WHITE,
+                Color.WHITE));
+        assertThrows(NullPointerException.class, () -> new TerminalTheme(
+                Color.BLACK,
+                Color.WHITE,
+                List.of(),
+                Color.WHITE,
+                Color.BLACK,
+                Color.WHITE,
+                Color.BLACK,
+                0.5,
+                Color.WHITE,
+                Color.WHITE,
+                Color.WHITE,
+                Color.WHITE,
+                Color.WHITE,
+                null));
         assertThrows(NullPointerException.class, () -> newTheme(List.of(Color.BLACK, null)));
     }
 

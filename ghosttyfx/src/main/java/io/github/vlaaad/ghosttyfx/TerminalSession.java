@@ -1326,8 +1326,13 @@ final class TerminalSession implements AutoCloseable {
                             graphics.fillRect(x, y, metrics.cellWidthPx(), metrics.cellHeightPx());
                         }
                         if (!selected && searchHighlighted) {
-                            graphics.setFill(searchHighlightColor(theme, currentSearchMatch));
-                            graphics.fillRect(x, y, metrics.cellWidthPx(), metrics.cellHeightPx());
+                            drawSearchHighlightBackground(
+                                    graphics,
+                                    x,
+                                    y,
+                                    metrics,
+                                    theme,
+                                    currentSearchMatch);
                         }
                         x += metrics.cellWidthPx();
                         viewportX++;
@@ -1389,8 +1394,13 @@ final class TerminalSession implements AutoCloseable {
                         graphics.fillRect(x, y, metrics.cellWidthPx(), metrics.cellHeightPx());
                     }
                     if (!selected && searchHighlighted) {
-                        graphics.setFill(searchHighlightColor(theme, currentSearchMatch));
-                        graphics.fillRect(x, y, metrics.cellWidthPx(), metrics.cellHeightPx());
+                        drawSearchHighlightBackground(
+                                graphics,
+                                x,
+                                y,
+                                metrics,
+                                theme,
+                                currentSearchMatch);
                     }
 
                     var faint = GhosttyStyle.faint(style);
@@ -1437,6 +1447,14 @@ final class TerminalSession implements AutoCloseable {
                     viewportX++;
                 }
 
+                drawSearchHighlightBorders(
+                        graphics,
+                        y,
+                        metrics,
+                        theme,
+                        searchResult,
+                        selectedSearchMatch,
+                        viewportTop + viewportY);
                 y += metrics.cellHeightPx();
                 viewportY++;
             }
@@ -2070,10 +2088,38 @@ final class TerminalSession implements AutoCloseable {
         return point.y() != to.y() || point.x() <= to.x();
     }
 
-    private static Color searchHighlightColor(TerminalTheme theme, boolean selected) {
-        return selected
-                ? theme.searchCurrentMatchColor()
-                : theme.searchMatchColor();
+    private static void drawSearchHighlightBackground(
+            GraphicsContext graphics,
+            double x,
+            double y,
+            TerminalView.CellMetrics metrics,
+            TerminalTheme theme,
+            boolean selected) {
+        var width = metrics.cellWidthPx();
+        graphics.setFill(selected ? theme.searchCurrentMatchColor() : theme.searchMatchColor());
+        graphics.fillRect(x, y, width, metrics.cellHeightPx());
+    }
+
+    private static void drawSearchHighlightBorders(
+            GraphicsContext graphics,
+            double y,
+            TerminalView.CellMetrics metrics,
+            TerminalTheme theme,
+            SearchResult searchResult,
+            int selectedSearchMatch,
+            int row) {
+        var spans = searchResult.rows().get(row);
+        if (spans == null) {
+            return;
+        }
+        graphics.setLineWidth(1.0);
+        for (var span : spans) {
+            var selected = span.matchIndex() == selectedSearchMatch;
+            var x = span.fromX() * metrics.cellWidthPx();
+            var width = (span.toX() - span.fromX() + 1) * metrics.cellWidthPx();
+            graphics.setStroke(selected ? theme.searchCurrentMatchBorderColor() : theme.searchMatchBorderColor());
+            graphics.strokeRect(x + 0.5, y + 0.5, width, metrics.cellHeightPx());
+        }
     }
 
     private static void drawBlockElement(

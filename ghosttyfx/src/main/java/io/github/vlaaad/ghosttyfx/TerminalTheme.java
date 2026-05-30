@@ -20,7 +20,9 @@ import javafx.scene.paint.Color;
 /// @param scrollbarColor the scrollbar thumb color
 /// @param scrollbarActiveColor the scrollbar thumb color while hovered or dragged
 /// @param searchMatchColor the background color for search matches
+/// @param searchMatchBorderColor the border color for search matches
 /// @param searchCurrentMatchColor the background color for the selected search match
+/// @param searchCurrentMatchBorderColor the border color for the selected search match
 public record TerminalTheme(
         Color background,
         Color foreground,
@@ -33,7 +35,39 @@ public record TerminalTheme(
         Color scrollbarColor,
         Color scrollbarActiveColor,
         Color searchMatchColor,
-        Color searchCurrentMatchColor) {
+        Color searchMatchBorderColor,
+        Color searchCurrentMatchColor,
+        Color searchCurrentMatchBorderColor) {
+
+    public TerminalTheme(
+            Color background,
+            Color foreground,
+            List<Color> palette,
+            Color cursorColor,
+            Color cursorText,
+            Color selectionColor,
+            Color selectionText,
+            double faintOpacity,
+            Color scrollbarColor,
+            Color scrollbarActiveColor,
+            Color searchMatchColor,
+            Color searchCurrentMatchColor) {
+        this(
+                background,
+                foreground,
+                palette,
+                cursorColor,
+                cursorText,
+                selectionColor,
+                selectionText,
+                faintOpacity,
+                scrollbarColor,
+                scrollbarActiveColor,
+                searchMatchColor,
+                searchMatchColor,
+                searchCurrentMatchColor,
+                searchCurrentMatchColor);
+    }
 
     public TerminalTheme(
             Color background,
@@ -59,6 +93,8 @@ public record TerminalTheme(
                 scrollbarColor,
                 scrollbarColor,
                 searchMatchColor,
+                searchMatchColor,
+                searchCurrentMatchColor,
                 searchCurrentMatchColor);
     }
 
@@ -73,7 +109,9 @@ public record TerminalTheme(
         Objects.requireNonNull(scrollbarColor, "scrollbarColor");
         Objects.requireNonNull(scrollbarActiveColor, "scrollbarActiveColor");
         Objects.requireNonNull(searchMatchColor, "searchMatchColor");
+        Objects.requireNonNull(searchMatchBorderColor, "searchMatchBorderColor");
         Objects.requireNonNull(searchCurrentMatchColor, "searchCurrentMatchColor");
+        Objects.requireNonNull(searchCurrentMatchBorderColor, "searchCurrentMatchBorderColor");
         if (!Double.isFinite(faintOpacity) || faintOpacity < 0.0 || faintOpacity > 1.0) {
             throw new IllegalArgumentException("faintOpacity must be between 0 and 1");
         }
@@ -105,6 +143,8 @@ public record TerminalTheme(
                 scrollbarColor,
                 scrollbarColor,
                 foreground.deriveColor(0, 1, 1, 0.18),
-                foreground.deriveColor(0, 1, 1, 0.35));
+                foreground,
+                foreground.deriveColor(0, 1, 1, 0.35),
+                foreground);
     }
 }
