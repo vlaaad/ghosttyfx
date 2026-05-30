@@ -182,7 +182,8 @@ the configured font family and size.
 ### Theme
 
 Use `themeProperty()` or `setTheme(...)` to configure colors used by the
-terminal, cursor, selection, scrollbar, and search highlights.
+terminal, cursor, selection, inactive and active scrollbar thumbs, and search
+highlights.
 
 `TerminalTheme.defaults()` uses a black background, white foreground, and the
 terminal emulator's default indexed palette. A custom palette may be empty, 16
