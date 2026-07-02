@@ -128,6 +128,34 @@ final class TerminalViewTest {
     }
 
     @Test
+    void terminalSizePropertyTracksLayoutResize() throws Exception {
+        try (var view = createView("")) {
+            runOnFxThread(() -> {
+                assertEquals(new TerminalSize(80, 24), view.getTerminalSize());
+                assertEquals(view.getTerminalSize(), view.terminalSizeProperty().get());
+
+                var observed = new AtomicReference<TerminalSize>();
+                view.terminalSizeProperty().addListener((_, _, size) -> observed.set(size));
+                view.resize(
+                        40 * cellWidth(view) + TerminalView.SCROLLBAR_WIDTH_PX + 2 * TerminalView.SCROLLBAR_MARGIN_PX,
+                        12 * cellHeight(view));
+
+                var expected = new TerminalSize(40, 12);
+                assertEquals(expected, view.getTerminalSize());
+                assertEquals(expected, view.terminalSizeProperty().get());
+                assertEquals(expected, observed.get());
+                return null;
+            });
+        }
+    }
+
+    @Test
+    void terminalSizeRejectsNonPositiveDimensions() {
+        assertThrows(IllegalArgumentException.class, () -> new TerminalSize(0, 1));
+        assertThrows(IllegalArgumentException.class, () -> new TerminalSize(1, 0));
+    }
+
+    @Test
     void themePropertyRejectsNullAndStoresTheme() throws Exception {
         var tempDirectory = Files.createTempDirectory("ghosttyfx-theme-test-");
         var pidFile = tempDirectory.resolve("shell.pid");

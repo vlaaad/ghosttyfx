@@ -122,6 +122,8 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
     private final ObservableList<TerminalLinkMatcher> linkMatchers = FXCollections.observableArrayList();
     private final ReadOnlyObjectWrapper<TerminalState> terminalState =
             new ReadOnlyObjectWrapper<>(this, "terminalState", new TerminalState.Running());
+    private final ReadOnlyObjectWrapper<TerminalSize> terminalSize =
+            new ReadOnlyObjectWrapper<>(this, "terminalSize", new TerminalSize(INITIAL_COLUMNS, INITIAL_ROWS));
 
     private final ObjectBinding<FontMetrics> fontMetrics = Bindings.createObjectBinding(() -> {
         var font = this.font.get();
@@ -513,6 +515,20 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
         return terminalState.getReadOnlyProperty();
     }
 
+    /// Returns the terminal grid size.
+    ///
+    /// @return the terminal grid size
+    public TerminalSize getTerminalSize() {
+        return terminalSize.get();
+    }
+
+    /// The terminal grid size measured in character cells.
+    ///
+    /// @return the read-only terminal size property
+    public ReadOnlyObjectProperty<TerminalSize> terminalSizeProperty() {
+        return terminalSize.getReadOnlyProperty();
+    }
+
     /// Closes the terminal backend owned by this view.
     ///
     /// This stops the terminal process or backend opened through the
@@ -535,6 +551,10 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
             return;
         }
 
+        var currentTerminalSize = terminalSize.get();
+        if (currentTerminalSize.columns() != size.columns() || currentTerminalSize.rows() != size.rows()) {
+            terminalSize.set(new TerminalSize(size.columns(), size.rows()));
+        }
         writeCommand(new PtySession.ResizePty(size.columns(), size.rows()));
         if (searchUi.visible()) {
             searchUi.refresh(false);
