@@ -123,7 +123,7 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
     private final ReadOnlyObjectWrapper<TerminalState> terminalState =
             new ReadOnlyObjectWrapper<>(this, "terminalState", new TerminalState.Running());
 
-    private final ObjectBinding<TerminalFontMetrics> fontMetrics = Bindings.createObjectBinding(() -> {
+    private final ObjectBinding<FontMetrics> fontMetrics = Bindings.createObjectBinding(() -> {
         var font = this.font.get();
         var text = new Text();
         text.setBoundsType(TextBoundsType.LOGICAL);
@@ -146,7 +146,7 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
         baselineOffsetPx = Math.max(0, Math.min(cellHeightPx, baselineOffsetPx));
         var monospace = maxWidth > 0 && maxWidth - minWidth <= 0.01;
         var fontSize = monospace ? font.getSize() * cellWidthPx / maxWidth : font.getSize();
-        return new TerminalFontMetrics(
+        return new FontMetrics(
                 new Font(font.getName(), fontSize),
                 Font.font(font.getFamily(), FontWeight.BOLD, fontSize),
                 Font.font(font.getFamily(), FontPosture.ITALIC, fontSize),
@@ -1953,7 +1953,7 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
         }
     }
 
-    static record TerminalFontMetrics(
+    static record FontMetrics(
             Font regular,
             Font bold,
             Font italic,
