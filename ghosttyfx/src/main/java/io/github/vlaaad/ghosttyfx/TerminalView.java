@@ -117,29 +117,25 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
             super.set(Objects.requireNonNull(value, "searchPromptText"));
         }
     };
-    private final ObjectBinding<TerminalFonts> terminalFonts = Bindings.createObjectBinding(() -> {
-        var font = this.font.get();
-        return new TerminalFonts(
-                font,
-                Font.font(font.getFamily(), FontWeight.BOLD, font.getSize()),
-                Font.font(font.getFamily(), FontPosture.ITALIC, font.getSize()),
-                Font.font(font.getFamily(), FontWeight.BOLD, FontPosture.ITALIC, font.getSize()));
-    }, font);
     private final BooleanProperty macOptionAsAlt = new SimpleBooleanProperty(this, "macOptionAsAlt", false);
     private final ObservableList<TerminalShortcut> terminalShortcuts = FXCollections.observableArrayList();
     private final ObservableList<TerminalLinkMatcher> linkMatchers = FXCollections.observableArrayList();
     private final ReadOnlyObjectWrapper<TerminalState> terminalState =
             new ReadOnlyObjectWrapper<>(this, "terminalState", new TerminalState.Running());
 
-    private final ObjectBinding<CellMetrics> cellMetrics = Bindings.createObjectBinding(() -> {
+    private final ObjectBinding<TerminalFontMetrics> fontMetrics = Bindings.createObjectBinding(() -> {
+        var font = this.font.get();
         var text = new Text();
         text.setBoundsType(TextBoundsType.LOGICAL);
-        text.setFont(font.get());
+        text.setFont(font);
 
+        var minWidth = Double.POSITIVE_INFINITY;
         var maxWidth = 0.0;
         for (var c = 32; c < 127; c++) {
             text.setText(Character.toString((char) c));
-            maxWidth = Math.max(maxWidth, text.getLayoutBounds().getWidth());
+            var width = text.getLayoutBounds().getWidth();
+            minWidth = Math.min(minWidth, width);
+            maxWidth = Math.max(maxWidth, width);
         }
 
         text.setText("M_");
@@ -148,11 +144,20 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
         var cellHeightPx = Math.max(1, (int) Math.round(bounds.getHeight()));
         var baselineOffsetPx = (int) Math.round(-bounds.getMinY());
         baselineOffsetPx = Math.max(0, Math.min(cellHeightPx, baselineOffsetPx));
-        return new CellMetrics(cellWidthPx, cellHeightPx, baselineOffsetPx);
+        var monospace = maxWidth > 0 && maxWidth - minWidth <= 0.01;
+        var fontSize = monospace ? font.getSize() * cellWidthPx / maxWidth : font.getSize();
+        return new TerminalFontMetrics(
+                new Font(font.getName(), fontSize),
+                Font.font(font.getFamily(), FontWeight.BOLD, fontSize),
+                Font.font(font.getFamily(), FontPosture.ITALIC, fontSize),
+                Font.font(font.getFamily(), FontWeight.BOLD, FontPosture.ITALIC, fontSize),
+                cellWidthPx,
+                cellHeightPx,
+                baselineOffsetPx);
     }, font);
     private final Canvas canvas = new ResizableCanvas(
-            () -> INITIAL_COLUMNS * cellMetrics.get().cellWidthPx() + scrollbarReservedWidthPx(),
-            () -> INITIAL_ROWS * cellMetrics.get().cellHeightPx());
+            () -> INITIAL_COLUMNS * fontMetrics.get().cellWidthPx() + scrollbarReservedWidthPx(),
+            () -> INITIAL_ROWS * fontMetrics.get().cellHeightPx());
 
     /// Creates a terminal view and opens its terminal backend.
     ///
@@ -170,12 +175,12 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
         textBlinkTimeline = new Timeline(new KeyFrame(BLINK_INTERVAL, _ -> tickTextBlink()));
         textBlinkTimeline.setCycleCount(Animation.INDEFINITE);
         promptNavigationHighlightTimeline = new Timeline(new KeyFrame(PROMPT_NAVIGATION_HIGHLIGHT_DURATION, _ -> clearPromptNavigationHighlight()));
-        var initialCellMetrics = cellMetrics.get();
+        var initialFontMetrics = fontMetrics.get();
         var thisRef = new WeakReference<>(this);
         terminalSession = new TerminalSession(
                 INITIAL_COLUMNS,
                 INITIAL_ROWS,
-                initialCellMetrics,
+                initialFontMetrics,
                 bytes -> writeBytes(bytes),
                 (newTitle) -> {
                     var view = thisRef.get();
@@ -217,8 +222,15 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
         widthProperty().addListener((_, _, _) -> handleResize());
         heightProperty().addListener((_, _, _) -> handleResize());
         resize(prefWidth(-1), prefHeight(-1));
-        cellMetrics.addListener((_, _, _) -> handleResize());
-        terminalFonts.addListener((_, _, _) -> redraw());
+        fontMetrics.addListener((_, oldMetrics, newMetrics) -> {
+            if (oldMetrics == null
+                    || oldMetrics.cellWidthPx() != newMetrics.cellWidthPx()
+                    || oldMetrics.cellHeightPx() != newMetrics.cellHeightPx()) {
+                handleResize();
+            } else {
+                redraw();
+            }
+        });
         linkMatchers.addListener((ListChangeListener<TerminalLinkMatcher>) _ -> redraw());
         cursorBlinking.addListener((_, _, value) -> {
             terminalSession.setCursorBlinking(value);
@@ -517,7 +529,7 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
     }
 
     private void handleResize() {
-        var metrics = cellMetrics.get();
+        var metrics = fontMetrics.get();
         var size = terminalSession.resize(getWidth(), getHeight(), metrics, scrollbarReservedWidthPx());
         if (size == null) {
             return;
@@ -686,7 +698,7 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
                     hit.cellOffsetX(),
                     pressGesture.rectangleSelection(),
                     terminalSession.columnCount(),
-                    cellMetrics.get().cellWidthPx()));
+                    fontMetrics.get().cellWidthPx()));
             case 2 -> applyWordDragSelection(pressGesture, hit.screenPoint());
             case 3 -> applyLineDragSelection(pressGesture, hit.screenPoint());
             case 4 -> applyRegionDragSelection(pressGesture, hit.screenPoint());
@@ -791,7 +803,7 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
                         eventModifiers(event),
                         getWidth(),
                         getHeight(),
-                        cellMetrics.get(),
+                        fontMetrics.get(),
                         scrollbarReservedWidthPx()));
             }
             if (!wroteToApplication && alternateScrollEnabled(overContent)) {
@@ -825,7 +837,7 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
                     eventModifiers(event),
                     getWidth(),
                     getHeight(),
-                    cellMetrics.get(),
+                    fontMetrics.get(),
                     scrollbarReservedWidthPx()));
         }
         if (!wroteToApplication && alternateScrollEnabled(overContent)) {
@@ -955,7 +967,7 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
         if (event.getDeltaY() == 0) {
             return 0;
         }
-        return event.getDeltaY() / cellMetrics.get().cellHeightPx();
+        return event.getDeltaY() / fontMetrics.get().cellHeightPx();
     }
 
     private static short eventModifiers(MouseEvent event) {
@@ -996,7 +1008,7 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
     }
 
     private int viewportRowCount() {
-        return terminalSession.viewportRowCount(0, cellMetrics.get().cellHeightPx(), getHeight());
+        return terminalSession.viewportRowCount(0, fontMetrics.get().cellHeightPx(), getHeight());
     }
 
     private TerminalSession.CellHit contentHit(MouseEvent event) {
@@ -1005,7 +1017,7 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
                 event.getY(),
                 getWidth(),
                 getHeight(),
-                cellMetrics.get(),
+                fontMetrics.get(),
                 scrollbarReservedWidthPx());
     }
 
@@ -1146,7 +1158,7 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
                 eventModifiers(event),
                 getWidth(),
                 getHeight(),
-                cellMetrics.get(),
+                fontMetrics.get(),
                 scrollbarReservedWidthPx(),
                 anyMouseButtonDown(event)));
     }
@@ -1159,7 +1171,7 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
                 eventModifiers(event),
                 getWidth(),
                 getHeight(),
-                cellMetrics.get(),
+                fontMetrics.get(),
                 scrollbarReservedWidthPx(),
                 anyMouseButtonDown(event)));
     }
@@ -1172,7 +1184,7 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
                 eventModifiers(event),
                 getWidth(),
                 getHeight(),
-                cellMetrics.get(),
+                fontMetrics.get(),
                 scrollbarReservedWidthPx(),
                 anyMouseButtonDown(event)));
     }
@@ -1742,8 +1754,7 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
                 canvas.getGraphicsContext2D(),
                 width,
                 height,
-                terminalFonts.get(),
-                cellMetrics.get(),
+                fontMetrics.get(),
                 keyInputState.preedit(),
                 selection,
                 hoveredLink == null ? Selection.empty() : hoveredLink.selection(),
@@ -1825,7 +1836,7 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
     }
 
     private CursorLocation currentCursorLocation() {
-        return terminalSession.currentCursorLocation(cellMetrics.get());
+        return terminalSession.currentCursorLocation(fontMetrics.get());
     }
 
     private record Cleanup(TerminalSession terminalSession, PtySession ptySession) implements Runnable {
@@ -1910,7 +1921,7 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
 
             var codePointCount = keyInputState.preedit().text().codePointCount(0, keyInputState.preedit().text().length());
             var clampedOffset = Math.clamp(offset, 0, codePointCount);
-            var metrics = cellMetrics.get();
+            var metrics = fontMetrics.get();
             var screenPoint = localToScreen(
                     cursorLocation.pixelX() + clampedOffset * (double) metrics.cellWidthPx(),
                     cursorLocation.pixelY() + metrics.cellHeightPx());
@@ -1929,7 +1940,7 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
             var localPoint = screenToLocal(x, y);
             var dx = Math.max(0, localPoint.getX() - cursorLocation.pixelX());
             var codePointCount = keyInputState.preedit().text().codePointCount(0, keyInputState.preedit().text().length());
-            return Math.clamp((int) Math.floor(dx / cellMetrics.get().cellWidthPx()), 0, codePointCount);
+            return Math.clamp((int) Math.floor(dx / fontMetrics.get().cellWidthPx()), 0, codePointCount);
         }
 
         @Override
@@ -1942,15 +1953,14 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
         }
     }
 
-    static record CellMetrics(int cellWidthPx, int cellHeightPx, int baselineOffsetPx) {
-
-    }
-
-    static record CursorLocation(int cellX, int cellY, double pixelX, double pixelY) {
-
-    }
-
-    static record TerminalFonts(Font regular, Font bold, Font italic, Font boldItalic) {
+    static record TerminalFontMetrics(
+            Font regular,
+            Font bold,
+            Font italic,
+            Font boldItalic,
+            int cellWidthPx,
+            int cellHeightPx,
+            int baselineOffsetPx) {
 
         Font forStyle(boolean bold, boolean italic) {
             if (bold && italic) {
@@ -1961,6 +1971,10 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
             }
             return italic ? this.italic : regular;
         }
+
+    }
+
+    static record CursorLocation(int cellX, int cellY, double pixelX, double pixelY) {
 
     }
 

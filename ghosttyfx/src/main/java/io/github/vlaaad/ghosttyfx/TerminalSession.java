@@ -81,12 +81,12 @@ final class TerminalSession implements AutoCloseable {
     private final Consumer<String> titleChanged;
     private final Runnable bell;
     private Size size;
-    private TerminalView.CellMetrics cellMetrics;
+    private TerminalView.TerminalFontMetrics fontMetrics;
 
     TerminalSession(
             int initialColumns,
             int initialRows,
-            TerminalView.CellMetrics initialCellMetrics,
+            TerminalView.TerminalFontMetrics initialFontMetrics,
             Consumer<byte[]> terminalInput,
             Consumer<String> titleChanged,
             Runnable bell) {
@@ -94,7 +94,7 @@ final class TerminalSession implements AutoCloseable {
         this.titleChanged = titleChanged;
         this.bell = bell;
         size = new Size(initialColumns, initialRows);
-        cellMetrics = initialCellMetrics;
+        fontMetrics = initialFontMetrics;
         xtversionString = GhosttyString.allocate(callbackArena);
         GhosttyString.ptr(xtversionString, callbackArena.allocateFrom(ValueLayout.JAVA_BYTE, XTVERSION_BYTES));
         GhosttyString.len(xtversionString, XTVERSION_BYTES.length);
@@ -123,8 +123,8 @@ final class TerminalSession implements AutoCloseable {
                             terminal,
                             (short) initialColumns,
                             (short) initialRows,
-                            initialCellMetrics.cellWidthPx(),
-                            initialCellMetrics.cellHeightPx()),
+                            initialFontMetrics.cellWidthPx(),
+                            initialFontMetrics.cellHeightPx()),
                     "ghostty_terminal_resize");
             setCursorBlinking(true);
             var palette = GhosttyColorRgb.allocateArray(PALETTE_SIZE, arena);
@@ -233,11 +233,11 @@ final class TerminalSession implements AutoCloseable {
     private boolean reportSize(MemorySegment terminal, MemorySegment userdata, MemorySegment outSize) {
         var sizeReport = outSize.reinterpret(GhosttySizeReportSize.sizeof());
         var currentSize = size;
-        var currentCellMetrics = cellMetrics;
+        var currentFontMetrics = fontMetrics;
         GhosttySizeReportSize.rows(sizeReport, (short) currentSize.rows());
         GhosttySizeReportSize.columns(sizeReport, (short) currentSize.columns());
-        GhosttySizeReportSize.cell_width(sizeReport, currentCellMetrics.cellWidthPx());
-        GhosttySizeReportSize.cell_height(sizeReport, currentCellMetrics.cellHeightPx());
+        GhosttySizeReportSize.cell_width(sizeReport, currentFontMetrics.cellWidthPx());
+        GhosttySizeReportSize.cell_height(sizeReport, currentFontMetrics.cellHeightPx());
         return true;
     }
 
@@ -321,7 +321,7 @@ final class TerminalSession implements AutoCloseable {
         }
     }
 
-    Size resize(double widthPx, double heightPx, TerminalView.CellMetrics metrics, double scrollbarReservedWidthPx) {
+    Size resize(double widthPx, double heightPx, TerminalView.TerminalFontMetrics metrics, double scrollbarReservedWidthPx) {
         if (widthPx <= 0 || heightPx <= 0) {
             return null;
         }
@@ -337,7 +337,7 @@ final class TerminalSession implements AutoCloseable {
                         metrics.cellHeightPx()),
                 "ghostty_terminal_resize");
         size = new Size(columns, rows);
-        cellMetrics = metrics;
+        fontMetrics = metrics;
         updateRenderState();
         return new Size(columns, rows);
     }
@@ -419,7 +419,7 @@ final class TerminalSession implements AutoCloseable {
             short mods,
             double widthPx,
             double heightPx,
-            TerminalView.CellMetrics metrics,
+            TerminalView.TerminalFontMetrics metrics,
             double scrollbarReservedWidthPx,
             boolean anyButtonPressed) {
         refreshMouseEncoder(anyButtonPressed, widthPx, heightPx, metrics, scrollbarReservedWidthPx);
@@ -433,7 +433,7 @@ final class TerminalSession implements AutoCloseable {
             short mods,
             double widthPx,
             double heightPx,
-            TerminalView.CellMetrics metrics,
+            TerminalView.TerminalFontMetrics metrics,
             double scrollbarReservedWidthPx,
             boolean anyButtonPressed) {
         refreshMouseEncoder(anyButtonPressed, widthPx, heightPx, metrics, scrollbarReservedWidthPx);
@@ -447,7 +447,7 @@ final class TerminalSession implements AutoCloseable {
             short mods,
             double widthPx,
             double heightPx,
-            TerminalView.CellMetrics metrics,
+            TerminalView.TerminalFontMetrics metrics,
             double scrollbarReservedWidthPx,
             boolean anyButtonPressed) {
         refreshMouseEncoder(anyButtonPressed, widthPx, heightPx, metrics, scrollbarReservedWidthPx);
@@ -461,7 +461,7 @@ final class TerminalSession implements AutoCloseable {
             short mods,
             double widthPx,
             double heightPx,
-            TerminalView.CellMetrics metrics,
+            TerminalView.TerminalFontMetrics metrics,
             double scrollbarReservedWidthPx) {
         var button = lineDelta > 0
                 ? ghostty_vt_h.GHOSTTY_MOUSE_BUTTON_FOUR()
@@ -815,7 +815,7 @@ final class TerminalSession implements AutoCloseable {
             double y,
             double widthPx,
             double heightPx,
-            TerminalView.CellMetrics metrics,
+            TerminalView.TerminalFontMetrics metrics,
             double scrollbarReservedWidthPx) {
         var contentWidth = Math.max(0, widthPx - scrollbarReservedWidthPx);
         if (x < 0 || y < 0 || x >= contentWidth || y >= heightPx) {
@@ -1207,8 +1207,7 @@ final class TerminalSession implements AutoCloseable {
             GraphicsContext graphics,
             double width,
             double height,
-            TerminalView.TerminalFonts fonts,
-            TerminalView.CellMetrics metrics,
+            TerminalView.TerminalFontMetrics metrics,
             KeyInput.Preedit preedit,
             Selection selection,
             Selection hoveredLink,
@@ -1223,7 +1222,7 @@ final class TerminalSession implements AutoCloseable {
             double scrollbarReservedWidthPx,
             double minScrollbarHeightPx,
             int promptNavigationHighlightRow) {
-        graphics.setFont(fonts.regular());
+        graphics.setFont(metrics.regular());
 
         try (var arena = Arena.ofConfined()) {
             var colors = GhosttyRenderStateColors.allocate(arena);
@@ -1430,7 +1429,7 @@ final class TerminalSession implements AutoCloseable {
                             if (codePointCount == 1 && codePoint >= 0x2580 && codePoint <= 0x259F) {
                                 drawBlockElement(graphics, codePoint, x, y, metrics, textColor);
                             } else {
-                                graphics.setFont(fonts.forStyle(GhosttyStyle.bold(style), GhosttyStyle.italic(style)));
+                                graphics.setFont(metrics.forStyle(GhosttyStyle.bold(style), GhosttyStyle.italic(style)));
                                 graphics.fillText(renderedText, x, baseline);
                             }
                             drawTextDecorations(graphics, x, y, metrics, style, selected, baseTextColor, textColor, theme, faintFactor);
@@ -1459,9 +1458,9 @@ final class TerminalSession implements AutoCloseable {
                 viewportY++;
             }
 
-            renderCursor(graphics, metrics, fonts, colors, focused, theme, cursorBlinkVisible, cursor, cursorText, cursorBold, cursorItalic);
-            graphics.setFont(fonts.regular());
-            renderPreedit(graphics, metrics, fonts, preedit, cursor, theme);
+            renderCursor(graphics, metrics, colors, focused, theme, cursorBlinkVisible, cursor, cursorText, cursorBold, cursorItalic);
+            graphics.setFont(metrics.regular());
+            renderPreedit(graphics, metrics, preedit, cursor, theme);
 
             var scrollbarInfo = scrollbarInfo(width, height, scrollbarReservedWidthPx, minScrollbarHeightPx);
             if (scrollbarInfo != null && scrollbarInfo.scrollable()) {
@@ -1478,7 +1477,7 @@ final class TerminalSession implements AutoCloseable {
         }
     }
 
-    TerminalView.CursorLocation currentCursorLocation(TerminalView.CellMetrics metrics) {
+    TerminalView.CursorLocation currentCursorLocation(TerminalView.TerminalFontMetrics metrics) {
         try (var arena = Arena.ofConfined()) {
             var cursorVisible = arena.allocate(ValueLayout.JAVA_BOOLEAN);
             if (ghostty_vt_h.ghostty_render_state_get(
@@ -1566,7 +1565,7 @@ final class TerminalSession implements AutoCloseable {
             boolean anyButtonPressed,
             double widthPx,
             double heightPx,
-            TerminalView.CellMetrics metrics,
+            TerminalView.TerminalFontMetrics metrics,
             double scrollbarReservedWidthPx) {
         ghostty_vt_h.ghostty_mouse_encoder_setopt_from_terminal(mouseEncoder, terminal);
         try (var arena = Arena.ofConfined()) {
@@ -2092,7 +2091,7 @@ final class TerminalSession implements AutoCloseable {
             GraphicsContext graphics,
             double x,
             double y,
-            TerminalView.CellMetrics metrics,
+            TerminalView.TerminalFontMetrics metrics,
             TerminalTheme theme,
             boolean selected) {
         var width = metrics.cellWidthPx();
@@ -2103,7 +2102,7 @@ final class TerminalSession implements AutoCloseable {
     private static void drawSearchHighlightBorders(
             GraphicsContext graphics,
             double y,
-            TerminalView.CellMetrics metrics,
+            TerminalView.TerminalFontMetrics metrics,
             TerminalTheme theme,
             SearchResult searchResult,
             int selectedSearchMatch,
@@ -2127,7 +2126,7 @@ final class TerminalSession implements AutoCloseable {
             int codePoint,
             double x,
             double y,
-            TerminalView.CellMetrics metrics,
+            TerminalView.TerminalFontMetrics metrics,
             Color color) {
         switch (codePoint) {
             case 0x2580 -> drawUpperBlock(graphics, x, y, metrics, 0.5);
@@ -2166,25 +2165,25 @@ final class TerminalSession implements AutoCloseable {
         }
     }
 
-    private static void drawUpperBlock(GraphicsContext graphics, double x, double y, TerminalView.CellMetrics metrics, double fraction) {
+    private static void drawUpperBlock(GraphicsContext graphics, double x, double y, TerminalView.TerminalFontMetrics metrics, double fraction) {
         graphics.fillRect(x, y, metrics.cellWidthPx(), blockSize(metrics.cellHeightPx(), fraction));
     }
 
-    private static void drawLowerBlock(GraphicsContext graphics, double x, double y, TerminalView.CellMetrics metrics, double fraction) {
+    private static void drawLowerBlock(GraphicsContext graphics, double x, double y, TerminalView.TerminalFontMetrics metrics, double fraction) {
         var height = blockSize(metrics.cellHeightPx(), fraction);
         graphics.fillRect(x, y + metrics.cellHeightPx() - height, metrics.cellWidthPx(), height);
     }
 
-    private static void drawLeftBlock(GraphicsContext graphics, double x, double y, TerminalView.CellMetrics metrics, double fraction) {
+    private static void drawLeftBlock(GraphicsContext graphics, double x, double y, TerminalView.TerminalFontMetrics metrics, double fraction) {
         graphics.fillRect(x, y, blockSize(metrics.cellWidthPx(), fraction), metrics.cellHeightPx());
     }
 
-    private static void drawRightBlock(GraphicsContext graphics, double x, double y, TerminalView.CellMetrics metrics, double fraction) {
+    private static void drawRightBlock(GraphicsContext graphics, double x, double y, TerminalView.TerminalFontMetrics metrics, double fraction) {
         var width = blockSize(metrics.cellWidthPx(), fraction);
         graphics.fillRect(x + metrics.cellWidthPx() - width, y, width, metrics.cellHeightPx());
     }
 
-    private static void drawFullBlock(GraphicsContext graphics, double x, double y, TerminalView.CellMetrics metrics) {
+    private static void drawFullBlock(GraphicsContext graphics, double x, double y, TerminalView.TerminalFontMetrics metrics) {
         graphics.fillRect(x, y, metrics.cellWidthPx(), metrics.cellHeightPx());
     }
 
@@ -2192,7 +2191,7 @@ final class TerminalSession implements AutoCloseable {
             GraphicsContext graphics,
             double x,
             double y,
-            TerminalView.CellMetrics metrics,
+            TerminalView.TerminalFontMetrics metrics,
             Color color,
             double opacity) {
         graphics.setFill(color.deriveColor(0, 1, 1, color.getOpacity() * opacity));
@@ -2203,7 +2202,7 @@ final class TerminalSession implements AutoCloseable {
             GraphicsContext graphics,
             double x,
             double y,
-            TerminalView.CellMetrics metrics,
+            TerminalView.TerminalFontMetrics metrics,
             boolean bottomLeft,
             boolean bottomRight,
             boolean topLeft,
@@ -2236,7 +2235,7 @@ final class TerminalSession implements AutoCloseable {
             GraphicsContext graphics,
             double x,
             double y,
-            TerminalView.CellMetrics metrics,
+            TerminalView.TerminalFontMetrics metrics,
             MemorySegment style,
             boolean selected,
             Color baseTextColor,
@@ -2465,8 +2464,7 @@ final class TerminalSession implements AutoCloseable {
 
     private void renderPreedit(
             GraphicsContext graphics,
-            TerminalView.CellMetrics metrics,
-            TerminalView.TerminalFonts fonts,
+            TerminalView.TerminalFontMetrics metrics,
             KeyInput.Preedit preedit,
             CursorInfo cursor,
             TerminalTheme theme) {
@@ -2477,7 +2475,7 @@ final class TerminalSession implements AutoCloseable {
         var codePointCount = preedit.text().codePointCount(0, preedit.text().length());
         var x = cursor.x() * (double) metrics.cellWidthPx();
         var y = cursor.y() * (double) metrics.cellHeightPx();
-        graphics.setFont(fonts.regular());
+        graphics.setFont(metrics.regular());
         graphics.setFill(theme.foreground());
         graphics.fillText(preedit.text(), x, y + metrics.baselineOffsetPx());
         graphics.setStroke(theme.foreground());
@@ -2496,8 +2494,7 @@ final class TerminalSession implements AutoCloseable {
 
     private void renderCursor(
             GraphicsContext graphics,
-            TerminalView.CellMetrics metrics,
-            TerminalView.TerminalFonts fonts,
+            TerminalView.TerminalFontMetrics metrics,
             MemorySegment colors,
             boolean focused,
             TerminalTheme theme,
@@ -2548,7 +2545,7 @@ final class TerminalSession implements AutoCloseable {
                 graphics.fillRect(cursorPixelX, cursorPixelY, cursorWidth, cursorHeight);
                 if (!cursorText.isEmpty()) {
                     graphics.setFill(theme.cursorText());
-                    graphics.setFont(fonts.forStyle(cursorBold, cursorItalic));
+                    graphics.setFont(metrics.forStyle(cursorBold, cursorItalic));
                     graphics.fillText(cursorText, cursorPixelX, cursorPixelY + metrics.baselineOffsetPx());
                 }
             }
