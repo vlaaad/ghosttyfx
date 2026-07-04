@@ -181,6 +181,17 @@ uses the font to measure terminal cells, so changing it can change the view's
 preferred width and height. Bold, italic, and bold italic faces are derived from
 the configured font family and size.
 
+JavaFX resolves bold and italic faces by family. If an app bundles a terminal
+font, load every face needed by terminal styles before assigning the font:
+
+```java
+var regular = Font.loadFont(App.class.getResourceAsStream("MyFont-Regular.ttf"), 14);
+Font.loadFont(App.class.getResourceAsStream("MyFont-Bold.ttf"), 14);
+Font.loadFont(App.class.getResourceAsStream("MyFont-Italic.ttf"), 14);
+Font.loadFont(App.class.getResourceAsStream("MyFont-BoldItalic.ttf"), 14);
+view.setFont(Font.font(regular.getFamily(), 14));
+```
+
 ### Theme
 
 Use `themeProperty()` or `setTheme(...)` to configure colors used by the

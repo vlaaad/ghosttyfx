@@ -32,6 +32,7 @@ import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.media.AudioClip;
 import javafx.scene.paint.Color;
+import javafx.scene.text.Font;
 import javafx.stage.DirectoryChooser;
 import javafx.stage.Stage;
 
@@ -44,6 +45,7 @@ public final class GhosttyFxManualApp {
 
     public static void main(String[] args) {
         Platform.startup(() -> {
+            var terminalFont = loadFont();
             var terminals = FXCollections.observableArrayList(detectTerminals());
             var terminalPicker = new ComboBox<TerminalOption>(terminals);
             if (!terminals.isEmpty()) {
@@ -116,6 +118,7 @@ public final class GhosttyFxManualApp {
                         var launcher = Shell.integrate(terminal.command(), System.getenv());
                         return new PtyTerminal(launcher.command(), cwd, launcher.environment(), columns, rows);
                     });
+                    view.setFont(terminalFont);
                     if (theme != null) {
                         view.setTheme(theme.theme());
                     }
@@ -182,6 +185,23 @@ public final class GhosttyFxManualApp {
                     .forEach(view -> Thread.ofVirtual().name("ghosttyfx-stage-close").start(view::close)));
             stage.show();
         });
+    }
+
+    private static Font loadFont() {
+        var regular = loadFont("Regular");
+        loadFont("Bold");
+        loadFont("Italic");
+        loadFont("BoldItalic");
+        return Font.font(regular.getFamily(), 14);
+    }
+
+    private static Font loadFont(String variant) {
+        var resource = "fonts/JetBrainsMonoNerdFont-" + variant + ".ttf";
+        try (var stream = Objects.requireNonNull(GhosttyFxManualApp.class.getResourceAsStream(resource), resource)) {
+            return Objects.requireNonNull(Font.loadFont(stream, 14), resource);
+        } catch (IOException e) {
+            throw new IllegalStateException("Unable to load " + resource, e);
+        }
     }
 
     private static List<ThemeOption> themes() {
