@@ -128,6 +128,34 @@ final class TerminalViewTest {
     }
 
     @Test
+    void mouseTrackingEnabledReflectsTerminalMode() throws Exception {
+        try (var view = createView("")) {
+            runOnFxThread(() -> {
+                assertFalse(view.isMouseTrackingEnabled());
+                return null;
+            });
+        }
+
+        try (var view = createView("\u001B[?1000h")) {
+            await("mouse tracking to enable", START_TIMEOUT, () -> runOnFxThread(() ->
+                    view.isMouseTrackingEnabled() ? Optional.of(Boolean.TRUE) : Optional.empty()));
+            runOnFxThread(() -> {
+                assertTrue(view.isMouseTrackingEnabled());
+                return null;
+            });
+        }
+
+        try (var view = createView("\u001B[?1000h\u001B[?1000l")) {
+            await("terminal output to close", START_TIMEOUT, () -> runOnFxThread(() ->
+                    view.getTerminalState() instanceof TerminalState.Closed ? Optional.of(Boolean.TRUE) : Optional.empty()));
+            runOnFxThread(() -> {
+                assertFalse(view.isMouseTrackingEnabled());
+                return null;
+            });
+        }
+    }
+
+    @Test
     void terminalSizePropertyTracksLayoutResize() throws Exception {
         try (var view = createView("")) {
             runOnFxThread(() -> {

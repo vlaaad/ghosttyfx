@@ -383,6 +383,13 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
         return macOptionAsAlt;
     }
 
+    /// Returns whether the terminal application has enabled mouse tracking.
+    ///
+    /// @return whether mouse tracking is enabled
+    public boolean isMouseTrackingEnabled() {
+        return terminalSession.mouseTrackingEnabled();
+    }
+
     /// Returns the default terminal shortcuts for this view.
     ///
     /// The returned list is immutable. Shortcut actions are bound to this
@@ -635,7 +642,7 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
             return;
         }
 
-        if (terminalSession.mouseTrackingEnabled() && !isInScrollbar(event.getX())) {
+        if (isMouseTrackingEnabled() && !isInScrollbar(event.getX())) {
             setScrollbarHovered(false);
             clearHover(true);
             clearSelection();
@@ -688,7 +695,7 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
             return;
         }
 
-        if (terminalSession.mouseTrackingEnabled() && !isInScrollbar(event.getX())) {
+        if (isMouseTrackingEnabled() && !isInScrollbar(event.getX())) {
             setScrollbarHovered(false);
             clearHover(true);
             writeReportedMouseMotion(event);
@@ -728,7 +735,7 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
 
     private void handleMouseMoved(MouseEvent event) {
         event.consume();
-        if (terminalSession.mouseTrackingEnabled() && !isInScrollbar(event.getX())) {
+        if (isMouseTrackingEnabled() && !isInScrollbar(event.getX())) {
             setScrollbarHovered(false);
             clearHover(true);
             writeReportedMouseMotion(event);
@@ -742,7 +749,7 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
         event.consume();
         stopScrollbarDrag();
 
-        if (terminalSession.mouseTrackingEnabled() && !isInScrollbar(event.getX())) {
+        if (isMouseTrackingEnabled() && !isInScrollbar(event.getX())) {
             setScrollbarHovered(false);
             clearHover(true);
             writeReportedMouseRelease(event);
@@ -777,7 +784,7 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
         event.consume();
         setScrollbarHovered(false);
         clearHover(true);
-        if (terminalSession.mouseTrackingEnabled() && anyMouseButtonDown(event)) {
+        if (isMouseTrackingEnabled() && anyMouseButtonDown(event)) {
             writeReportedMouseMotion(event);
         }
     }
@@ -813,7 +820,7 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
                 return;
             }
 
-            var mouseTrackingEnabled = overContent && terminalSession.mouseTrackingEnabled();
+            var mouseTrackingEnabled = overContent && isMouseTrackingEnabled();
             var wroteToApplication = false;
             if (mouseTrackingEnabled) {
                 wroteToApplication = writeBytes(terminalSession.encodeMouseScroll(
@@ -847,7 +854,7 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
             return;
         }
 
-        var mouseTrackingEnabled = overContent && terminalSession.mouseTrackingEnabled();
+        var mouseTrackingEnabled = overContent && isMouseTrackingEnabled();
         var wroteToApplication = false;
         if (mouseTrackingEnabled) {
             wroteToApplication = writeBytes(terminalSession.encodeMouseScroll(

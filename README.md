@@ -168,6 +168,7 @@ used. Useful view APIs include:
 - `titleProperty()`: terminal title reported by the running program
 - `terminalStateProperty()`: running, closed, or failed backend state
 - `terminalSizeProperty()`: current terminal grid size in character cells
+- `isMouseTrackingEnabled()`: whether the running program has enabled mouse tracking
 - `copySelection()`, `pasteClipboard()`, `selectAll()`: common terminal actions
 - `sendText(...)`, `sendEsc(...)`: send text or escape-prefixed input
 
