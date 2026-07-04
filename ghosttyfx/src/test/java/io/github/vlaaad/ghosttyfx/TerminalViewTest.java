@@ -410,27 +410,30 @@ final class TerminalViewTest {
     }
 
     @Test
-    void builtInUrlLinkMatcherIgnoresShellInputRegion() throws Exception {
+    void builtInUrlLinkMatcherMatchesShellInputRegion() throws Exception {
         var output = "\u001B]133;A\u0007> \u001B]133;B\u0007https://example.test";
         try (var view = createView(output)) {
             awaitText(view, "https://example.test");
             runOnFxThread(() -> {
                 moveToCell(view, 5, 0);
-                assertSame(Cursor.DEFAULT, view.getCursor());
+                assertSame(Cursor.HAND, view.getCursor());
                 return null;
             });
         }
     }
 
     @Test
-    void customLinkMatchersIgnoreShellInputRegion() throws Exception {
+    void customLinkMatchersMatchShellInputRegion() throws Exception {
+        var clicks = new AtomicInteger();
         var output = "\u001B]133;A\u0007> \u001B]133;B\u0007issue-123";
         try (var view = createView(output)) {
             awaitText(view, "issue-123");
             runOnFxThread(() -> {
-                view.getLinkMatchers().add(new TerminalLinkMatcher(Pattern.compile("issue-(\\d+)"), _ -> {}));
+                view.getLinkMatchers().add(new TerminalLinkMatcher(Pattern.compile("issue-(\\d+)"), _ -> clicks.incrementAndGet()));
                 moveToCell(view, 5, 0);
-                assertSame(Cursor.DEFAULT, view.getCursor());
+                assertSame(Cursor.HAND, view.getCursor());
+                clickCell(view, 5, 0);
+                assertEquals(1, clicks.get());
                 return null;
             });
         }

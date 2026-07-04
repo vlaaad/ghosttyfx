@@ -61,7 +61,10 @@ public final class GhosttyFxNordApp {
                 foreground.deriveColor(0, 1, 1, 0.18),
                 foreground,
                 foreground.deriveColor(0, 1, 1, 0.35),
-                foreground);
+                foreground,
+                0.0,
+                0.45,
+                0.85);
     }
 
     private static Color color(String value) {

@@ -717,9 +717,7 @@ final class TerminalSession implements AutoCloseable {
             var matcher = linkMatcher.pattern().matcher(line.text());
             while (matcher.find()) {
                 var selection = line.selection(matcher.start(), matcher.end());
-                if (!selection.isEmpty()
-                        && contains(selection, point)
-                        && !containsSemanticInput(selection)) {
+                if (!selection.isEmpty() && contains(selection, point)) {
                     return new MatchedLinkMatcher(i, linkMatcher, matcher.toMatchResult(), selection);
                 }
             }
@@ -762,7 +760,7 @@ final class TerminalSession implements AutoCloseable {
                 var matcher = linkMatcher.pattern().matcher(line.text());
                 while (matcher.find()) {
                     var selection = line.selection(matcher.start(), matcher.end());
-                    if (!selection.isEmpty() && !containsSemanticInput(selection)) {
+                    if (!selection.isEmpty()) {
                         selections.add(selection);
                     }
                 }
@@ -1297,7 +1295,7 @@ final class TerminalSession implements AutoCloseable {
                     var screenPoint = new Selection.ScreenPoint(viewportX, viewportTop + viewportY);
                     var selected = contains(selection, screenPoint);
                     var hovered = contains(hoveredLink, screenPoint);
-                    var linked = linkResult.matchIndex(screenPoint) >= 0;
+                    var matchedLink = linkResult.matchIndex(screenPoint) >= 0;
                     var searchMatch = searchResult.matchIndex(screenPoint);
                     var searchHighlighted = searchMatch >= 0;
                     var currentSearchMatch = searchMatch == selectedSearchMatch;
@@ -1435,10 +1433,18 @@ final class TerminalSession implements AutoCloseable {
                             drawTextDecorations(graphics, x, y, metrics, style, selected, baseTextColor, textColor, theme, faintFactor);
                             if (GhosttyStyle.underline(style) == ghostty_vt_h.GHOSTTY_SGR_UNDERLINE_NONE()
                                     && !GhosttyStyle.strikethrough(style)
-                                    && !GhosttyStyle.overline(style)
-                                    && (linked || cellHyperlink(screenPoint, arena) != null)) {
-                                graphics.setStroke(applyOpacity(baseTextColor, faintFactor * (hovered ? 0.85 : 0.45)));
-                                drawUnderline(graphics, x, y + metrics.cellHeightPx() - 2.5, metrics.cellWidthPx(), ghostty_vt_h.GHOSTTY_SGR_UNDERLINE_DOTTED());
+                                    && !GhosttyStyle.overline(style)) {
+                                var hyperlinkUri = cellHyperlink(screenPoint, arena);
+                                var osc8Link = hyperlinkUri != null && !hyperlinkUri.isEmpty();
+                                if (matchedLink || osc8Link) {
+                                    var linkUnderlineOpacity = hovered
+                                            ? theme.hoveredLinkUnderlineOpacity()
+                                            : (osc8Link ? theme.osc8LinkUnderlineOpacity() : theme.matchedLinkUnderlineOpacity());
+                                    if (linkUnderlineOpacity > 0.0) {
+                                        graphics.setStroke(applyOpacity(baseTextColor, faintFactor * linkUnderlineOpacity));
+                                        drawUnderline(graphics, x, y + metrics.cellHeightPx() - 2.5, metrics.cellWidthPx(), ghostty_vt_h.GHOSTTY_SGR_UNDERLINE_DOTTED());
+                                    }
+                                }
                             }
                         }
                     }
@@ -1833,31 +1839,6 @@ final class TerminalSession implements AutoCloseable {
     private String cellHyperlink(Selection.ScreenPoint point, Arena arena) {
         var gridRef = gridRef(point, arena);
         return gridRef == null ? null : hyperlinkUri(gridRef, arena);
-    }
-
-    private boolean containsSemanticInput(Selection selection) {
-        var normalized = selection.normalized();
-        if (normalized.isEmpty()) {
-            return false;
-        }
-
-        var columns = columnCount();
-        if (columns <= 0) {
-            return false;
-        }
-
-        try (var arena = Arena.ofConfined()) {
-            var point = normalized.from();
-            while (true) {
-                if (cellSemanticContent(point, arena) == ghostty_vt_h.GHOSTTY_CELL_SEMANTIC_INPUT()) {
-                    return true;
-                }
-                if (point.equals(normalized.to())) {
-                    return false;
-                }
-                point = next(point, columns);
-            }
-        }
     }
 
     private int cellSemanticContent(Selection.ScreenPoint point, Arena arena) {
