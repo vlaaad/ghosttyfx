@@ -916,7 +916,7 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
             return true;
         }
 
-        scrollViewportTo(scrollbar.targetOffsetForTrackPress(y), scrollbar);
+        scrollViewportTo(scrollbar.targetOffsetForTrackPress(y));
         var updatedScrollbar = scrollbarInfo();
         if (updatedScrollbar != null && updatedScrollbar.scrollable()) {
             mouseInputState = MouseInput.startScrollbarDrag(mouseInputState, updatedScrollbar.thumbGrabRatio(y));
@@ -931,13 +931,14 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
             return false;
         }
 
-        scrollViewportTo(scrollbar.targetOffsetForDrag(y, mouseInputState.scrollbarThumbGrabRatio()), scrollbar);
+        scrollViewportTo(scrollbar.targetOffsetForDrag(y, mouseInputState.scrollbarThumbGrabRatio()));
         return true;
     }
 
-    private void scrollViewportTo(long targetOffset, TerminalSession.ScrollbarInfo scrollbar) {
-        var clampedOffset = Math.clamp(targetOffset, 0, scrollbar.scrollableRows());
-        scrollViewportBy(clampedOffset - scrollbar.offset());
+    private void scrollViewportTo(long row) {
+        promptNavigationRow = -1;
+        terminalSession.scrollViewportTo(row);
+        redraw();
     }
 
     private void scrollViewportBy(long deltaRows) {
@@ -1462,7 +1463,7 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
         if (scrollbar.offset() == 0) {
             return true;
         }
-        scrollViewportTo(0, scrollbar);
+        scrollViewportTo(0);
         return true;
     }
 
@@ -1477,7 +1478,7 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
         if (scrollbar.offset() == scrollbar.scrollableRows()) {
             return true;
         }
-        scrollViewportTo(scrollbar.scrollableRows(), scrollbar);
+        scrollViewportTo(scrollbar.scrollableRows());
         return true;
     }
 
@@ -1560,7 +1561,7 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
             return true;
         }
 
-        scrollViewportTo(nextOffset, scrollbar);
+        scrollViewportTo(nextOffset);
         return true;
     }
 
@@ -1583,7 +1584,7 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
             }
 
             if (!rowDisplayed(target, scrollbar) && scrollbar.scrollable()) {
-                scrollViewportTo(target, scrollbar);
+                scrollViewportTo(target);
             }
             promptNavigationRow = target;
             showPromptNavigationHighlight(target);
@@ -1668,9 +1669,9 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
         var viewportTop = scrollbar.offset();
         var viewportBottom = viewportTop + scrollbar.visible() - 1;
         if (row < viewportTop) {
-            scrollViewportTo(row, scrollbar);
+            scrollViewportTo(row);
         } else if (row > viewportBottom) {
-            scrollViewportTo(row - scrollbar.visible() + 1, scrollbar);
+            scrollViewportTo(row - scrollbar.visible() + 1);
         }
     }
 
@@ -1689,9 +1690,9 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
         var viewportTop = scrollbar.offset();
         var viewportBottom = viewportTop + scrollbar.visible() - 1;
         if (nextFocus.y() < viewportTop) {
-            scrollViewportTo(nextFocus.y(), scrollbar);
+            scrollViewportTo(nextFocus.y());
         } else if (nextFocus.y() > viewportBottom) {
-            scrollViewportTo(nextFocus.y() - scrollbar.visible() + 1, scrollbar);
+            scrollViewportTo(nextFocus.y() - scrollbar.visible() + 1);
         }
         return true;
     }
