@@ -18,6 +18,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 import java.util.regex.MatchResult;
 
+import io.github.vlaaad.ghostty.bindings.GhosttyBuffer;
 import io.github.vlaaad.ghostty.bindings.GhosttyColorRgb;
 import io.github.vlaaad.ghostty.bindings.GhosttyDeviceAttributes;
 import io.github.vlaaad.ghostty.bindings.GhosttyDeviceAttributesPrimary;
@@ -1307,13 +1308,15 @@ final class TerminalSession implements AutoCloseable {
 
             var rowCellsPointer = arena.allocate(ValueLayout.ADDRESS);
             rowCellsPointer.set(ValueLayout.ADDRESS, 0, rowCells);
-            var graphemeLength = arena.allocate(ValueLayout.JAVA_INT);
             var style = GhosttyStyle.allocate(arena);
             GhosttyStyle.size(style, GhosttyStyle.sizeof());
             var foreground = GhosttyColorRgb.allocate(arena);
             var background = GhosttyColorRgb.allocate(arena);
             var swappedColor = GhosttyColorRgb.allocate(arena);
             var selectedValue = arena.allocate(ValueLayout.JAVA_BOOLEAN);
+            var graphemeBuffer = GhosttyBuffer.allocate(arena);
+            var graphemeBytesCapacity = MAX_GRAPHEME_CODEPOINTS * 4;
+            var graphemeBytes = arena.allocate(graphemeBytesCapacity);
             var scrollbar = GhosttyTerminalScrollbar.allocate(arena);
             var viewportTop = ghostty_vt_h.ghostty_terminal_get(terminal, ghostty_vt_h.GHOSTTY_TERMINAL_DATA_SCROLLBAR(), scrollbar) == GHOSTTY_SUCCESS
                     ? Math.toIntExact(GhosttyTerminalScrollbar.offset(scrollbar))
@@ -1329,9 +1332,6 @@ final class TerminalSession implements AutoCloseable {
                     : -1;
             var cursor = cursorInfo(arena);
             var preeditCellCount = preedit.text().codePointCount(0, preedit.text().length());
-            var text = new StringBuilder(MAX_GRAPHEME_CODEPOINTS * 2);
-            var codepointsCapacity = MAX_GRAPHEME_CODEPOINTS;
-            var codepoints = arena.allocate(MemoryLayout.sequenceLayout(codepointsCapacity, ValueLayout.JAVA_INT));
             var y = 0.0;
             var viewportY = 0;
             var cursorText = "";
@@ -1374,14 +1374,30 @@ final class TerminalSession implements AutoCloseable {
                             && viewportY == cursor.y()
                             && viewportX >= cursor.x()
                             && viewportX < cursor.x() + preeditCellCount;
-                    requireGhosttySuccess(
-                            ghostty_vt_h.ghostty_render_state_row_cells_get(
-                                    rowCells,
-                                    ghostty_vt_h.GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_GRAPHEMES_LEN(),
-                                    graphemeLength),
-                            "ghostty_render_state_row_cells_get(graphemes_len)");
-                    var codePointCount = graphemeLength.get(ValueLayout.JAVA_INT, 0);
-                    if (codePointCount == 0) {
+                    GhosttyBuffer.ptr(graphemeBuffer, graphemeBytes);
+                    GhosttyBuffer.cap(graphemeBuffer, graphemeBytesCapacity);
+                    GhosttyBuffer.len(graphemeBuffer, 0);
+                    var graphemeResult = ghostty_vt_h.ghostty_render_state_row_cells_get(
+                            rowCells,
+                            ghostty_vt_h.GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_GRAPHEMES_UTF8(),
+                            graphemeBuffer);
+                    if (graphemeResult == ghostty_vt_h.GHOSTTY_OUT_OF_SPACE()) {
+                        graphemeBytesCapacity = Math.toIntExact(GhosttyBuffer.len(graphemeBuffer));
+                        graphemeBytes = arena.allocate(graphemeBytesCapacity);
+                        GhosttyBuffer.ptr(graphemeBuffer, graphemeBytes);
+                        GhosttyBuffer.cap(graphemeBuffer, graphemeBytesCapacity);
+                        GhosttyBuffer.len(graphemeBuffer, 0);
+                        requireGhosttySuccess(
+                                ghostty_vt_h.ghostty_render_state_row_cells_get(
+                                        rowCells,
+                                        ghostty_vt_h.GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_GRAPHEMES_UTF8(),
+                                        graphemeBuffer),
+                                "ghostty_render_state_row_cells_get(graphemes_utf8)");
+                    } else {
+                        requireGhosttySuccess(graphemeResult, "ghostty_render_state_row_cells_get(graphemes_utf8)");
+                    }
+                    var graphemeByteLength = GhosttyBuffer.len(graphemeBuffer);
+                    if (graphemeByteLength == 0) {
                         if (selected) {
                             graphics.setFill(theme.selectionColor());
                             graphics.fillRect(x, y, metrics.cellWidthPx(), metrics.cellHeightPx());
@@ -1406,17 +1422,6 @@ final class TerminalSession implements AutoCloseable {
                         continue;
                     }
 
-                    if (codePointCount > codepointsCapacity) {
-                        codepointsCapacity = codePointCount;
-                        codepoints = arena.allocate(MemoryLayout.sequenceLayout(codepointsCapacity, ValueLayout.JAVA_INT));
-                    }
-
-                    requireGhosttySuccess(
-                            ghostty_vt_h.ghostty_render_state_row_cells_get(
-                                    rowCells,
-                                    ghostty_vt_h.GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_GRAPHEMES_BUF(),
-                                    codepoints),
-                            "ghostty_render_state_row_cells_get(graphemes_buf)");
                     GhosttyStyle.size(style, GhosttyStyle.sizeof());
                     requireGhosttySuccess(
                             ghostty_vt_h.ghostty_render_state_row_cells_get(
@@ -1477,12 +1482,11 @@ final class TerminalSession implements AutoCloseable {
                     var faintFactor = faint || (textBlinking && !textBlinkVisible) ? theme.faintOpacity() : 1.0;
 
                     if (!GhosttyStyle.invisible(style) && !textBlinkHidden) {
-                        text.setLength(0);
-                        for (var i = 0; i < codePointCount; i++) {
-                            var codePoint = codepoints.get(ValueLayout.JAVA_INT, (long) i * Integer.BYTES);
-                            text.appendCodePoint(Character.isValidCodePoint(codePoint) ? codePoint : 0xFFFD);
-                        }
-                        var renderedText = text.toString();
+                        var renderedText = new String(
+                                GhosttyBuffer.ptr(graphemeBuffer)
+                                        .reinterpret(graphemeByteLength)
+                                        .toArray(ValueLayout.JAVA_BYTE),
+                                StandardCharsets.UTF_8);
                         if (cursor != null && viewportX == cursor.x() && viewportY == cursor.y()) {
                             cursorText = renderedText;
                             cursorBold = GhosttyStyle.bold(style);
@@ -1493,8 +1497,8 @@ final class TerminalSession implements AutoCloseable {
                             var baseTextColor = selected ? theme.selectionText() : toFxColor(foreground);
                             var textColor = applyOpacity(baseTextColor, faintFactor);
                             graphics.setFill(textColor);
-                            var codePoint = codepoints.get(ValueLayout.JAVA_INT, 0);
-                            if (codePointCount == 1 && codePoint >= 0x2580 && codePoint <= 0x259F) {
+                            var codePoint = renderedText.codePointAt(0);
+                            if (Character.charCount(codePoint) == renderedText.length() && codePoint >= 0x2580 && codePoint <= 0x259F) {
                                 drawBlockElement(graphics, codePoint, x, y, metrics, textColor);
                             } else {
                                 graphics.setFont(metrics.forStyle(GhosttyStyle.bold(style), GhosttyStyle.italic(style)));
