@@ -66,7 +66,6 @@ final class TerminalSession implements AutoCloseable {
     private static final int CURSOR_STYLE_BLOCK_HOLLOW = 3;
     private static final int PALETTE_SIZE = 256;
     private static final int MAX_GHOSTTY_DIMENSION = 0xFFFF;
-    private static final short CURSOR_BLINKING_MODE = 12;
     private static final long INITIAL_MAX_SCROLLBACK = 10_000_000;
     private static final double BLOCK_CURSOR_ALPHA = 0.5;
     private static final byte[] XTVERSION_BYTES = "ghosttyfx".getBytes(StandardCharsets.UTF_8);
@@ -135,6 +134,7 @@ final class TerminalSession implements AutoCloseable {
                             initialFontMetrics.cellWidthPx(),
                             initialFontMetrics.cellHeightPx()),
                     "ghostty_terminal_resize");
+            setDefaultCursorStyle();
             setCursorBlinking(true);
             var palette = GhosttyColorRgb.allocateArray(PALETTE_SIZE, arena);
             requireGhosttySuccess(
@@ -226,10 +226,30 @@ final class TerminalSession implements AutoCloseable {
     }
 
     void setCursorBlinking(boolean value) {
-        requireGhosttySuccess(
-                ghostty_vt_h.ghostty_terminal_mode_set(terminal, CURSOR_BLINKING_MODE, value),
-                "ghostty_terminal_mode_set(cursor_blinking)");
+        try (var arena = Arena.ofConfined()) {
+            var blink = arena.allocate(ValueLayout.JAVA_BOOLEAN);
+            blink.set(ValueLayout.JAVA_BOOLEAN, 0, value);
+            requireGhosttySuccess(
+                    ghostty_vt_h.ghostty_terminal_set(
+                            terminal,
+                            ghostty_vt_h.GHOSTTY_TERMINAL_OPT_DEFAULT_CURSOR_BLINK(),
+                            blink),
+                    "ghostty_terminal_set(default_cursor_blink)");
+        }
         updateRenderState();
+    }
+
+    private void setDefaultCursorStyle() {
+        try (var arena = Arena.ofConfined()) {
+            var style = arena.allocate(ValueLayout.JAVA_INT);
+            style.set(ValueLayout.JAVA_INT, 0, ghostty_vt_h.GHOSTTY_TERMINAL_CURSOR_STYLE_BLOCK());
+            requireGhosttySuccess(
+                    ghostty_vt_h.ghostty_terminal_set(
+                            terminal,
+                            ghostty_vt_h.GHOSTTY_TERMINAL_OPT_DEFAULT_CURSOR_STYLE(),
+                            style),
+                    "ghostty_terminal_set(default_cursor_style)");
+        }
     }
 
     private void writePty(MemorySegment terminal, MemorySegment userdata, MemorySegment data, long length) {
