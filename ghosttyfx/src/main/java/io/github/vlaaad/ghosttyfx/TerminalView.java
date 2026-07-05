@@ -82,12 +82,13 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
     private final TerminalSession terminalSession;
     private final PtySession ptySession;
     private final AnimationTimer processOutputDrain;
+    private final AnimationTimer selectionAutoscroll;
     private final Timeline cursorBlinkTimeline;
     private final Timeline textBlinkTimeline;
     private final Timeline promptNavigationHighlightTimeline;
     private KeyInput.State keyInputState = KeyInput.initialState();
     private MouseInput.State mouseInputState = MouseInput.initialState();
-    private Selection selection = Selection.empty();
+    private SelectionDrag selectionDrag;
     private ActiveLink hoveredLink;
     private int promptNavigationRow = -1;
     private int promptNavigationHighlightRow = -1;
@@ -172,6 +173,12 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
         title = new ReadOnlyStringWrapper(this, "title", "Terminal");
         ptySession = new PtySession(Objects.requireNonNull(terminalFactory, "terminalFactory"), INITIAL_COLUMNS, INITIAL_ROWS);
         processOutputDrain = new ProcessOutputDrain(this);
+        selectionAutoscroll = new AnimationTimer() {
+            @Override
+            public void handle(long now) {
+                handleSelectionAutoscroll();
+            }
+        };
         cursorBlinkTimeline = new Timeline(new KeyFrame(BLINK_INTERVAL, _ -> tickCursorBlink()));
         cursorBlinkTimeline.setCycleCount(Animation.INDEFINITE);
         textBlinkTimeline = new Timeline(new KeyFrame(BLINK_INTERVAL, _ -> tickTextBlink()));
@@ -575,6 +582,8 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
             var nextKeyInputState = KeyInput.onFocusLost(keyInputState);
             var nextMouseInputState = MouseInput.onFocusLost(mouseInputState);
             clearHover(false);
+            terminalSession.resetSelectionGesture();
+            stopSelectionAutoscroll();
             if (!nextKeyInputState.equals(keyInputState) || !nextMouseInputState.equals(mouseInputState)) {
                 keyInputState = nextKeyInputState;
                 mouseInputState = nextMouseInputState;
@@ -646,6 +655,8 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
             setScrollbarHovered(false);
             clearHover(true);
             clearSelection();
+            terminalSession.resetSelectionGesture();
+            stopSelectionAutoscroll();
             mouseInputState = mouseInputState.withPressGesture(null);
             writeReportedMousePress(event);
             return;
@@ -659,27 +670,20 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
         if (hit == null) {
             mouseInputState = mouseInputState.withPressGesture(null);
             clearHover(true);
+            terminalSession.resetSelectionGesture();
+            stopSelectionAutoscroll();
             return;
         }
 
-        var clickCount = Math.clamp(event.getClickCount(), 1, 4);
-        var rectangle = isRectangleSelection(event);
         mouseInputState = mouseInputState.withPressGesture(new MouseInput.PressGesture(
                 TerminalSession.MouseButton.LEFT,
                 hit.screenPoint(),
-                hit.cellOffsetX(),
-                clickCount,
-                rectangle,
-                false,
                 activeLink(hit)));
         clearHover(false);
-        switch (clickCount) {
-            case 1 -> clearSelection();
-            case 2 -> applySelection(terminalSession.wordSelection(hit.screenPoint()));
-            case 3 -> applySelection(terminalSession.lineSelection(hit.screenPoint()));
-            case 4 -> applySelection(terminalSession.regionSelection(hit.screenPoint()));
-            default -> throw new IllegalStateException("unsupported click count: " + clickCount);
-        }
+        selectionDrag = null;
+        terminalSession.selectionGesturePress(hit, event.getX(), event.getY(), fontMetrics.get());
+        updateSelectionAutoscroll();
+        redraw();
     }
 
     private void handleMouseDragged(MouseEvent event) {
@@ -707,30 +711,18 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
             return;
         }
 
-        var hit = contentHit(event);
+        var hit = selectionHit(event);
         if (hit == null) {
             clearHover(true);
             return;
         }
 
-        var movedOffOrigin = !pressGesture.anchor().equals(hit.screenPoint());
-        pressGesture = pressGesture.withDrag(movedOffOrigin || !selection.isEmpty());
-        mouseInputState = mouseInputState.withPressGesture(pressGesture);
         clearHover(false);
-        switch (pressGesture.clickCount()) {
-            case 1 -> applySelection(MouseInput.selectionForDrag(
-                    pressGesture.anchor(),
-                    hit.screenPoint(),
-                    pressGesture.anchorCellOffsetX(),
-                    hit.cellOffsetX(),
-                    pressGesture.rectangleSelection(),
-                    terminalSession.columnCount(),
-                    fontMetrics.get().cellWidthPx()));
-            case 2 -> applyWordDragSelection(pressGesture, hit.screenPoint());
-            case 3 -> applyLineDragSelection(pressGesture, hit.screenPoint());
-            case 4 -> applyRegionDragSelection(pressGesture, hit.screenPoint());
-            default -> throw new IllegalStateException("unsupported click count: " + pressGesture.clickCount());
-        }
+        var rectangle = isRectangleSelection(event);
+        selectionDrag = new SelectionDrag(event.getX(), event.getY(), rectangle);
+        terminalSession.selectionGestureDrag(hit, event.getX(), event.getY(), rectangle, fontMetrics.get(), getHeight());
+        updateSelectionAutoscroll();
+        redraw();
     }
 
     private void handleMouseMoved(MouseEvent event) {
@@ -754,6 +746,8 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
             clearHover(true);
             writeReportedMouseRelease(event);
             mouseInputState = mouseInputState.withPressGesture(null);
+            terminalSession.resetSelectionGesture();
+            stopSelectionAutoscroll();
             return;
         }
 
@@ -763,14 +757,16 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
 
         var releasedGesture = mouseInputState.pressGesture();
         mouseInputState = mouseInputState.withPressGesture(null);
+        stopSelectionAutoscroll();
         if (releasedGesture == null) {
             refreshHover(event);
             return;
         }
 
         var hit = contentHit(event);
-        if (releasedGesture.clickCount() == 1
-                && !releasedGesture.dragged()
+        terminalSession.selectionGestureRelease(hit);
+        if (terminalSession.selectionGestureClickCount() == 1
+                && !terminalSession.selectionGestureDragged()
                 && hit != null
                 && releasedGesture.link() != null
                 && releasedGesture.anchor().equals(hit.screenPoint())
@@ -1049,6 +1045,16 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
                 scrollbarReservedWidthPx());
     }
 
+    private TerminalSession.CellHit selectionHit(MouseEvent event) {
+        return terminalSession.clampedHitTest(
+                event.getX(),
+                event.getY(),
+                getWidth(),
+                getHeight(),
+                fontMetrics.get(),
+                scrollbarReservedWidthPx());
+    }
+
     private ActiveLink activeLink(TerminalSession.CellHit hit) {
         if (hit.hyperlinkUri() != null && !hit.hyperlinkUri().isEmpty()) {
             var selection = terminalSession.hyperlinkSelection(hit.screenPoint(), hit.hyperlinkUri());
@@ -1129,53 +1135,44 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
         }
     }
 
-    private void applySelection(Selection nextSelection) {
-        if (!selection.equals(nextSelection)) {
-            if (!nextSelection.isEmpty()) {
-                clearHover(false);
-            }
-            selection = nextSelection;
-            redraw();
-        }
-    }
-
-    private void applyWordDragSelection(MouseInput.PressGesture pressGesture, Selection.ScreenPoint dragPoint) {
-        var anchorWord = terminalSession.wordSelection(pressGesture.anchor());
-        var currentWord = terminalSession.wordSelectionBetween(dragPoint, pressGesture.anchor());
-        if (anchorWord.isEmpty() || currentWord.isEmpty()) {
-            applySelection(Selection.empty());
+    private void updateSelectionAutoscroll() {
+        if (selectionDrag == null || terminalSession.selectionGestureAutoscroll() == TerminalSession.SelectionAutoscroll.NONE) {
+            selectionAutoscroll.stop();
             return;
         }
 
-        applySelection(compareScreenPoints(dragPoint, pressGesture.anchor()) < 0
-                ? Selection.linear(currentWord.normalized().from(), anchorWord.normalized().to())
-                : Selection.linear(anchorWord.normalized().from(), currentWord.normalized().to()));
+        selectionAutoscroll.start();
     }
 
-    private void applyLineDragSelection(MouseInput.PressGesture pressGesture, Selection.ScreenPoint dragPoint) {
-        var anchorLine = terminalSession.lineSelection(pressGesture.anchor());
-        var currentLine = terminalSession.lineSelection(dragPoint);
-        if (anchorLine.isEmpty() || currentLine.isEmpty()) {
-            applySelection(Selection.empty());
+    private void stopSelectionAutoscroll() {
+        selectionDrag = null;
+        selectionAutoscroll.stop();
+    }
+
+    private void handleSelectionAutoscroll() {
+        var drag = selectionDrag;
+        if (drag == null) {
+            selectionAutoscroll.stop();
             return;
         }
 
-        applySelection(compareScreenPoints(dragPoint, pressGesture.anchor()) < 0
-                ? Selection.linear(currentLine.normalized().from(), anchorLine.normalized().to())
-                : Selection.linear(anchorLine.normalized().from(), currentLine.normalized().to()));
-    }
-
-    private void applyRegionDragSelection(MouseInput.PressGesture pressGesture, Selection.ScreenPoint dragPoint) {
-        var anchorRegion = terminalSession.regionSelection(pressGesture.anchor());
-        var currentRegion = terminalSession.regionSelection(dragPoint);
-        if (anchorRegion.isEmpty() || currentRegion.isEmpty()) {
-            applySelection(Selection.empty());
+        var hit = terminalSession.clampedHitTest(
+                drag.x(),
+                drag.y(),
+                getWidth(),
+                getHeight(),
+                fontMetrics.get(),
+                scrollbarReservedWidthPx());
+        if (hit == null) {
+            selectionAutoscroll.stop();
             return;
         }
 
-        applySelection(compareScreenPoints(dragPoint, pressGesture.anchor()) < 0
-                ? Selection.linear(currentRegion.normalized().from(), anchorRegion.normalized().to())
-                : Selection.linear(anchorRegion.normalized().from(), currentRegion.normalized().to()));
+        terminalSession.selectionGestureAutoscrollTick(hit, drag.x(), drag.y(), drag.rectangle(), fontMetrics.get(), getHeight());
+        if (terminalSession.selectionGestureAutoscroll() == TerminalSession.SelectionAutoscroll.NONE) {
+            selectionAutoscroll.stop();
+        }
+        redraw();
     }
 
     private void writeReportedMousePress(MouseEvent event) {
@@ -1249,11 +1246,6 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
                 : event.isAltDown() && (event.isControlDown() || event.isMetaDown());
     }
 
-    private static int compareScreenPoints(Selection.ScreenPoint left, Selection.ScreenPoint right) {
-        var byY = Integer.compare(left.y(), right.y());
-        return byY != 0 ? byY : Integer.compare(left.x(), right.x());
-    }
-
     private static void openHyperlink(String hyperlinkUri) {
         try {
             if (Desktop.isDesktopSupported() && Desktop.getDesktop().isSupported(Desktop.Action.BROWSE)) {
@@ -1293,7 +1285,7 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
     ///
     /// @return `true` if there was a selection to copy; otherwise `false`
     public boolean copySelection() {
-        if (selection.isEmpty()) {
+        if (!terminalSession.hasSelection()) {
             return false;
         }
 
@@ -1349,12 +1341,9 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
     ///
     /// @return `true`
     public boolean selectAll() {
-        var nextSelection = terminalSession.selectAllSelection();
-        if (!nextSelection.equals(selection)) {
-            clearHover(false);
-            selection = nextSelection;
-            redraw();
-        }
+        clearHover(false);
+        terminalSession.selectAll();
+        redraw();
         return true;
     }
 
@@ -1362,94 +1351,70 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
     ///
     /// @return `true` if there was a selection to extend; otherwise `false`
     public boolean extendSelectionLeft() {
-        if (selection.isEmpty()) {
-            return false;
-        }
-        if (terminalSession.columnCount() <= 0) {
-            return extendSelectionTo(selection.to());
-        }
-        if (selection.to().x() > 0) {
-            return extendSelectionTo(new Selection.ScreenPoint(selection.to().x() - 1, selection.to().y()));
-        }
-        if (selection.to().y() > 0) {
-            return extendSelectionTo(new Selection.ScreenPoint(terminalSession.columnCount() - 1, selection.to().y() - 1));
-        }
-        return extendSelectionTo(selection.to());
+        return adjustSelection(ghostty_vt_h.GHOSTTY_SELECTION_ADJUST_LEFT());
     }
 
     /// Extends the current selection one cell to the right.
     ///
     /// @return `true` if there was a selection to extend; otherwise `false`
     public boolean extendSelectionRight() {
-        if (selection.isEmpty()) {
-            return false;
-        }
-        if (terminalSession.columnCount() <= 0 || terminalSession.totalRowCount() <= 0) {
-            return extendSelectionTo(selection.to());
-        }
-        if (selection.to().x() + 1 < terminalSession.columnCount()) {
-            return extendSelectionTo(new Selection.ScreenPoint(selection.to().x() + 1, selection.to().y()));
-        }
-        if (selection.to().y() + 1 < terminalSession.totalRowCount()) {
-            return extendSelectionTo(new Selection.ScreenPoint(0, selection.to().y() + 1));
-        }
-        return extendSelectionTo(selection.to());
+        return adjustSelection(ghostty_vt_h.GHOSTTY_SELECTION_ADJUST_RIGHT());
     }
 
     /// Extends the current selection one row up.
     ///
     /// @return `true` if there was a selection to extend; otherwise `false`
     public boolean extendSelectionUp() {
-        return !selection.isEmpty() && extendSelectionTo(moveScreenPointRows(selection.to(), terminalSession.columnCount(), terminalSession.totalRowCount(), -1));
+        return adjustSelection(ghostty_vt_h.GHOSTTY_SELECTION_ADJUST_UP());
     }
 
     /// Extends the current selection one row down.
     ///
     /// @return `true` if there was a selection to extend; otherwise `false`
     public boolean extendSelectionDown() {
-        return !selection.isEmpty() && extendSelectionTo(moveScreenPointRows(selection.to(), terminalSession.columnCount(), terminalSession.totalRowCount(), 1));
+        return adjustSelection(ghostty_vt_h.GHOSTTY_SELECTION_ADJUST_DOWN());
     }
 
     /// Extends the current selection one viewport page up.
     ///
     /// @return `true` if there was a selection to extend; otherwise `false`
     public boolean extendSelectionPageUp() {
-        return !selection.isEmpty() && extendSelectionTo(moveScreenPointRows(selection.to(), terminalSession.columnCount(), terminalSession.totalRowCount(), -viewportRowCount()));
+        return adjustSelection(ghostty_vt_h.GHOSTTY_SELECTION_ADJUST_PAGE_UP());
     }
 
     /// Extends the current selection one viewport page down.
     ///
     /// @return `true` if there was a selection to extend; otherwise `false`
     public boolean extendSelectionPageDown() {
-        return !selection.isEmpty() && extendSelectionTo(moveScreenPointRows(selection.to(), terminalSession.columnCount(), terminalSession.totalRowCount(), viewportRowCount()));
+        return adjustSelection(ghostty_vt_h.GHOSTTY_SELECTION_ADJUST_PAGE_DOWN());
     }
 
     /// Extends the current selection to the beginning of its focus row.
     ///
     /// @return `true` if there was a selection to extend; otherwise `false`
     public boolean extendSelectionHome() {
-        return !selection.isEmpty() && extendSelectionTo(new Selection.ScreenPoint(0, selection.to().y()));
+        return adjustSelection(ghostty_vt_h.GHOSTTY_SELECTION_ADJUST_HOME());
     }
 
     /// Extends the current selection to the end of its focus row.
     ///
     /// @return `true` if there was a selection to extend; otherwise `false`
     public boolean extendSelectionEnd() {
-        return !selection.isEmpty() && extendSelectionTo(new Selection.ScreenPoint(Math.max(0, terminalSession.columnCount() - 1), selection.to().y()));
+        return adjustSelection(ghostty_vt_h.GHOSTTY_SELECTION_ADJUST_END());
     }
 
     /// Scrolls the viewport one page up.
     ///
     /// @return `true` if scrolling was available; otherwise `false`
     public boolean scrollViewportPageUp() {
-        return scrollViewportWithoutSelection(-viewportRowCount());
+        return scrollViewportByRows(-viewportRowCount());
     }
 
     /// Scrolls the viewport one page down.
     ///
     /// @return `true` if scrolling was available; otherwise `false`
     public boolean scrollViewportPageDown() {
-        return scrollViewportWithoutSelection(viewportRowCount());
+        return scrollViewportByRows(viewportRowCount());
     }
 
     /// Scrolls the viewport to the top of the scrollback.
@@ -1505,7 +1470,7 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
             return true;
         }
 
-        var selected = selection.isEmpty() ? "" : selectedText();
+        var selected = terminalSession.hasSelection() ? selectedText() : "";
         clearSelection();
         searchUi.open(selected);
         return true;
@@ -1550,7 +1515,7 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
         return searchUi.selectedMatch();
     }
 
-    private boolean scrollViewportWithoutSelection(long deltaRows) {
+    private boolean scrollViewportByRows(long deltaRows) {
         var scrollbar = scrollbarInfo();
         if (!viewportScrollAvailable(scrollbar) || deltaRows == 0) {
             return false;
@@ -1567,7 +1532,7 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
 
     private boolean scrollViewportToPrompt(int direction) {
         var scrollbar = scrollbarInfo();
-        if (selection.isEmpty() && scrollbar != null && scrollbar.visible() > 0) {
+        if (scrollbar != null && scrollbar.visible() > 0) {
             var anchor = promptNavigationAnchor(direction, scrollbar);
             if (anchor < 0 && direction < 0) {
                 return false;
@@ -1676,15 +1641,29 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
     }
 
     private boolean viewportScrollAvailable(TerminalSession.ScrollbarInfo scrollbar) {
-        return selection.isEmpty() && scrollbar != null && scrollbar.scrollable();
+        return scrollbar != null && scrollbar.scrollable();
     }
 
-    private boolean extendSelectionTo(Selection.ScreenPoint nextFocus) {
-        var anchor = selection.from();
-        applySelection(new Selection(anchor, nextFocus, selection.rectangle()));
+    private boolean adjustSelection(int adjustment) {
+        if (!terminalSession.adjustSelection(adjustment)) {
+            return false;
+        }
+
+        clearHover(false);
+        scrollSelectionFocusIntoView();
+        redraw();
+        return true;
+    }
+
+    private void scrollSelectionFocusIntoView() {
+        var nextFocus = terminalSession.selectionFocus();
+        if (nextFocus == null) {
+            return;
+        }
+
         var scrollbar = scrollbarInfo();
         if (scrollbar == null || scrollbar.visible() <= 0) {
-            return true;
+            return;
         }
 
         var viewportTop = scrollbar.offset();
@@ -1694,22 +1673,13 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
         } else if (nextFocus.y() > viewportBottom) {
             scrollViewportTo(nextFocus.y() - scrollbar.visible() + 1);
         }
-        return true;
-    }
-
-    private static Selection.ScreenPoint moveScreenPointRows(Selection.ScreenPoint point, int columns, int rows, int delta) {
-        if (columns <= 0 || rows <= 0) {
-            return point;
-        }
-        return new Selection.ScreenPoint(
-                Math.clamp(point.x(), 0, columns - 1),
-                Math.clamp(point.y() + delta, 0, rows - 1));
     }
 
     private void clearSelection() {
-        if (!selection.isEmpty()) {
+        if (terminalSession.clearSelection()) {
             clearHover(false);
-            selection = Selection.empty();
+            terminalSession.resetSelectionGesture();
+            stopSelectionAutoscroll();
             redraw();
         }
     }
@@ -1720,11 +1690,10 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
 
     private boolean applyTransition(KeyInput.Transition transition) {
         var previousKeyInputState = keyInputState;
-        var previousSelection = selection;
+        var hadSelection = terminalSession.hasSelection();
         keyInputState = transition.state();
         if (transition.clearSelection()) {
-            clearHover(false);
-            selection = Selection.empty();
+            clearSelection();
         }
 
         var wroteToPty = false;
@@ -1754,16 +1723,16 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
 
         var redraw = transition.redraw()
                 || wroteToPty
-                || !previousSelection.equals(selection)
+                || hadSelection != terminalSession.hasSelection()
                 || !previousKeyInputState.preedit().equals(keyInputState.preedit());
         if (redraw) {
             redraw();
         }
-        return wroteToPty || redraw || !previousKeyInputState.equals(keyInputState) || !previousSelection.equals(selection);
+        return wroteToPty || redraw || !previousKeyInputState.equals(keyInputState) || hadSelection != terminalSession.hasSelection();
     }
 
     private String selectedText() {
-        return terminalSession.selectedText(selection);
+        return terminalSession.selectedText();
     }
 
     private KeyInput.KeySnapshot snapshot(KeyEvent event) {
@@ -1784,7 +1753,6 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
                 height,
                 fontMetrics.get(),
                 keyInputState.preedit(),
-                selection,
                 hoveredLink == null ? Selection.empty() : hoveredLink.selection(),
                 getLinkMatchers(),
                 searchUi.visible() ? searchUi.result() : TerminalSession.SearchResult.empty(),
@@ -2003,6 +1971,10 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
     }
 
     static record CursorLocation(int cellX, int cellY, double pixelX, double pixelY) {
+
+    }
+
+    private record SelectionDrag(double x, double y, boolean rectangle) {
 
     }
 

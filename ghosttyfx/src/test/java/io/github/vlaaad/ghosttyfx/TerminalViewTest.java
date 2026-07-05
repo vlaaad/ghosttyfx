@@ -47,7 +47,6 @@ import javafx.scene.control.TextField;
 import javafx.scene.layout.HBox;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.BeforeAll;
-import org.junit.jupiter.api.Assumptions;
 import javafx.scene.paint.Color;
 import javafx.scene.text.Font;
 
@@ -468,105 +467,12 @@ final class TerminalViewTest {
     }
 
     @Test
-    void quadrupleClickSelectsSemanticOutputRegion() throws Exception {
-        var output = "\u001B]133;A\u0007> \u001B]133;B\u0007echo one\r\n"
-                + "\u001B]133;C\u0007one\r\n"
-                + "two\r\n"
-                + "\u001B]133;D;0\u0007\u001B]133;A\u0007> \u001B]133;B\u0007echo next";
-        try (var view = createView(output)) {
-            awaitText(view, "echo next");
+    void doubleClickSelectsWord() throws Exception {
+        try (var view = createView("alpha beta")) {
+            awaitText(view, "alpha beta");
             runOnFxThread(() -> {
-                clickCell(view, 0, 1, 4);
-                assertEquals("one\ntwo", view.getInputMethodRequests().getSelectedText());
-                return null;
-            });
-        }
-    }
-
-    @Test
-    void quadrupleClickSelectsSemanticPromptAndInputRegion() throws Exception {
-        var output = "\u001B]133;A\u0007> \u001B]133;B\u0007echo one\r\n"
-                + "\u001B]133;C\u0007one";
-        try (var view = createView(output)) {
-            awaitText(view, "one");
-            runOnFxThread(() -> {
-                clickCell(view, 1, 0, 4);
-                assertEquals("> echo one", view.getInputMethodRequests().getSelectedText());
-                return null;
-            });
-        }
-    }
-
-    @Test
-    void quadrupleClickSelectsClickedInputRegionWhenOutputStartMarkerIsMissing() throws Exception {
-        var output = "\u001B]133;A\u0007> \u001B]133;B\u0007echo one\r\n"
-                + "\u001B]133;B\u0007one\r\n"
-                + "\u001B]133;D;0\u0007\u001B]133;A\u0007> \u001B]133;B\u0007echo next";
-        try (var view = createView(output)) {
-            awaitText(view, "echo next");
-            runOnFxThread(() -> {
-                clickCell(view, 0, 1, 4);
-                assertEquals("> echo one\none", view.getInputMethodRequests().getSelectedText());
-                return null;
-            });
-        }
-    }
-
-    @Test
-    void quadrupleClickSelectsOutputRegionWithoutPriorPromptMarker() throws Exception {
-        var output = "one\r\ntwo";
-        try (var view = createView(output)) {
-            awaitText(view, "two");
-            runOnFxThread(() -> {
-                clickCell(view, 0, 1, 4);
-                assertEquals("one\ntwo", view.getInputMethodRequests().getSelectedText());
-                return null;
-            });
-        }
-    }
-
-    @Test
-    void quadrupleClickSelectsRealCmdDirOutput() throws Exception {
-        Assumptions.assumeTrue(isWindows());
-        var tempDirectory = Files.createTempDirectory("ghosttyfx-cmd-region-test-");
-        Files.writeString(tempDirectory.resolve("ghosttyfx-region-marker.txt"), "marker");
-        var executable = findExecutable(
-                List.of("cmd.exe"),
-                List.of(Path.of(System.getenv().getOrDefault("SystemRoot", "C:\\Windows"), "System32", "cmd.exe")));
-        var launcher = Shell.integrate(List.of(executable.toString()), Map.of("PROMPT", "$G"));
-        try (var view = createPtyView(launcher, tempDirectory)) {
-            runOnFxThread(() -> {
-                attachToScene(view);
-                return null;
-            });
-            awaitText(view, ">");
-            runOnFxThread(() -> {
-                view.sendText("dir ghosttyfx-region-marker.txt\r\n");
-                return null;
-            });
-
-            var rowAndColumn = await("cmd dir output row", START_TIMEOUT, () -> runOnFxThread(() -> {
-                fireTerminalShortcut(view, selectAllTerminalShortcut());
-                var text = view.getInputMethodRequests().getSelectedText();
-                if (text == null || !text.contains("ghosttyfx-region-marker.txt")) {
-                    return Optional.empty();
-                }
-                var row = 0;
-                for (var line : text.split("\\R", -1)) {
-                    var column = line.indexOf("ghosttyfx-region-marker.txt");
-                    if (column >= 0) {
-                        return Optional.of(new Selection.ScreenPoint(column, row));
-                    }
-                    row++;
-                }
-                return Optional.empty();
-            }));
-
-            runOnFxThread(() -> {
-                clickCell(view, 0, rowAndColumn.y(), 4);
-                var text = view.getInputMethodRequests().getSelectedText();
-                assertTrue(text != null && text.contains("ghosttyfx-region-marker.txt"), "Expected cmd dir output to be selected, got: " + text);
-                assertTrue(text.contains("dir ghosttyfx-region-marker.txt"), "Expected cmd region selection to include command context, got: " + text);
+                clickCell(view, 1, 0, 2);
+                assertEquals("alpha", view.getInputMethodRequests().getSelectedText());
                 return null;
             });
         }
@@ -715,6 +621,32 @@ final class TerminalViewTest {
     }
 
     @Test
+    void viewportScrollTerminalShortcutsWorkWithSelection() throws Exception {
+        var tempDirectory = Files.createTempDirectory("ghosttyfx-viewport-scroll-selection-test-");
+        var pidFile = tempDirectory.resolve("shell.pid");
+        var shell = discoverOutputShell(pidFile, lineOutput(80));
+
+        try (var view = createView(shell, tempDirectory)) {
+            await("scrollable terminal output", START_TIMEOUT, () -> runOnFxThread(() ->
+                    view.scrollViewportToTop() ? Optional.of(Boolean.TRUE) : Optional.empty()));
+
+            runOnFxThread(() -> {
+                dragSelection(view, 0, 5);
+                assertEquals("line-0", view.getInputMethodRequests().getSelectedText());
+
+                assertTrue(view.scrollViewportPageDown());
+                assertTrue(view.scrollViewportToBottom());
+                assertEquals("line-0", view.getInputMethodRequests().getSelectedText());
+
+                assertTrue(view.scrollViewportPageUp());
+                assertTrue(view.scrollViewportToTop());
+                assertEquals("line-0", view.getInputMethodRequests().getSelectedText());
+                return null;
+            });
+        }
+    }
+
+    @Test
     void promptNavigationReportsUnavailableWithoutSemanticPrompts() throws Exception {
         var tempDirectory = Files.createTempDirectory("ghosttyfx-prompt-navigation-unavailable-test-");
         var pidFile = tempDirectory.resolve("shell.pid");
@@ -727,6 +659,23 @@ final class TerminalViewTest {
             runOnFxThread(() -> {
                 assertFalse(view.scrollViewportToPreviousPrompt());
                 assertFalse(view.scrollViewportToNextPrompt());
+                return null;
+            });
+        }
+    }
+
+    @Test
+    void promptNavigationWorksWithSelection() throws Exception {
+        try (var view = createView(promptOutput(40))) {
+            await("terminal prompt output", START_TIMEOUT, () -> runOnFxThread(() ->
+                    view.scrollViewportToNextPrompt() ? Optional.of(Boolean.TRUE) : Optional.empty()));
+
+            runOnFxThread(() -> {
+                dragSelection(view, 0, 1);
+                assertFalse(view.getInputMethodRequests().getSelectedText().isEmpty());
+                assertTrue(view.scrollViewportToNextPrompt());
+                assertTrue(view.scrollViewportToPreviousPrompt());
+                assertFalse(view.getInputMethodRequests().getSelectedText().isEmpty());
                 return null;
             });
         }
@@ -1229,8 +1178,10 @@ final class TerminalViewTest {
     private static void clickCell(TerminalView view, int column, int row, int clickCount) {
         var x = cellX(view, column, 0.5);
         var y = cellY(view, row, 0.5);
-        Event.fireEvent(view, mouseEvent(MouseEvent.MOUSE_PRESSED, x, y, true, clickCount));
-        Event.fireEvent(view, mouseEvent(MouseEvent.MOUSE_RELEASED, x, y, false, clickCount));
+        for (var i = 1; i <= clickCount; i++) {
+            Event.fireEvent(view, mouseEvent(MouseEvent.MOUSE_PRESSED, x, y, true, i));
+            Event.fireEvent(view, mouseEvent(MouseEvent.MOUSE_RELEASED, x, y, false, i));
+        }
     }
 
     private static void moveToCell(TerminalView view, int column, int row) {

@@ -1,10 +1,14 @@
 package io.github.vlaaad.ghosttyfx;
 
 import java.lang.foreign.Arena;
+import java.lang.foreign.FunctionDescriptor;
+import java.lang.foreign.Linker;
 import java.lang.foreign.MemoryLayout;
 import java.lang.foreign.MemorySegment;
 import java.lang.foreign.SegmentAllocator;
+import java.lang.foreign.SymbolLookup;
 import java.lang.foreign.ValueLayout;
+import java.lang.invoke.MethodHandle;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -19,7 +23,6 @@ import io.github.vlaaad.ghostty.bindings.GhosttyDeviceAttributes;
 import io.github.vlaaad.ghostty.bindings.GhosttyDeviceAttributesPrimary;
 import io.github.vlaaad.ghostty.bindings.GhosttyDeviceAttributesSecondary;
 import io.github.vlaaad.ghostty.bindings.GhosttyDeviceAttributesTertiary;
-import io.github.vlaaad.ghostty.bindings.GhosttyFormatterTerminalOptions;
 import io.github.vlaaad.ghostty.bindings.GhosttyGridRef;
 import io.github.vlaaad.ghostty.bindings.GhosttyMouseEncoderSize;
 import io.github.vlaaad.ghostty.bindings.GhosttyMousePosition;
@@ -28,11 +31,13 @@ import io.github.vlaaad.ghostty.bindings.GhosttyPointCoordinate;
 import io.github.vlaaad.ghostty.bindings.GhosttyPointValue;
 import io.github.vlaaad.ghostty.bindings.GhosttyRenderStateColors;
 import io.github.vlaaad.ghostty.bindings.GhosttySelection;
+import io.github.vlaaad.ghostty.bindings.GhosttySelectionGestureGeometry;
 import io.github.vlaaad.ghostty.bindings.GhosttySizeReportSize;
 import io.github.vlaaad.ghostty.bindings.GhosttyString;
 import io.github.vlaaad.ghostty.bindings.GhosttyStyle;
 import io.github.vlaaad.ghostty.bindings.GhosttyStyleColor;
 import io.github.vlaaad.ghostty.bindings.GhosttyStyleColorValue;
+import io.github.vlaaad.ghostty.bindings.GhosttySurfacePosition;
 import io.github.vlaaad.ghostty.bindings.GhosttyTerminalBellFn;
 import io.github.vlaaad.ghostty.bindings.GhosttyTerminalColorSchemeFn;
 import io.github.vlaaad.ghostty.bindings.GhosttyTerminalDeviceAttributesFn;
@@ -40,6 +45,7 @@ import io.github.vlaaad.ghostty.bindings.GhosttyTerminalOptions;
 import io.github.vlaaad.ghostty.bindings.GhosttyTerminalScrollViewport;
 import io.github.vlaaad.ghostty.bindings.GhosttyTerminalScrollViewportValue;
 import io.github.vlaaad.ghostty.bindings.GhosttyTerminalScrollbar;
+import io.github.vlaaad.ghostty.bindings.GhosttyTerminalSelectionFormatOptions;
 import io.github.vlaaad.ghostty.bindings.GhosttyTerminalSizeFn;
 import io.github.vlaaad.ghostty.bindings.GhosttyTerminalTitleChangedFn;
 import io.github.vlaaad.ghostty.bindings.GhosttyTerminalWritePtyFn;
@@ -64,6 +70,7 @@ final class TerminalSession implements AutoCloseable {
     private static final long INITIAL_MAX_SCROLLBACK = 10_000_000;
     private static final double BLOCK_CURSOR_ALPHA = 0.5;
     private static final byte[] XTVERSION_BYTES = "ghosttyfx".getBytes(StandardCharsets.UTF_8);
+    private static final long SELECTION_REPEAT_INTERVAL_NS = 500_000_000L;
 
     private final AtomicBoolean closed = new AtomicBoolean();
     private final Arena callbackArena = Arena.ofShared();
@@ -75,6 +82,7 @@ final class TerminalSession implements AutoCloseable {
     private final MemorySegment keyEvent;
     private final MemorySegment mouseEncoder;
     private final MemorySegment mouseEvent;
+    private final MemorySegment selectionGesture;
     private final MemorySegment xtversionString;
     private final ArrayList<Color> builtInPalette = new ArrayList<>(PALETTE_SIZE);
     private final Consumer<byte[]> terminalInput;
@@ -117,6 +125,7 @@ final class TerminalSession implements AutoCloseable {
             keyEvent = newAddress(arena, "ghostty_key_event_new", ghostty_vt_h::ghostty_key_event_new);
             mouseEncoder = newAddress(arena, "ghostty_mouse_encoder_new", ghostty_vt_h::ghostty_mouse_encoder_new);
             mouseEvent = newAddress(arena, "ghostty_mouse_event_new", ghostty_vt_h::ghostty_mouse_event_new);
+            selectionGesture = newAddress(arena, "ghostty_selection_gesture_new", ghostty_vt_h::ghostty_selection_gesture_new);
 
             requireGhosttySuccess(
                     ghostty_vt_h.ghostty_terminal_resize(
@@ -310,6 +319,7 @@ final class TerminalSession implements AutoCloseable {
         }
 
         try (callbackArena) {
+            ghostty_vt_h.ghostty_selection_gesture_free(selectionGesture, terminal);
             ghostty_vt_h.ghostty_mouse_event_free(mouseEvent);
             ghostty_vt_h.ghostty_mouse_encoder_free(mouseEncoder);
             ghostty_vt_h.ghostty_key_event_free(keyEvent);
@@ -608,52 +618,250 @@ final class TerminalSession implements AutoCloseable {
         }
     }
 
-    String selectedText(Selection selection) {
-        if (selection.isEmpty()) {
-            return "";
-        }
+    boolean hasSelection() {
         try (var arena = Arena.ofConfined()) {
-            var formatterSelection = formatterSelection(arena, selection);
-            if (formatterSelection.address() == 0) {
+            return !activeSelection(arena).equals(MemorySegment.NULL);
+        }
+    }
+
+    boolean clearSelection() {
+        if (!hasSelection()) {
+            return false;
+        }
+
+        setActiveSelection(MemorySegment.NULL);
+        updateRenderState();
+        return true;
+    }
+
+    boolean selectAll() {
+        try (var arena = Arena.ofConfined()) {
+            var selection = GhosttySelection.allocate(arena);
+            GhosttySelection.size(selection, GhosttySelection.sizeof());
+            var result = ghostty_vt_h.ghostty_terminal_select_all(terminal, selection);
+            if (result == ghostty_vt_h.GHOSTTY_NO_VALUE()) {
+                setActiveSelection(MemorySegment.NULL);
+                updateRenderState();
+                return false;
+            }
+
+            requireGhosttySuccess(result, "ghostty_terminal_select_all");
+            setActiveSelection(selection);
+        }
+        updateRenderState();
+        return true;
+    }
+
+    boolean adjustSelection(int adjustment) {
+        try (var arena = Arena.ofConfined()) {
+            var selection = activeSelection(arena);
+            if (selection.equals(MemorySegment.NULL)) {
+                return false;
+            }
+
+            requireGhosttySuccess(
+                    ghostty_vt_h.ghostty_terminal_selection_adjust(terminal, selection, adjustment),
+                    "ghostty_terminal_selection_adjust");
+            setActiveSelection(selection);
+        }
+        updateRenderState();
+        return true;
+    }
+
+    Selection.ScreenPoint selectionFocus() {
+        try (var arena = Arena.ofConfined()) {
+            var selection = activeSelection(arena);
+            if (selection.equals(MemorySegment.NULL)) {
+                return null;
+            }
+
+            return screenPoint(GhosttySelection.end(selection), arena);
+        }
+    }
+
+    String selectedText() {
+        try (var arena = Arena.ofConfined()) {
+            var options = GhosttyTerminalSelectionFormatOptions.allocate(arena);
+            GhosttyTerminalSelectionFormatOptions.size(options, GhosttyTerminalSelectionFormatOptions.sizeof());
+            GhosttyTerminalSelectionFormatOptions.emit(options, ghostty_vt_h.GHOSTTY_FORMATTER_FORMAT_PLAIN());
+            GhosttyTerminalSelectionFormatOptions.unwrap(options, true);
+            GhosttyTerminalSelectionFormatOptions.trim(options, true);
+            GhosttyTerminalSelectionFormatOptions.selection(options, MemorySegment.NULL);
+
+            var outputPointer = arena.allocate(ValueLayout.ADDRESS);
+            var outputLength = arena.allocate(ValueLayout.JAVA_LONG);
+            var result = ghostty_vt_h.ghostty_terminal_selection_format_alloc(
+                    terminal,
+                    MemorySegment.NULL,
+                    options,
+                    outputPointer,
+                    outputLength);
+            if (result == ghostty_vt_h.GHOSTTY_NO_VALUE()) {
                 return "";
             }
 
-            var options = GhosttyFormatterTerminalOptions.allocate(arena);
-            GhosttyFormatterTerminalOptions.size(options, GhosttyFormatterTerminalOptions.sizeof());
-            GhosttyFormatterTerminalOptions.emit(options, ghostty_vt_h.GHOSTTY_FORMATTER_FORMAT_PLAIN());
-            GhosttyFormatterTerminalOptions.unwrap(options, true);
-            GhosttyFormatterTerminalOptions.trim(options, true);
-            GhosttyFormatterTerminalOptions.selection(options, formatterSelection);
-
-            var formatterPointer = arena.allocate(ValueLayout.ADDRESS);
-            requireGhosttySuccess(
-                    ghostty_vt_h.ghostty_formatter_terminal_new(MemorySegment.NULL, formatterPointer, terminal, options),
-                    "ghostty_formatter_terminal_new");
-            var formatter = formatterPointer.get(ValueLayout.ADDRESS, 0);
-            try {
-                var outputPointer = arena.allocate(ValueLayout.ADDRESS);
-                var outputLength = arena.allocate(ValueLayout.JAVA_LONG);
-                requireGhosttySuccess(
-                        ghostty_vt_h.ghostty_formatter_format_alloc(
-                                formatter,
-                                MemorySegment.NULL,
-                                outputPointer,
-                                outputLength),
-                        "ghostty_formatter_format_alloc");
-                var length = outputLength.get(ValueLayout.JAVA_LONG, 0);
-                if (length == 0) {
-                    return "";
-                }
-
-                var output = outputPointer.get(ValueLayout.ADDRESS, 0);
-                try {
-                    return new String(output.reinterpret(length).toArray(ValueLayout.JAVA_BYTE), StandardCharsets.UTF_8);
-                } finally {
-                    ghostty_vt_h.ghostty_free(MemorySegment.NULL, output, length);
-                }
-            } finally {
-                ghostty_vt_h.ghostty_formatter_free(formatter);
+            requireGhosttySuccess(result, "ghostty_terminal_selection_format_alloc");
+            var length = outputLength.get(ValueLayout.JAVA_LONG, 0);
+            if (length == 0) {
+                return "";
             }
+
+            var output = outputPointer.get(ValueLayout.ADDRESS, 0);
+            try {
+                return new String(output.reinterpret(length).toArray(ValueLayout.JAVA_BYTE), StandardCharsets.UTF_8);
+            } finally {
+                ghostty_vt_h.ghostty_free(MemorySegment.NULL, output, length);
+            }
+        }
+    }
+
+    boolean selectionGesturePress(
+            CellHit hit,
+            double x,
+            double y,
+            TerminalView.FontMetrics metrics) {
+        try (var arena = Arena.ofConfined()) {
+            var event = selectionGestureEvent(arena, ghostty_vt_h.GHOSTTY_SELECTION_GESTURE_EVENT_TYPE_PRESS());
+            try {
+                var ref = gridRef(hit.screenPoint(), arena);
+                if (ref == null) {
+                    return false;
+                }
+
+                setSelectionGestureRef(event, ref);
+                setSelectionGesturePosition(event, arena, x, y);
+                setSelectionGestureDouble(event, arena, ghostty_vt_h.GHOSTTY_SELECTION_GESTURE_EVENT_OPT_REPEAT_DISTANCE(), metrics.cellWidthPx());
+                setSelectionGestureLong(event, arena, ghostty_vt_h.GHOSTTY_SELECTION_GESTURE_EVENT_OPT_TIME_NS(), SelectionGestureClock.now());
+                setSelectionGestureLong(event, arena, ghostty_vt_h.GHOSTTY_SELECTION_GESTURE_EVENT_OPT_REPEAT_INTERVAL_NS(), SELECTION_REPEAT_INTERVAL_NS);
+                return applySelectionGestureEvent(arena, event, true);
+            } finally {
+                ghostty_vt_h.ghostty_selection_gesture_event_free(event);
+            }
+        }
+    }
+
+    boolean selectionGestureDrag(
+            CellHit hit,
+            double x,
+            double y,
+            boolean rectangle,
+            TerminalView.FontMetrics metrics,
+            double heightPx) {
+        try (var arena = Arena.ofConfined()) {
+            var event = selectionGestureEvent(arena, ghostty_vt_h.GHOSTTY_SELECTION_GESTURE_EVENT_TYPE_DRAG());
+            try {
+                var ref = gridRef(hit.screenPoint(), arena);
+                if (ref == null) {
+                    return false;
+                }
+
+                setSelectionGestureRef(event, ref);
+                setSelectionGesturePosition(event, arena, x, y);
+                setSelectionGestureBoolean(event, arena, ghostty_vt_h.GHOSTTY_SELECTION_GESTURE_EVENT_OPT_RECTANGLE(), rectangle);
+                setSelectionGestureGeometry(event, arena, metrics, heightPx);
+                return applySelectionGestureEvent(arena, event, false);
+            } finally {
+                ghostty_vt_h.ghostty_selection_gesture_event_free(event);
+            }
+        }
+    }
+
+    boolean selectionGestureAutoscrollTick(
+            CellHit hit,
+            double x,
+            double y,
+            boolean rectangle,
+            TerminalView.FontMetrics metrics,
+            double heightPx) {
+        try (var arena = Arena.ofConfined()) {
+            var event = selectionGestureEvent(arena, ghostty_vt_h.GHOSTTY_SELECTION_GESTURE_EVENT_TYPE_AUTOSCROLL_TICK());
+            try {
+                var viewport = GhosttyPointCoordinate.allocate(arena);
+                GhosttyPointCoordinate.x(viewport, (short) hit.viewportX());
+                GhosttyPointCoordinate.y(viewport, hit.viewportY());
+                requireGhosttySuccess(
+                        ghostty_vt_h.ghostty_selection_gesture_event_set(
+                                event,
+                                ghostty_vt_h.GHOSTTY_SELECTION_GESTURE_EVENT_OPT_VIEWPORT(),
+                                viewport),
+                        "ghostty_selection_gesture_event_set(viewport)");
+                setSelectionGesturePosition(event, arena, x, y);
+                setSelectionGestureBoolean(event, arena, ghostty_vt_h.GHOSTTY_SELECTION_GESTURE_EVENT_OPT_RECTANGLE(), rectangle);
+                setSelectionGestureGeometry(event, arena, metrics, heightPx);
+                return applySelectionGestureEvent(arena, event, false);
+            } finally {
+                ghostty_vt_h.ghostty_selection_gesture_event_free(event);
+            }
+        }
+    }
+
+    void selectionGestureRelease(CellHit hit) {
+        try (var arena = Arena.ofConfined()) {
+            var event = selectionGestureEvent(arena, ghostty_vt_h.GHOSTTY_SELECTION_GESTURE_EVENT_TYPE_RELEASE());
+            try {
+                if (hit != null) {
+                    var ref = gridRef(hit.screenPoint(), arena);
+                    if (ref != null) {
+                        setSelectionGestureRef(event, ref);
+                    }
+                }
+                applySelectionGestureEvent(arena, event, false);
+            } finally {
+                ghostty_vt_h.ghostty_selection_gesture_event_free(event);
+            }
+        }
+    }
+
+    void resetSelectionGesture() {
+        ghostty_vt_h.ghostty_selection_gesture_reset(selectionGesture, terminal);
+    }
+
+    boolean selectionGestureDragged() {
+        try (var arena = Arena.ofConfined()) {
+            var dragged = arena.allocate(ValueLayout.JAVA_BOOLEAN);
+            requireGhosttySuccess(
+                    ghostty_vt_h.ghostty_selection_gesture_get(
+                            selectionGesture,
+                            terminal,
+                            ghostty_vt_h.GHOSTTY_SELECTION_GESTURE_DATA_DRAGGED(),
+                            dragged),
+                    "ghostty_selection_gesture_get(dragged)");
+            return dragged.get(ValueLayout.JAVA_BOOLEAN, 0);
+        }
+    }
+
+    int selectionGestureClickCount() {
+        try (var arena = Arena.ofConfined()) {
+            var clickCount = arena.allocate(ValueLayout.JAVA_BYTE);
+            requireGhosttySuccess(
+                    ghostty_vt_h.ghostty_selection_gesture_get(
+                            selectionGesture,
+                            terminal,
+                            ghostty_vt_h.GHOSTTY_SELECTION_GESTURE_DATA_CLICK_COUNT(),
+                            clickCount),
+                    "ghostty_selection_gesture_get(click_count)");
+            return Byte.toUnsignedInt(clickCount.get(ValueLayout.JAVA_BYTE, 0));
+        }
+    }
+
+    SelectionAutoscroll selectionGestureAutoscroll() {
+        try (var arena = Arena.ofConfined()) {
+            var autoscroll = arena.allocate(ValueLayout.JAVA_INT);
+            requireGhosttySuccess(
+                    ghostty_vt_h.ghostty_selection_gesture_get(
+                            selectionGesture,
+                            terminal,
+                            ghostty_vt_h.GHOSTTY_SELECTION_GESTURE_DATA_AUTOSCROLL(),
+                            autoscroll),
+                    "ghostty_selection_gesture_get(autoscroll)");
+            var value = autoscroll.get(ValueLayout.JAVA_INT, 0);
+            if (value == ghostty_vt_h.GHOSTTY_SELECTION_GESTURE_AUTOSCROLL_UP()) {
+                return SelectionAutoscroll.UP;
+            }
+            if (value == ghostty_vt_h.GHOSTTY_SELECTION_GESTURE_AUTOSCROLL_DOWN()) {
+                return SelectionAutoscroll.DOWN;
+            }
+            return SelectionAutoscroll.NONE;
         }
     }
 
@@ -779,25 +987,6 @@ final class TerminalSession implements AutoCloseable {
         return selections;
     }
 
-    Selection selectAllSelection() {
-        try (var arena = Arena.ofConfined()) {
-            var cols = arena.allocate(ValueLayout.JAVA_SHORT);
-            var totalRows = arena.allocate(ValueLayout.JAVA_LONG);
-            if (ghostty_vt_h.ghostty_terminal_get(terminal, ghostty_vt_h.GHOSTTY_TERMINAL_DATA_COLS(), cols) != GHOSTTY_SUCCESS
-                    || ghostty_vt_h.ghostty_terminal_get(terminal, ghostty_vt_h.GHOSTTY_TERMINAL_DATA_TOTAL_ROWS(), totalRows) != GHOSTTY_SUCCESS) {
-                return Selection.empty();
-            }
-
-            var columnCount = Short.toUnsignedInt(cols.get(ValueLayout.JAVA_SHORT, 0));
-            var rowCount = Math.toIntExact(totalRows.get(ValueLayout.JAVA_LONG, 0));
-            return columnCount == 0 || rowCount == 0
-                    ? Selection.empty()
-                    : Selection.linear(
-                            new Selection.ScreenPoint(0, 0),
-                            new Selection.ScreenPoint(columnCount - 1, rowCount - 1));
-        }
-    }
-
     int columnCount() {
         try (var arena = Arena.ofConfined()) {
             var cols = arena.allocate(ValueLayout.JAVA_SHORT);
@@ -825,17 +1014,43 @@ final class TerminalSession implements AutoCloseable {
             double heightPx,
             TerminalView.FontMetrics metrics,
             double scrollbarReservedWidthPx) {
+        return hitTest(x, y, widthPx, heightPx, metrics, scrollbarReservedWidthPx, false);
+    }
+
+    CellHit clampedHitTest(
+            double x,
+            double y,
+            double widthPx,
+            double heightPx,
+            TerminalView.FontMetrics metrics,
+            double scrollbarReservedWidthPx) {
+        return hitTest(x, y, widthPx, heightPx, metrics, scrollbarReservedWidthPx, true);
+    }
+
+    private CellHit hitTest(
+            double x,
+            double y,
+            double widthPx,
+            double heightPx,
+            TerminalView.FontMetrics metrics,
+            double scrollbarReservedWidthPx,
+            boolean clamp) {
         var contentWidth = Math.max(0, widthPx - scrollbarReservedWidthPx);
-        if (x < 0 || y < 0 || x >= contentWidth || y >= heightPx) {
+        if (contentWidth <= 0 || heightPx <= 0) {
+            return null;
+        }
+        if (!clamp && (x < 0 || y < 0 || x >= contentWidth || y >= heightPx)) {
             return null;
         }
 
+        var hitX = clamp ? Math.clamp(x, 0.0, Math.max(0.0, contentWidth - 1.0)) : x;
+        var hitY = clamp ? Math.clamp(y, 0.0, Math.max(0.0, heightPx - 1.0)) : y;
         try (var arena = Arena.ofConfined()) {
             var point = GhosttyPoint.allocate(arena);
             GhosttyPoint.tag(point, ghostty_vt_h.GHOSTTY_POINT_TAG_VIEWPORT());
             var coordinate = GhosttyPointCoordinate.allocate(arena);
-            GhosttyPointCoordinate.x(coordinate, (short) Math.clamp((int) Math.floor(x / metrics.cellWidthPx()), 0, Math.max(0, columnCount() - 1)));
-            GhosttyPointCoordinate.y(coordinate, Math.max(0, (int) Math.floor(y / metrics.cellHeightPx())));
+            GhosttyPointCoordinate.x(coordinate, (short) Math.clamp((int) Math.floor(hitX / metrics.cellWidthPx()), 0, Math.max(0, columnCount() - 1)));
+            GhosttyPointCoordinate.y(coordinate, Math.max(0, (int) Math.floor(hitY / metrics.cellHeightPx())));
             GhosttyPointValue.coordinate(GhosttyPoint.value(point), coordinate);
 
             var gridRef = GhosttyGridRef.allocate(arena);
@@ -869,191 +1084,10 @@ final class TerminalSession implements AutoCloseable {
                             GhosttyPointCoordinate.y(screenCoordinate)),
                     Short.toUnsignedInt(GhosttyPointCoordinate.x(coordinate)),
                     GhosttyPointCoordinate.y(coordinate),
-                    x % metrics.cellWidthPx(),
+                    hitX % metrics.cellWidthPx(),
                     hasText.get(ValueLayout.JAVA_BOOLEAN, 0),
                     hyperlinkUri);
         }
-    }
-
-    Selection wordSelection(Selection.ScreenPoint point) {
-        return wordSelection(point, true);
-    }
-
-    Selection wordSelectionBetween(Selection.ScreenPoint start, Selection.ScreenPoint end) {
-        var columns = columnCount();
-        if (columns <= 0) {
-            return Selection.empty();
-        }
-
-        try (var arena = Arena.ofConfined()) {
-            var current = start;
-            var direction = compare(start, end) <= 0 ? 1 : -1;
-            while (true) {
-                var selection = wordSelection(current, arena, false);
-                if (!selection.isEmpty()) {
-                    return selection;
-                }
-                if (current.equals(end)) {
-                    return Selection.empty();
-                }
-                current = direction > 0 ? next(current, columns) : previous(current, columns);
-            }
-        }
-    }
-
-    Selection lineSelection(Selection.ScreenPoint point) {
-        var columns = columnCount();
-        if (columns <= 0) {
-            return Selection.empty();
-        }
-
-        try (var arena = Arena.ofConfined()) {
-            var current = point;
-            while (current.y() > 0 && rowWrapContinuation(current, arena)) {
-                current = new Selection.ScreenPoint(current.x(), current.y() - 1);
-            }
-
-            var startRow = current.y();
-            var endRow = current.y();
-            while (rowWrap(new Selection.ScreenPoint(columns - 1, endRow), arena)) {
-                endRow++;
-            }
-
-            var start = firstTextPoint(startRow, endRow, columns, arena);
-            var end = lastTextPoint(startRow, endRow, columns, arena);
-            if (start == null || end == null) {
-                return Selection.linear(
-                        new Selection.ScreenPoint(0, startRow),
-                        new Selection.ScreenPoint(columns - 1, endRow));
-            }
-            return Selection.linear(start, end);
-        }
-    }
-
-    Selection regionSelection(Selection.ScreenPoint point) {
-        var columns = columnCount();
-        var rows = totalRowCount();
-        if (columns <= 0 || rows <= 0 || point.y() >= rows) {
-            return Selection.empty();
-        }
-
-        try (var arena = Arena.ofConfined()) {
-            var promptRow = promptRowAtOrBefore(point.y(), arena);
-            var startRow = Math.max(promptRow, 0);
-            var endRow = regionEndRow(startRow, rows, arena);
-            var semanticContent = cellSemanticContent(point, arena);
-
-            if (semanticContent == ghostty_vt_h.GHOSTTY_CELL_SEMANTIC_PROMPT()) {
-                var selection = promptRow < 0 ? Selection.empty() : promptRegionSelection(startRow, endRow, columns, arena);
-                return selection.isEmpty() || selectedText(selection).isEmpty()
-                        ? nearestSemanticRegionOrLine(point, startRow, endRow, columns, arena)
-                        : selection;
-            }
-
-            var selection = semanticRegionSelection(
-                    point,
-                    semanticContent,
-                    startRow,
-                    endRow,
-                    columns,
-                    arena,
-                    semanticContent != ghostty_vt_h.GHOSTTY_CELL_SEMANTIC_INPUT());
-            return nonEmptyRegionOrNearestSemanticRegion(point, selection, startRow, endRow, columns, arena);
-        }
-    }
-
-    private Selection nonEmptyRegionOrNearestSemanticRegion(
-            Selection.ScreenPoint point,
-            Selection selection,
-            int promptRow,
-            int endRow,
-            int columns,
-            Arena arena) {
-        var line = lineSelection(point);
-        if (!selection.isEmpty()
-                && !selectedText(selection).isEmpty()
-                && !selection.normalized().equals(line.normalized())) {
-            return selection;
-        }
-        return nearestSemanticRegionOrLine(point, promptRow, endRow, columns, arena);
-    }
-
-    private Selection nearestSemanticRegionOrLine(
-            Selection.ScreenPoint point,
-            int promptRow,
-            int endRow,
-            int columns,
-            Arena arena) {
-        var nearest = nearestSemanticRegionSelection(promptRow, endRow, columns, arena);
-        if (!nearest.isEmpty() && !selectedText(nearest).isEmpty()) {
-            return nearest;
-        }
-        return lineSelection(point);
-    }
-
-    private Selection nearestSemanticRegionSelection(int promptRow, int endRow, int columns, Arena arena) {
-        var start = firstTextPoint(promptRow, endRow, columns, arena);
-        var end = lastTextPoint(promptRow, endRow, columns, arena);
-        return start == null || end == null ? Selection.empty() : Selection.linear(start, end);
-    }
-
-    private Selection promptRegionSelection(int promptRow, int endRow, int columns, Arena arena) {
-        var start = new Selection.ScreenPoint(0, promptRow);
-        var end = start;
-        var point = start;
-        while (true) {
-            var semanticContent = cellSemanticContent(point, arena);
-            if (semanticContent == ghostty_vt_h.GHOSTTY_CELL_SEMANTIC_OUTPUT()) {
-                return Selection.linear(start, end);
-            }
-            end = point;
-            if (point.x() == columns - 1 && point.y() == endRow) {
-                return Selection.linear(start, end);
-            }
-            point = next(point, columns);
-        }
-    }
-
-    private Selection semanticRegionSelection(
-            Selection.ScreenPoint point,
-            int semanticContent,
-            int promptRow,
-            int endRow,
-            int columns,
-            Arena arena,
-            boolean trimToText) {
-        var lower = new Selection.ScreenPoint(0, promptRow);
-        var upper = new Selection.ScreenPoint(columns - 1, endRow);
-
-        var start = point;
-        while (!start.equals(lower)) {
-            var previous = previous(start, columns);
-            if (cellSemanticContent(previous, arena) != semanticContent) {
-                break;
-            }
-            start = previous;
-        }
-
-        var end = point;
-        while (!end.equals(upper)) {
-            var next = next(end, columns);
-            if (cellSemanticContent(next, arena) != semanticContent) {
-                break;
-            }
-            end = next;
-        }
-
-        if (!trimToText) {
-            return Selection.linear(start, end);
-        }
-
-        while (!start.equals(end) && !cellHasText(start, arena)) {
-            start = next(start, columns);
-        }
-        while (!end.equals(start) && !cellHasText(end, arena)) {
-            end = previous(end, columns);
-        }
-        return cellHasText(start, arena) ? Selection.linear(start, end) : Selection.empty();
     }
 
     LogicalLine logicalLine(Selection.ScreenPoint point) {
@@ -1217,7 +1251,6 @@ final class TerminalSession implements AutoCloseable {
             double height,
             TerminalView.FontMetrics metrics,
             KeyInput.Preedit preedit,
-            Selection selection,
             Selection hoveredLink,
             List<TerminalLinkMatcher> linkMatchers,
             SearchResult searchResult,
@@ -1260,6 +1293,7 @@ final class TerminalSession implements AutoCloseable {
             var foreground = GhosttyColorRgb.allocate(arena);
             var background = GhosttyColorRgb.allocate(arena);
             var swappedColor = GhosttyColorRgb.allocate(arena);
+            var selectedValue = arena.allocate(ValueLayout.JAVA_BOOLEAN);
             var scrollbar = GhosttyTerminalScrollbar.allocate(arena);
             var viewportTop = ghostty_vt_h.ghostty_terminal_get(terminal, ghostty_vt_h.GHOSTTY_TERMINAL_DATA_SCROLLBAR(), scrollbar) == GHOSTTY_SUCCESS
                     ? Math.toIntExact(GhosttyTerminalScrollbar.offset(scrollbar))
@@ -1303,7 +1337,13 @@ final class TerminalSession implements AutoCloseable {
                 var viewportX = 0;
                 while (ghostty_vt_h.ghostty_render_state_row_cells_next(rowCells)) {
                     var screenPoint = new Selection.ScreenPoint(viewportX, viewportTop + viewportY);
-                    var selected = contains(selection, screenPoint);
+                    requireGhosttySuccess(
+                            ghostty_vt_h.ghostty_render_state_row_cells_get(
+                                    rowCells,
+                                    ghostty_vt_h.GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_SELECTED(),
+                                    selectedValue),
+                            "ghostty_render_state_row_cells_get(selected)");
+                    var selected = selectedValue.get(ValueLayout.JAVA_BOOLEAN, 0);
                     var hovered = contains(hoveredLink, screenPoint);
                     var matchedLink = linkResult.matchIndex(screenPoint) >= 0;
                     var searchMatch = searchResult.matchIndex(screenPoint);
@@ -1626,19 +1666,121 @@ final class TerminalSession implements AutoCloseable {
         }
     }
 
-    private MemorySegment formatterSelection(Arena arena, Selection selection) {
-        var normalized = selection.normalized();
-        if (normalized.isEmpty()) {
+    private MemorySegment activeSelection(Arena arena) {
+        var selection = GhosttySelection.allocate(arena);
+        GhosttySelection.size(selection, GhosttySelection.sizeof());
+        var result = ghostty_vt_h.ghostty_terminal_get(
+                terminal,
+                ghostty_vt_h.GHOSTTY_TERMINAL_DATA_SELECTION(),
+                selection);
+        if (result == ghostty_vt_h.GHOSTTY_NO_VALUE()) {
             return MemorySegment.NULL;
         }
 
-        var ghosttySelection = GhosttySelection.allocate(arena);
-        GhosttySelection.size(ghosttySelection, GhosttySelection.sizeof());
-        GhosttySelection.rectangle(ghosttySelection, normalized.rectangle());
-        return writeGridRef(arena, normalized.from(), GhosttySelection.start(ghosttySelection))
-                && writeGridRef(arena, normalized.to(), GhosttySelection.end(ghosttySelection))
-                ? ghosttySelection
-                : MemorySegment.NULL;
+        requireGhosttySuccess(result, "ghostty_terminal_get(selection)");
+        return selection;
+    }
+
+    private void setActiveSelection(MemorySegment selection) {
+        requireGhosttySuccess(
+                ghostty_vt_h.ghostty_terminal_set(
+                        terminal,
+                        ghostty_vt_h.GHOSTTY_TERMINAL_OPT_SELECTION(),
+                        selection),
+                "ghostty_terminal_set(selection)");
+    }
+
+    private MemorySegment selectionGestureEvent(Arena arena, int type) {
+        var eventPointer = arena.allocate(ValueLayout.ADDRESS);
+        requireGhosttySuccess(
+                ghostty_vt_h.ghostty_selection_gesture_event_new(MemorySegment.NULL, eventPointer, type),
+                "ghostty_selection_gesture_event_new");
+        return eventPointer.get(ValueLayout.ADDRESS, 0);
+    }
+
+    private boolean applySelectionGestureEvent(Arena arena, MemorySegment event, boolean clearOnNoSelection) {
+        var selection = GhosttySelection.allocate(arena);
+        GhosttySelection.size(selection, GhosttySelection.sizeof());
+        var result = ghostty_vt_h.ghostty_selection_gesture_event(selectionGesture, terminal, event, selection);
+        if (result == GHOSTTY_SUCCESS) {
+            setActiveSelection(selection);
+            updateRenderState();
+            return true;
+        }
+
+        if (result == ghostty_vt_h.GHOSTTY_NO_VALUE()) {
+            if (clearOnNoSelection) {
+                setActiveSelection(MemorySegment.NULL);
+            }
+            updateRenderState();
+            return false;
+        }
+
+        requireGhosttySuccess(result, "ghostty_selection_gesture_event");
+        return false;
+    }
+
+    private void setSelectionGestureRef(MemorySegment event, MemorySegment ref) {
+        requireGhosttySuccess(
+                ghostty_vt_h.ghostty_selection_gesture_event_set(
+                        event,
+                        ghostty_vt_h.GHOSTTY_SELECTION_GESTURE_EVENT_OPT_REF(),
+                        ref),
+                "ghostty_selection_gesture_event_set(ref)");
+    }
+
+    private static void setSelectionGesturePosition(MemorySegment event, Arena arena, double x, double y) {
+        var position = GhosttySurfacePosition.allocate(arena);
+        GhosttySurfacePosition.x(position, x);
+        GhosttySurfacePosition.y(position, y);
+        requireGhosttySuccess(
+                ghostty_vt_h.ghostty_selection_gesture_event_set(
+                        event,
+                        ghostty_vt_h.GHOSTTY_SELECTION_GESTURE_EVENT_OPT_POSITION(),
+                        position),
+                "ghostty_selection_gesture_event_set(position)");
+    }
+
+    private static void setSelectionGestureDouble(MemorySegment event, Arena arena, int option, double value) {
+        var nativeValue = arena.allocate(ValueLayout.JAVA_DOUBLE);
+        nativeValue.set(ValueLayout.JAVA_DOUBLE, 0, value);
+        requireGhosttySuccess(
+                ghostty_vt_h.ghostty_selection_gesture_event_set(event, option, nativeValue),
+                "ghostty_selection_gesture_event_set(double)");
+    }
+
+    private static void setSelectionGestureLong(MemorySegment event, Arena arena, int option, long value) {
+        var nativeValue = arena.allocate(ValueLayout.JAVA_LONG);
+        nativeValue.set(ValueLayout.JAVA_LONG, 0, value);
+        requireGhosttySuccess(
+                ghostty_vt_h.ghostty_selection_gesture_event_set(event, option, nativeValue),
+                "ghostty_selection_gesture_event_set(long)");
+    }
+
+    private static void setSelectionGestureBoolean(MemorySegment event, Arena arena, int option, boolean value) {
+        var nativeValue = arena.allocate(ValueLayout.JAVA_BOOLEAN);
+        nativeValue.set(ValueLayout.JAVA_BOOLEAN, 0, value);
+        requireGhosttySuccess(
+                ghostty_vt_h.ghostty_selection_gesture_event_set(event, option, nativeValue),
+                "ghostty_selection_gesture_event_set(boolean)");
+    }
+
+    private void setSelectionGestureGeometry(
+            MemorySegment event,
+            Arena arena,
+            TerminalView.FontMetrics metrics,
+            double heightPx) {
+        var geometry = GhosttySelectionGestureGeometry.allocate(arena);
+        GhosttySelectionGestureGeometry.columns(geometry, Math.max(1, columnCount()));
+        GhosttySelectionGestureGeometry.cell_width(geometry, Math.max(1, metrics.cellWidthPx()));
+        GhosttySelectionGestureGeometry.padding_left(geometry, 0);
+        GhosttySelectionGestureGeometry.screen_height(geometry, Math.max(1, (int) Math.ceil(heightPx)));
+        requireGhosttySuccess(
+                ghostty_vt_h.ghostty_selection_gesture_event_set(
+                        event,
+                        ghostty_vt_h.GHOSTTY_SELECTION_GESTURE_EVENT_OPT_GEOMETRY(),
+                        geometry),
+                "ghostty_selection_gesture_event_set(geometry)");
     }
 
     private boolean writeGridRef(Arena arena, Selection.ScreenPoint point, MemorySegment outGridRef) {
@@ -1649,6 +1791,21 @@ final class TerminalSession implements AutoCloseable {
         GhosttyPoint.tag(ghosttyPoint, ghostty_vt_h.GHOSTTY_POINT_TAG_SCREEN());
         GhosttyPointValue.coordinate(GhosttyPoint.value(ghosttyPoint), coordinate);
         return ghostty_vt_h.ghostty_terminal_grid_ref(terminal, ghosttyPoint, outGridRef) == GHOSTTY_SUCCESS;
+    }
+
+    private Selection.ScreenPoint screenPoint(MemorySegment gridRef, Arena arena) {
+        var coordinate = GhosttyPointCoordinate.allocate(arena);
+        if (ghostty_vt_h.ghostty_terminal_point_from_grid_ref(
+                terminal,
+                gridRef,
+                ghostty_vt_h.GHOSTTY_POINT_TAG_SCREEN(),
+                coordinate) != GHOSTTY_SUCCESS) {
+            return null;
+        }
+
+        return new Selection.ScreenPoint(
+                Short.toUnsignedInt(GhosttyPointCoordinate.x(coordinate)),
+                GhosttyPointCoordinate.y(coordinate));
     }
 
     private void appendSearchRow(SearchDocumentBuilder document, int row, Arena arena) {
@@ -1711,52 +1868,6 @@ final class TerminalSession implements AutoCloseable {
         return -1;
     }
 
-    private Selection wordSelection(Selection.ScreenPoint point, boolean includeHyperlink) {
-        try (var arena = Arena.ofConfined()) {
-            return wordSelection(point, arena, includeHyperlink);
-        }
-    }
-
-    private Selection wordSelection(Selection.ScreenPoint point, Arena arena, boolean includeHyperlink) {
-        if (includeHyperlink) {
-            var hyperlinkUri = cellHyperlink(point, arena);
-            if (hyperlinkUri != null && !hyperlinkUri.isEmpty()) {
-                return hyperlinkSelection(point, hyperlinkUri);
-            }
-        }
-
-        var startCodePoint = cellCodePoint(point, arena);
-        if (startCodePoint == null) {
-            return Selection.empty();
-        }
-
-        var columns = columnCount();
-        var wordKind = classifyWordCodePoint(startCodePoint);
-        var start = point;
-        while (true) {
-            var previous = previous(start, columns);
-            if (previous.equals(start)
-                    || !isSoftWrappedBoundary(previous, start, columns, arena)
-                    || classifyWordCodePoint(cellCodePoint(previous, arena)) != wordKind) {
-                break;
-            }
-            start = previous;
-        }
-
-        var end = point;
-        while (true) {
-            var next = next(end, columns);
-            if (next.equals(end)
-                    || !isSoftWrappedBoundary(end, next, columns, arena)
-                    || classifyWordCodePoint(cellCodePoint(next, arena)) != wordKind) {
-                break;
-            }
-            end = next;
-        }
-
-        return Selection.linear(start, end);
-    }
-
     private Integer cellCodePoint(Selection.ScreenPoint point, Arena arena) {
         var gridRef = gridRef(point, arena);
         if (gridRef == null) {
@@ -1781,24 +1892,6 @@ final class TerminalSession implements AutoCloseable {
                 ghostty_vt_h.ghostty_cell_get(cell.get(ValueLayout.JAVA_LONG, 0), ghostty_vt_h.GHOSTTY_CELL_DATA_CODEPOINT(), codePoint),
                 "ghostty_cell_get(codepoint)");
         return codePoint.get(ValueLayout.JAVA_INT, 0);
-    }
-
-    private boolean cellHasText(Selection.ScreenPoint point, Arena arena) {
-        var gridRef = gridRef(point, arena);
-        if (gridRef == null) {
-            return false;
-        }
-
-        var cell = arena.allocate(ValueLayout.JAVA_LONG);
-        if (ghostty_vt_h.ghostty_grid_ref_cell(gridRef, cell) != GHOSTTY_SUCCESS) {
-            return false;
-        }
-
-        var hasText = arena.allocate(ValueLayout.JAVA_BOOLEAN);
-        requireGhosttySuccess(
-                ghostty_vt_h.ghostty_cell_get(cell.get(ValueLayout.JAVA_LONG, 0), ghostty_vt_h.GHOSTTY_CELL_DATA_HAS_TEXT(), hasText),
-                "ghostty_cell_get(has_text)");
-        return hasText.get(ValueLayout.JAVA_BOOLEAN, 0);
     }
 
     private CellGrapheme cellGrapheme(Selection.ScreenPoint point, Arena arena) {
@@ -1849,45 +1942,6 @@ final class TerminalSession implements AutoCloseable {
     private String cellHyperlink(Selection.ScreenPoint point, Arena arena) {
         var gridRef = gridRef(point, arena);
         return gridRef == null ? null : hyperlinkUri(gridRef, arena);
-    }
-
-    private int cellSemanticContent(Selection.ScreenPoint point, Arena arena) {
-        var gridRef = gridRef(point, arena);
-        if (gridRef == null) {
-            return ghostty_vt_h.GHOSTTY_CELL_SEMANTIC_OUTPUT();
-        }
-
-        var cell = arena.allocate(ValueLayout.JAVA_LONG);
-        if (ghostty_vt_h.ghostty_grid_ref_cell(gridRef, cell) != GHOSTTY_SUCCESS) {
-            return ghostty_vt_h.GHOSTTY_CELL_SEMANTIC_OUTPUT();
-        }
-
-        var semanticContent = arena.allocate(ValueLayout.JAVA_INT);
-        requireGhosttySuccess(
-                ghostty_vt_h.ghostty_cell_get(
-                        cell.get(ValueLayout.JAVA_LONG, 0),
-                        ghostty_vt_h.GHOSTTY_CELL_DATA_SEMANTIC_CONTENT(),
-                        semanticContent),
-                "ghostty_cell_get(semantic_content)");
-        return semanticContent.get(ValueLayout.JAVA_INT, 0);
-    }
-
-    private int promptRowAtOrBefore(int row, Arena arena) {
-        for (var currentRow = row; currentRow >= 0; currentRow--) {
-            if (rowSemanticPrompt(currentRow, arena) == ghostty_vt_h.GHOSTTY_ROW_SEMANTIC_PROMPT()) {
-                return currentRow;
-            }
-        }
-        return -1;
-    }
-
-    private int regionEndRow(int promptRow, int rows, Arena arena) {
-        for (var row = promptRow + 1; row < rows; row++) {
-            if (rowSemanticPrompt(row, arena) == ghostty_vt_h.GHOSTTY_ROW_SEMANTIC_PROMPT()) {
-                return row - 1;
-            }
-        }
-        return rows - 1;
     }
 
     private int rowSemanticPrompt(int row, Arena arena) {
@@ -1963,42 +2017,6 @@ final class TerminalSession implements AutoCloseable {
         return writeGridRef(arena, point, gridRef) ? gridRef : null;
     }
 
-    private Selection.ScreenPoint firstTextPoint(int startRow, int endRow, int columns, Arena arena) {
-        for (var row = startRow; row <= endRow; row++) {
-            for (var column = 0; column < columns; column++) {
-                var point = new Selection.ScreenPoint(column, row);
-                if (cellCodePoint(point, arena) != null) {
-                    return point;
-                }
-            }
-        }
-        return null;
-    }
-
-    private Selection.ScreenPoint lastTextPoint(int startRow, int endRow, int columns, Arena arena) {
-        for (var row = endRow; row >= startRow; row--) {
-            for (var column = columns - 1; column >= 0; column--) {
-                var point = new Selection.ScreenPoint(column, row);
-                if (cellCodePoint(point, arena) != null) {
-                    return point;
-                }
-            }
-        }
-        return null;
-    }
-
-    private static WordKind classifyWordCodePoint(Integer codePoint) {
-        if (codePoint == null || !Character.isValidCodePoint(codePoint)) {
-            return WordKind.NONE;
-        }
-        if (Character.isWhitespace(codePoint)) {
-            return WordKind.WHITESPACE;
-        }
-        return Character.isLetterOrDigit(codePoint) || codePoint == '_'
-                ? WordKind.WORD
-                : WordKind.SYMBOL;
-    }
-
     private boolean isSoftWrappedBoundary(
             Selection.ScreenPoint left,
             Selection.ScreenPoint right,
@@ -2014,11 +2032,6 @@ final class TerminalSession implements AutoCloseable {
             return rowWrap(right, arena);
         }
         return false;
-    }
-
-    private static int compare(Selection.ScreenPoint left, Selection.ScreenPoint right) {
-        var byY = Integer.compare(left.y(), right.y());
-        return byY != 0 ? byY : Integer.compare(left.x(), right.x());
     }
 
     private static Selection.ScreenPoint nearestMappedPoint(List<Selection.ScreenPoint> points, int index, int direction) {
@@ -2653,6 +2666,41 @@ final class TerminalSession implements AutoCloseable {
         }
     }
 
+    private static final class SelectionGestureClock {
+        private SelectionGestureClock() {
+        }
+
+        private static long now() {
+            return HostPlatform.CURRENT.os() == HostPlatform.OS.WINDOWS
+                    ? WindowsPerformanceCounter.now()
+                    : System.nanoTime();
+        }
+    }
+
+    private static final class WindowsPerformanceCounter {
+        private static final MethodHandle QUERY_PERFORMANCE_COUNTER = Linker.nativeLinker().downcallHandle(
+                SymbolLookup.libraryLookup("kernel32", Arena.global()).findOrThrow("QueryPerformanceCounter"),
+                FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.ADDRESS));
+
+        private WindowsPerformanceCounter() {
+        }
+
+        private static long now() {
+            try (var arena = Arena.ofConfined()) {
+                var counter = arena.allocate(ValueLayout.JAVA_LONG);
+                var result = (int) QUERY_PERFORMANCE_COUNTER.invokeExact(counter);
+                if (result == 0) {
+                    throw new IllegalStateException("QueryPerformanceCounter failed");
+                }
+                return counter.get(ValueLayout.JAVA_LONG, 0);
+            } catch (RuntimeException | Error exception) {
+                throw exception;
+            } catch (Throwable throwable) {
+                throw new IllegalStateException("QueryPerformanceCounter failed", throwable);
+            }
+        }
+    }
+
     @FunctionalInterface
     private interface Allocator {
 
@@ -2742,11 +2790,10 @@ final class TerminalSession implements AutoCloseable {
         }
     }
 
-    private enum WordKind {
+    enum SelectionAutoscroll {
         NONE,
-        WHITESPACE,
-        WORD,
-        SYMBOL
+        UP,
+        DOWN
     }
 
     record BlinkState(boolean cursor, boolean text) {

@@ -2,12 +2,6 @@
 
 After updating the pinned Ghostty/libghostty-vt version, consider using:
 
-- `ghostty_terminal_selection_format_*` for copy text instead of formatter setup.
-- `GHOSTTY_TERMINAL_OPT_SELECTION` to store active selection in Ghostty.
-- Render row/cell selection data for selected-cell painting.
-- `ghostty_terminal_select_word`, `select_line`, `select_all`, `select_output`.
-- `ghostty_terminal_selection_adjust/order/contains/equal` for keyboard extension.
-- `ghostty_selection_gesture_*` for press/drag/release/autoscroll selection.
 - Tracked grid refs for anchors that must survive scrollback mutations.
 - `GHOSTTY_TERMINAL_DATA_VIEWPORT_ACTIVE` for pinned-to-bottom state.
 - Default cursor style/blink options instead of setting mode 12 directly.
