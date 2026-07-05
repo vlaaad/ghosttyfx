@@ -43,6 +43,7 @@ import io.github.vlaaad.ghostty.bindings.GhosttyTerminalBellFn;
 import io.github.vlaaad.ghostty.bindings.GhosttyTerminalColorSchemeFn;
 import io.github.vlaaad.ghostty.bindings.GhosttyTerminalDeviceAttributesFn;
 import io.github.vlaaad.ghostty.bindings.GhosttyTerminalOptions;
+import io.github.vlaaad.ghostty.bindings.GhosttyTerminalPwdChangedFn;
 import io.github.vlaaad.ghostty.bindings.GhosttyTerminalScrollViewport;
 import io.github.vlaaad.ghostty.bindings.GhosttyTerminalScrollViewportValue;
 import io.github.vlaaad.ghostty.bindings.GhosttyTerminalScrollbar;
@@ -87,6 +88,7 @@ final class TerminalSession implements AutoCloseable {
     private final ArrayList<Color> builtInPalette = new ArrayList<>(PALETTE_SIZE);
     private final Consumer<byte[]> terminalInput;
     private final Consumer<String> titleChanged;
+    private final Consumer<String> pwdChanged;
     private final Runnable bell;
     private Size size;
     private TerminalView.FontMetrics fontMetrics;
@@ -97,9 +99,11 @@ final class TerminalSession implements AutoCloseable {
             TerminalView.FontMetrics initialFontMetrics,
             Consumer<byte[]> terminalInput,
             Consumer<String> titleChanged,
+            Consumer<String> pwdChanged,
             Runnable bell) {
         this.terminalInput = terminalInput;
         this.titleChanged = titleChanged;
+        this.pwdChanged = pwdChanged;
         this.bell = bell;
         size = new Size(initialColumns, initialRows);
         fontMetrics = initialFontMetrics;
@@ -183,6 +187,12 @@ final class TerminalSession implements AutoCloseable {
                         terminal,
                         ghostty_vt_h.GHOSTTY_TERMINAL_OPT_TITLE_CHANGED(),
                         GhosttyTerminalTitleChangedFn.allocate(this::reportTitleChanged, callbackArena)),
+                "ghostty_terminal_set");
+        requireGhosttySuccess(
+                ghostty_vt_h.ghostty_terminal_set(
+                        terminal,
+                        ghostty_vt_h.GHOSTTY_TERMINAL_OPT_PWD_CHANGED(),
+                        GhosttyTerminalPwdChangedFn.allocate(this::reportPwdChanged, callbackArena)),
                 "ghostty_terminal_set");
         requireGhosttySuccess(
                 ghostty_vt_h.ghostty_terminal_set(
@@ -317,6 +327,18 @@ final class TerminalSession implements AutoCloseable {
                     ghostty_vt_h.GHOSTTY_TERMINAL_DATA_TITLE(),
                     title) == GHOSTTY_SUCCESS) {
                 titleChanged.accept(toJavaString(title));
+            }
+        }
+    }
+
+    private void reportPwdChanged(MemorySegment terminal, MemorySegment userdata) {
+        try (var arena = Arena.ofConfined()) {
+            var pwd = GhosttyString.allocate(arena);
+            if (ghostty_vt_h.ghostty_terminal_get(
+                    this.terminal,
+                    ghostty_vt_h.GHOSTTY_TERMINAL_DATA_PWD(),
+                    pwd) == GHOSTTY_SUCCESS) {
+                pwdChanged.accept(toJavaString(pwd));
             }
         }
     }

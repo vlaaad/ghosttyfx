@@ -97,6 +97,7 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
     private TerminalSession.BlinkState blinkState = TerminalSession.BlinkState.none();
     private final SearchUi searchUi;
     private final ReadOnlyStringWrapper title;
+    private final ReadOnlyStringWrapper currentDirectory;
     private final ObjectProperty<Runnable> onBell = new SimpleObjectProperty<>(this, "onBell");
     private final ObjectProperty<TerminalTheme> theme = new SimpleObjectProperty<>(this, "theme", TerminalTheme.defaults()) {
         @Override
@@ -171,6 +172,7 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
     public TerminalView(TerminalFactory terminalFactory) {
         NativeLibrary.ensureLoaded();
         title = new ReadOnlyStringWrapper(this, "title", "Terminal");
+        currentDirectory = new ReadOnlyStringWrapper(this, "currentDirectory", "");
         ptySession = new PtySession(Objects.requireNonNull(terminalFactory, "terminalFactory"), INITIAL_COLUMNS, INITIAL_ROWS);
         processOutputDrain = new ProcessOutputDrain(this);
         selectionAutoscroll = new AnimationTimer() {
@@ -195,6 +197,12 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
                     var view = thisRef.get();
                     if (view != null) {
                         view.title.set(newTitle);
+                    }
+                },
+                (newCurrentDirectory) -> {
+                    var view = thisRef.get();
+                    if (view != null) {
+                        view.currentDirectory.set(newCurrentDirectory);
                     }
                 },
                 () -> {
@@ -492,6 +500,23 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
     /// @return the read-only title property
     public ReadOnlyStringProperty titleProperty() {
         return title.getReadOnlyProperty();
+    }
+
+    /// Returns the terminal current directory reported by OSC 7/9/1337.
+    ///
+    /// The value is the raw string stored by Ghostty. OSC 7 usually reports a
+    /// `file://` URI, while OSC 9 and OSC 1337 usually report a bare path.
+    ///
+    /// @return the terminal current directory, or an empty string when unset
+    public String getCurrentDirectory() {
+        return currentDirectory.get();
+    }
+
+    /// The raw terminal current directory reported by OSC 7/9/1337.
+    ///
+    /// @return the read-only current directory property
+    public ReadOnlyStringProperty currentDirectoryProperty() {
+        return currentDirectory.getReadOnlyProperty();
     }
 
     /// Returns the handler invoked when the terminal rings the bell.

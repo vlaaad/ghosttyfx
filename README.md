@@ -166,6 +166,7 @@ Zsh. Unknown commands are returned unchanged.
 used. Useful view APIs include:
 
 - `titleProperty()`: terminal title reported by the running program
+- `currentDirectoryProperty()`: raw current directory reported by OSC 7/9/1337
 - `terminalStateProperty()`: running, closed, or failed backend state
 - `terminalSizeProperty()`: current terminal grid size in character cells
 - `isMouseTrackingEnabled()`: whether the running program has enabled mouse tracking

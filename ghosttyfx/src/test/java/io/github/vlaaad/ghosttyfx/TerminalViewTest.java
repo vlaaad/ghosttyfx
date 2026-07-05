@@ -520,6 +520,20 @@ final class TerminalViewTest {
     }
 
     @Test
+    void exposesCurrentDirectoryFromTerminalOutput() throws Exception {
+        assertCurrentDirectoryFromOutput("\u001B]7;file:///tmp/ghosttyfx\u001B\\", "file:///tmp/ghosttyfx");
+        assertCurrentDirectoryFromOutput("\u001B]9;9;C:\\tmp\\ghosttyfx\u001B\\", "C:\\tmp\\ghosttyfx");
+        assertCurrentDirectoryFromOutput("\u001B]1337;CurrentDir=/tmp/ghosttyfx\u001B\\", "/tmp/ghosttyfx");
+
+        try (var view = createView("\u001B]7;file:///tmp/ghosttyfx\u001B\\\u001B]7;\u001B\\\u001B]2;pwd-cleared\u001B\\")) {
+            await("terminal current directory to clear", START_TIMEOUT, () -> runOnFxThread(() ->
+                    "pwd-cleared".equals(view.getTitle()) && view.getCurrentDirectory().isEmpty()
+                            ? Optional.of(Boolean.TRUE)
+                            : Optional.empty()));
+        }
+    }
+
+    @Test
     void sendTextAndSendEscExposeTerminalShortcutActions() throws Exception {
         var tempDirectory = Files.createTempDirectory("ghosttyfx-send-text-test-");
         var pidFile = tempDirectory.resolve("shell.pid");
@@ -1065,6 +1079,17 @@ final class TerminalViewTest {
 
     private static TerminalView createView(String output) throws IOException {
         return new TerminalView((_, _) -> new StaticTerminal(output));
+    }
+
+    private static void assertCurrentDirectoryFromOutput(String output, String expected) throws Exception {
+        try (var view = createView(output)) {
+            assertEquals("", view.getCurrentDirectory());
+            assertEquals(view.getCurrentDirectory(), view.currentDirectoryProperty().get());
+            await("terminal current directory " + expected, START_TIMEOUT, () -> runOnFxThread(() ->
+                    expected.equals(view.getCurrentDirectory()) && expected.equals(view.currentDirectoryProperty().get())
+                            ? Optional.of(Boolean.TRUE)
+                            : Optional.empty()));
+        }
     }
 
     private static <T> T runOnFxThread(CheckedSupplier<T> supplier) throws Exception {
