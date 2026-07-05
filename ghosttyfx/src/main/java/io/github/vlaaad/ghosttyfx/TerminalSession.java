@@ -72,6 +72,54 @@ final class TerminalSession implements AutoCloseable {
     private static final double BLOCK_CURSOR_ALPHA = 0.5;
     private static final byte[] XTVERSION_BYTES = "ghosttyfx".getBytes(StandardCharsets.UTF_8);
     private static final long SELECTION_REPEAT_INTERVAL_NS = 500_000_000L;
+    private static final Allocator RENDER_STATE_ALLOCATOR = new Allocator() {
+        @Override
+        public int allocate(MemorySegment allocator, MemorySegment out) {
+            return ghostty_vt_h.ghostty_render_state_new(allocator, out);
+        }
+    };
+    private static final Allocator RENDER_STATE_ROW_ITERATOR_ALLOCATOR = new Allocator() {
+        @Override
+        public int allocate(MemorySegment allocator, MemorySegment out) {
+            return ghostty_vt_h.ghostty_render_state_row_iterator_new(allocator, out);
+        }
+    };
+    private static final Allocator RENDER_STATE_ROW_CELLS_ALLOCATOR = new Allocator() {
+        @Override
+        public int allocate(MemorySegment allocator, MemorySegment out) {
+            return ghostty_vt_h.ghostty_render_state_row_cells_new(allocator, out);
+        }
+    };
+    private static final Allocator KEY_ENCODER_ALLOCATOR = new Allocator() {
+        @Override
+        public int allocate(MemorySegment allocator, MemorySegment out) {
+            return ghostty_vt_h.ghostty_key_encoder_new(allocator, out);
+        }
+    };
+    private static final Allocator KEY_EVENT_ALLOCATOR = new Allocator() {
+        @Override
+        public int allocate(MemorySegment allocator, MemorySegment out) {
+            return ghostty_vt_h.ghostty_key_event_new(allocator, out);
+        }
+    };
+    private static final Allocator MOUSE_ENCODER_ALLOCATOR = new Allocator() {
+        @Override
+        public int allocate(MemorySegment allocator, MemorySegment out) {
+            return ghostty_vt_h.ghostty_mouse_encoder_new(allocator, out);
+        }
+    };
+    private static final Allocator MOUSE_EVENT_ALLOCATOR = new Allocator() {
+        @Override
+        public int allocate(MemorySegment allocator, MemorySegment out) {
+            return ghostty_vt_h.ghostty_mouse_event_new(allocator, out);
+        }
+    };
+    private static final Allocator SELECTION_GESTURE_ALLOCATOR = new Allocator() {
+        @Override
+        public int allocate(MemorySegment allocator, MemorySegment out) {
+            return ghostty_vt_h.ghostty_selection_gesture_new(allocator, out);
+        }
+    };
 
     private final AtomicBoolean closed = new AtomicBoolean();
     private final Arena callbackArena = Arena.ofShared();
@@ -122,14 +170,14 @@ final class TerminalSession implements AutoCloseable {
                     "ghostty_terminal_new");
             terminal = terminalPointer.get(ValueLayout.ADDRESS, 0);
 
-            renderState = newAddress(arena, "ghostty_render_state_new", ghostty_vt_h::ghostty_render_state_new);
-            rowIterator = newAddress(arena, "ghostty_render_state_row_iterator_new", ghostty_vt_h::ghostty_render_state_row_iterator_new);
-            rowCells = newAddress(arena, "ghostty_render_state_row_cells_new", ghostty_vt_h::ghostty_render_state_row_cells_new);
-            keyEncoder = newAddress(arena, "ghostty_key_encoder_new", ghostty_vt_h::ghostty_key_encoder_new);
-            keyEvent = newAddress(arena, "ghostty_key_event_new", ghostty_vt_h::ghostty_key_event_new);
-            mouseEncoder = newAddress(arena, "ghostty_mouse_encoder_new", ghostty_vt_h::ghostty_mouse_encoder_new);
-            mouseEvent = newAddress(arena, "ghostty_mouse_event_new", ghostty_vt_h::ghostty_mouse_event_new);
-            selectionGesture = newAddress(arena, "ghostty_selection_gesture_new", ghostty_vt_h::ghostty_selection_gesture_new);
+            renderState = newAddress(arena, "ghostty_render_state_new", RENDER_STATE_ALLOCATOR);
+            rowIterator = newAddress(arena, "ghostty_render_state_row_iterator_new", RENDER_STATE_ROW_ITERATOR_ALLOCATOR);
+            rowCells = newAddress(arena, "ghostty_render_state_row_cells_new", RENDER_STATE_ROW_CELLS_ALLOCATOR);
+            keyEncoder = newAddress(arena, "ghostty_key_encoder_new", KEY_ENCODER_ALLOCATOR);
+            keyEvent = newAddress(arena, "ghostty_key_event_new", KEY_EVENT_ALLOCATOR);
+            mouseEncoder = newAddress(arena, "ghostty_mouse_encoder_new", MOUSE_ENCODER_ALLOCATOR);
+            mouseEvent = newAddress(arena, "ghostty_mouse_event_new", MOUSE_EVENT_ALLOCATOR);
+            selectionGesture = newAddress(arena, "ghostty_selection_gesture_new", SELECTION_GESTURE_ALLOCATOR);
 
             requireGhosttySuccess(
                     ghostty_vt_h.ghostty_terminal_resize(

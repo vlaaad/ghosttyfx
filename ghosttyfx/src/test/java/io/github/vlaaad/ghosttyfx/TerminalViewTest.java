@@ -15,6 +15,8 @@ import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.io.PipedInputStream;
+import java.io.PipedOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -509,8 +511,10 @@ final class TerminalViewTest {
     @Test
     void exposesBellAndTitleEffectsFromTerminalOutput() throws Exception {
         var bells = new AtomicInteger();
-        try (var view = createView("\u0007\u001B]2;ghosttyfx title\u001B\\")) {
+        var terminal = new ControlledTerminal();
+        try (var view = new TerminalView((_, _) -> terminal)) {
             view.setOnBell(bells::incrementAndGet);
+            terminal.emit("\u0007\u001B]2;ghosttyfx title\u001B\\");
 
             await("terminal bell and title effects", START_TIMEOUT, () -> runOnFxThread(() ->
                     bells.get() == 1 && "ghosttyfx title".equals(view.getTitle())
@@ -1082,9 +1086,11 @@ final class TerminalViewTest {
     }
 
     private static void assertCurrentDirectoryFromOutput(String output, String expected) throws Exception {
-        try (var view = createView(output)) {
+        var terminal = new ControlledTerminal();
+        try (var view = new TerminalView((_, _) -> terminal)) {
             assertEquals("", view.getCurrentDirectory());
             assertEquals(view.getCurrentDirectory(), view.currentDirectoryProperty().get());
+            terminal.emit(output);
             await("terminal current directory " + expected, START_TIMEOUT, () -> runOnFxThread(() ->
                     expected.equals(view.getCurrentDirectory()) && expected.equals(view.currentDirectoryProperty().get())
                             ? Optional.of(Boolean.TRUE)
@@ -1561,6 +1567,40 @@ final class TerminalViewTest {
 
         @Override
         public void close() {
+        }
+    }
+
+    private static final class ControlledTerminal implements Terminal {
+        private final PipedInputStream output = new PipedInputStream();
+        private final PipedOutputStream outputWriter;
+
+        private ControlledTerminal() throws IOException {
+            outputWriter = new PipedOutputStream(output);
+        }
+
+        private void emit(String output) throws IOException {
+            outputWriter.write(output.getBytes(StandardCharsets.UTF_8));
+            outputWriter.flush();
+        }
+
+        @Override
+        public InputStream output() {
+            return output;
+        }
+
+        @Override
+        public OutputStream input() {
+            return OutputStream.nullOutputStream();
+        }
+
+        @Override
+        public void resize(int columns, int rows) {
+        }
+
+        @Override
+        public void close() throws IOException {
+            outputWriter.close();
+            output.close();
         }
     }
 }
