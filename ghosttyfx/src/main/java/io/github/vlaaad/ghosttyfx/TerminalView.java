@@ -1414,14 +1414,14 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
         return adjustSelection(ghostty_vt_h.GHOSTTY_SELECTION_ADJUST_PAGE_DOWN());
     }
 
-    /// Extends the current selection to the beginning of its focus row.
+    /// Extends the current selection to the top-left cell of the terminal screen.
     ///
     /// @return `true` if there was a selection to extend; otherwise `false`
     public boolean extendSelectionHome() {
         return adjustSelection(ghostty_vt_h.GHOSTTY_SELECTION_ADJUST_HOME());
     }
 
-    /// Extends the current selection to the end of its focus row.
+    /// Extends the current selection to the right edge of the last non-blank terminal row.
     ///
     /// @return `true` if there was a selection to extend; otherwise `false`
     public boolean extendSelectionEnd() {
