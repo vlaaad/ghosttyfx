@@ -36,9 +36,27 @@ licenses.
 
 ## Local Build
 
+Requires JDK 25+.
+
 Run:
 
 `mvn clean test`
+
+### macOS with Xcode 26+
+
+Zig 0.15.2 cannot link against the macOS 26.x SDK. If the build fails with
+`undefined symbol: _abort` (and other libc symbols), switch to the
+CommandLineTools SDK which ships an older (15.x) SDK:
+
+```
+sudo xcode-select -s /Library/Developer/CommandLineTools
+```
+
+Switch back after building:
+
+```
+sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+```
 
 The Maven build invokes [scripts/GhosttyBuild.java](/C:/Users/Vlaaad/Projects/ghosttyfx/scripts/GhosttyBuild.java), which:
 
