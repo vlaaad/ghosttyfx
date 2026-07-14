@@ -5,7 +5,10 @@ import java.lang.ref.Cleaner;
 import java.lang.ref.WeakReference;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.function.DoubleSupplier;
 import java.util.regex.Pattern;
@@ -150,11 +153,39 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
         baselineOffsetPx = Math.max(0, Math.min(cellHeightPx, baselineOffsetPx));
         var monospace = maxWidth > 0 && maxWidth - minWidth <= 0.01;
         var fontSize = monospace ? font.getSize() * cellWidthPx / maxWidth : font.getSize();
+        var regular = new Font(font.getName(), fontSize);
+        var lookupFamilies = Font.getFontNames(font.getFamily()).contains(font.getName())
+                ? List.of(font.getFamily())
+                : FontIndex.lookupFamilies(font.getName());
+        var bold = regular;
+        var italic = regular;
+        var boldItalic = regular;
+        for (var lookupFamily : lookupFamilies) {
+            var faceNames = Font.getFontNames(lookupFamily);
+            if (bold.equals(regular)) {
+                var match = Font.font(lookupFamily, FontWeight.BOLD, fontSize);
+                if (faceNames.contains(match.getName())) {
+                    bold = match;
+                }
+            }
+            if (italic.equals(regular)) {
+                var match = Font.font(lookupFamily, FontPosture.ITALIC, fontSize);
+                if (faceNames.contains(match.getName())) {
+                    italic = match;
+                }
+            }
+            if (boldItalic.equals(regular)) {
+                var match = Font.font(lookupFamily, FontWeight.BOLD, FontPosture.ITALIC, fontSize);
+                if (faceNames.contains(match.getName())) {
+                    boldItalic = match;
+                }
+            }
+        }
         return new FontMetrics(
-                new Font(font.getName(), fontSize),
-                Font.font(font.getFamily(), FontWeight.BOLD, fontSize),
-                Font.font(font.getFamily(), FontPosture.ITALIC, fontSize),
-                Font.font(font.getFamily(), FontWeight.BOLD, FontPosture.ITALIC, fontSize),
+                regular,
+                bold,
+                italic,
+                boldItalic,
                 cellWidthPx,
                 cellHeightPx,
                 baselineOffsetPx);
@@ -1971,6 +2002,30 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
         @Override
         public String getSelectedText() {
             return selectedText();
+        }
+    }
+
+    // A nested holder keeps installed-font enumeration lazy: the JVM initializes it only when a reported family
+    // cannot be used and reverse lookup is first needed.
+    private static final class FontIndex {
+
+        private static final Map<String, List<String>> LOOKUP_FAMILIES_BY_FACE_NAME = build();
+
+        private FontIndex() {
+        }
+
+        private static List<String> lookupFamilies(String faceName) {
+            return LOOKUP_FAMILIES_BY_FACE_NAME.getOrDefault(faceName, List.of());
+        }
+
+        private static Map<String, List<String>> build() {
+            var index = new HashMap<String, List<String>>();
+            for (var family : Font.getFamilies()) {
+                for (var faceName : Font.getFontNames(family)) {
+                    index.computeIfAbsent(faceName, _ -> new ArrayList<>()).add(family);
+                }
+            }
+            return index;
         }
     }
 

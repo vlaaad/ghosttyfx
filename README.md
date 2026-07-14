@@ -179,17 +179,15 @@ used. Useful view APIs include:
 
 Use `fontProperty()` or `setFont(...)` to configure the terminal font. The view
 uses the font to measure terminal cells, so changing it can change the view's
-preferred width and height. Bold, italic, and bold italic faces are derived from
-the configured font family and size.
-
-JavaFX resolves bold and italic faces by family. If an app bundles a terminal
-font, load every face needed by terminal styles before assigning the font:
+preferred width and height. When bundling a font, load every face needed for
+terminal styles before creating the view:
 
 ```java
 var regular = Font.loadFont(App.class.getResourceAsStream("MyFont-Regular.ttf"), 14);
 Font.loadFont(App.class.getResourceAsStream("MyFont-Bold.ttf"), 14);
 Font.loadFont(App.class.getResourceAsStream("MyFont-Italic.ttf"), 14);
 Font.loadFont(App.class.getResourceAsStream("MyFont-BoldItalic.ttf"), 14);
+var view = new TerminalView(terminalFactory);
 view.setFont(Font.font(regular.getFamily(), 14));
 ```
 
