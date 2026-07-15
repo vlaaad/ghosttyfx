@@ -504,7 +504,10 @@ public final class GhosttyBuild {
     private static void buildGhostty(Path repo, PlatformSpec platform, Path zigHome) throws Exception {
         ensureHostToolchain();
         var environment = buildEnvironment(repo, zigHome);
-        run(
+        // ghostty's build.zig exits non-zero when xcodebuild -create-xcframework fails
+        // (e.g. missing full Xcode install), but the .dylib we need is already built by then.
+        // The xcframework bundles a static lib for Swift/Xcode consumers — ghosttyfx doesn't use it.
+        runAllowFailure(
             repo.resolve(GHOSTTY_SUBMODULE),
             environment,
             zigExecutable(zigHome).toString(),
@@ -854,6 +857,21 @@ public final class GhosttyBuild {
             buildDir.resolve("generated-resources").resolve("ghosttyfx"),
             buildDir.resolve("ghosttyfx-artifact")
         );
+    }
+
+    private static void runAllowFailure(Path workingDirectory, Map<String, String> extraEnvironment, String... command) throws Exception {
+        System.out.println(String.join(" ", command));
+        var processBuilder = new ProcessBuilder(command);
+        processBuilder.directory(workingDirectory.toFile());
+        processBuilder.inheritIO();
+        if (!extraEnvironment.isEmpty()) {
+            processBuilder.environment().putAll(extraEnvironment);
+        }
+        var process = processBuilder.start();
+        var exitCode = process.waitFor();
+        if (exitCode != 0) {
+            System.out.println("warning: command exited with code " + exitCode + " (continuing): " + String.join(" ", command));
+        }
     }
 
     private static void run(Path workingDirectory, Map<String, String> extraEnvironment, String... command) throws Exception {
