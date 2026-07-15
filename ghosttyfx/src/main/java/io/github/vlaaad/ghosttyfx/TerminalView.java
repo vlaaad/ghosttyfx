@@ -660,6 +660,9 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
             event.consume();
             return;
         }
+        var jfrEvent = new JfrEvents.KeyInputEvent();
+        jfrEvent.action = "pressed";
+        jfrEvent.begin();
         if (handleTerminalShortcut(event) || applyTransition(KeyInput.onKeyPressed(
                 keyInputState,
                 HostPlatform.CURRENT,
@@ -667,15 +670,23 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
                 snapshot(event)))) {
             event.consume();
         }
+        jfrEvent.commit();
     }
 
     private void handleKeyReleased(KeyEvent event) {
+        var jfrEvent = new JfrEvents.KeyInputEvent();
+        jfrEvent.action = "released";
+        jfrEvent.begin();
         if (applyTransition(KeyInput.onKeyReleased(keyInputState, snapshot(event)))) {
             event.consume();
         }
+        jfrEvent.commit();
     }
 
     private void handleKeyTyped(KeyEvent event) {
+        var jfrEvent = new JfrEvents.KeyInputEvent();
+        jfrEvent.action = "typed";
+        jfrEvent.begin();
         if (applyTransition(KeyInput.onKeyTyped(
                 keyInputState,
                 HostPlatform.CURRENT,
@@ -683,6 +694,7 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
                 event.getCharacter()))) {
             event.consume();
         }
+        jfrEvent.commit();
     }
 
     private void handleInputMethodTextChanged(InputMethodEvent event) {
@@ -1796,9 +1808,12 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
     }
 
     private void redraw() {
+        var event = new JfrEvents.RedrawEvent();
+        event.begin();
         var width = getWidth();
         var height = getHeight();
         if (width <= 0 || height <= 0) {
+            event.commit();
             return;
         }
         canvas.resize(width, height);
@@ -1821,6 +1836,7 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
                 scrollbarReservedWidthPx(),
                 MIN_SCROLLBAR_HEIGHT_PX,
                 promptNavigationHighlightRow);
+        event.commit();
     }
 
     private void resetCursorBlink() {
@@ -1935,6 +1951,9 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
                 }
 
                 if (bytes.length != 0) {
+                    var ptyEvent = new JfrEvents.PtyOutputEvent();
+                    ptyEvent.bytes = bytes.length;
+                    ptyEvent.begin();
                     terminal.resetCursorBlink();
                     terminal.resetPromptNavigation();
                     terminal.terminalSession.writeToTerminal(bytes);
@@ -1943,6 +1962,7 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
                     } else {
                         terminal.redraw();
                     }
+                    ptyEvent.commit();
                 }
             }
             if (outputs.get(outputs.size() - 1) instanceof PtySession.Closed(var state)) {

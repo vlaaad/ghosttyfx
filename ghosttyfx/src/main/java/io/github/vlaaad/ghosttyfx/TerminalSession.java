@@ -315,7 +315,11 @@ final class TerminalSession implements AutoCloseable {
         if (length == 0) {
             return;
         }
+        var event = new JfrEvents.PtyWriteEvent();
+        event.bytes = Math.toIntExact(length);
+        event.begin();
         terminalInput.accept(data.reinterpret(length).toArray(ValueLayout.JAVA_BYTE));
+        event.commit();
     }
 
     private boolean reportSize(MemorySegment terminal, MemorySegment userdata, MemorySegment outSize) {
@@ -444,11 +448,15 @@ final class TerminalSession implements AutoCloseable {
     }
 
     void writeToTerminal(byte[] bytes) {
+        var event = new JfrEvents.WriteToTerminalEvent();
+        event.bytes = bytes.length;
+        event.begin();
         try (var arena = Arena.ofConfined()) {
             var nativeBytes = arena.allocateFrom(ValueLayout.JAVA_BYTE, bytes);
             ghostty_vt_h.ghostty_terminal_vt_write(terminal, nativeBytes, bytes.length);
         }
         updateRenderState();
+        event.commit();
     }
 
     byte[] encodeFocus(boolean focused) {
@@ -1354,6 +1362,10 @@ final class TerminalSession implements AutoCloseable {
             double scrollbarReservedWidthPx,
             double minScrollbarHeightPx,
             int promptNavigationHighlightRow) {
+        var jfrEvent = new JfrEvents.RenderEvent();
+        jfrEvent.rows = size.rows();
+        jfrEvent.cols = size.columns();
+        jfrEvent.begin();
         graphics.setFont(metrics.regular());
 
         try (var arena = Arena.ofConfined()) {
@@ -1623,7 +1635,9 @@ final class TerminalSession implements AutoCloseable {
                         TerminalView.SCROLLBAR_ARC_PX,
                         TerminalView.SCROLLBAR_ARC_PX);
             }
-            return new BlinkState(hasCursorBlink, hasTextBlink);
+            var result = new BlinkState(hasCursorBlink, hasTextBlink);
+            jfrEvent.commit();
+            return result;
         }
     }
 
