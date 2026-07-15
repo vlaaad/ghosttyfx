@@ -625,7 +625,10 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
         if (currentTerminalSize.columns() != size.columns() || currentTerminalSize.rows() != size.rows()) {
             terminalSize.set(new TerminalSize(size.columns(), size.rows()));
         }
-        writeCommand(new PtySession.ResizePty(size.columns(), size.rows()));
+        writeCommand(new PtySession.ResizePty(
+                size.columns(), size.rows(),
+                size.columns() * metrics.cellWidthPx(),
+                size.rows() * metrics.cellHeightPx()));
         if (searchUi.visible()) {
             searchUi.refresh(false);
             return;

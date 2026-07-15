@@ -3,7 +3,9 @@ package io.github.vlaaad.ghosttyfx.perfapp;
 import com.pty4j.PtyProcess;
 import com.pty4j.PtyProcessBuilder;
 import com.pty4j.WinSize;
+import com.pty4j.unix.UnixPtyProcess;
 import io.github.vlaaad.ghosttyfx.Terminal;
+
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -40,8 +42,11 @@ final class PtyTerminal implements Terminal {
     }
 
     @Override
-    public void resize(int columns, int rows) {
+    public void resize(int columns, int rows, int widthPx, int heightPx) {
         process.setWinSize(new WinSize(columns, rows));
+        if (process instanceof UnixPtyProcess unix) {
+            Terminal.setPtyPixelSize(unix.getPty().getMasterFD(), columns, rows, widthPx, heightPx);
+        }
     }
 
     @Override

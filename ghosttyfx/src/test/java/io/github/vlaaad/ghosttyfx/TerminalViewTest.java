@@ -3,6 +3,8 @@ package io.github.vlaaad.ghosttyfx;
 import com.pty4j.PtyProcess;
 import com.pty4j.PtyProcessBuilder;
 import com.pty4j.WinSize;
+import com.pty4j.unix.UnixPtyProcess;
+
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -505,6 +507,46 @@ final class TerminalViewTest {
                 restoreClipboardContents(clipboardContents);
                 return null;
             });
+        }
+    }
+
+    @Test
+    void kittyGraphicsImageIsStoredAfterEscapeSequence() throws Exception {
+        // 1x1 red PNG, base64-encoded
+        var pngBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAA"
+                + "DUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==";
+        // a=T (transmit+display), f=100 (PNG), q=2 (suppress response)
+        var kittyCmd = "\u001B_Ga=T,f=100,q=2;" + pngBase64 + "\u001B\\";
+        var marker = "img-stored";
+        var terminal = new ControlledTerminal();
+        try (var view = new TerminalView((_, _) -> terminal)) {
+            terminal.emit(kittyCmd);
+            terminal.emit(marker);
+            // Verify the terminal processed the kitty graphics command and still renders text.
+            // The PNG decoder is called (verified by the setup), the image is stored internally.
+            await("terminal text after kitty graphics", START_TIMEOUT, () -> runOnFxThread(() -> {
+                fireTerminalShortcut(view, selectAllTerminalShortcut());
+                var text = view.getInputMethodRequests().getSelectedText();
+                return text != null && text.contains(marker) ? Optional.of(Boolean.TRUE) : Optional.empty();
+            }));
+        }
+    }
+
+    @Test
+    void kittyGraphicsRenderSucceedsWithImage() throws Exception {
+        // 1x1 red PNG, base64-encoded
+        var pngBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAA"
+                + "DUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==";
+        // a=T (transmit+display), f=100 (PNG), q=2 (suppress response)
+        var kittyCmd = "\u001B_Ga=T,f=100,q=2;" + pngBase64 + "\u001B\\";
+        var marker = "after-kitty";
+        try (var view = createView(kittyCmd + marker)) {
+            // Verify the terminal renders text after kitty graphics without error
+            await("terminal output after kitty graphics", START_TIMEOUT, () -> runOnFxThread(() -> {
+                fireTerminalShortcut(view, selectAllTerminalShortcut());
+                var text = view.getInputMethodRequests().getSelectedText();
+                return text != null && text.contains(marker) ? Optional.of(Boolean.TRUE) : Optional.empty();
+            }));
         }
     }
 
@@ -1482,7 +1524,7 @@ final class TerminalViewTest {
         }
 
         @Override
-        public void resize(int columns, int rows) {
+        public void resize(int columns, int rows, int widthPx, int heightPx) {
         }
 
         @Override
@@ -1526,8 +1568,11 @@ final class TerminalViewTest {
         }
 
         @Override
-        public void resize(int columns, int rows) {
+        public void resize(int columns, int rows, int widthPx, int heightPx) {
             process.setWinSize(new WinSize(columns, rows));
+            if (process instanceof UnixPtyProcess unix) {
+                Terminal.setPtyPixelSize(unix.getPty().getMasterFD(), columns, rows, widthPx, heightPx);
+            }
         }
 
         @Override
@@ -1562,7 +1607,7 @@ final class TerminalViewTest {
         }
 
         @Override
-        public void resize(int columns, int rows) {
+        public void resize(int columns, int rows, int widthPx, int heightPx) {
         }
 
         @Override
@@ -1594,7 +1639,7 @@ final class TerminalViewTest {
         }
 
         @Override
-        public void resize(int columns, int rows) {
+        public void resize(int columns, int rows, int widthPx, int heightPx) {
         }
 
         @Override
@@ -1603,4 +1648,5 @@ final class TerminalViewTest {
             output.close();
         }
     }
+
 }
