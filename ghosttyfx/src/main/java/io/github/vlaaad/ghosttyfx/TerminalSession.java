@@ -1411,6 +1411,7 @@ final class TerminalSession implements AutoCloseable {
                     ? Math.toIntExact(GhosttyTerminalScrollbar.offset(scrollbar))
                     : 0;
             var visibleRows = Math.max(1, (int) Math.ceil(height / metrics.cellHeightPx()));
+            var linkDebounced = System.nanoTime() - lastWriteToTerminalNs < LINK_MATCH_DEBOUNCE_NS;
             var linkResult = SearchResult.append(
                     SearchResult.empty(),
                     linkMatcherSelections(linkMatchers, viewportTop, viewportTop + visibleRows - 1),
@@ -1596,7 +1597,8 @@ final class TerminalSession implements AutoCloseable {
                             drawTextDecorations(graphics, x, y, metrics, style, selected, baseTextColor, textColor, theme, faintFactor);
                             if (GhosttyStyle.underline(style) == ghostty_vt_h.GHOSTTY_SGR_UNDERLINE_NONE()
                                     && !GhosttyStyle.strikethrough(style)
-                                    && !GhosttyStyle.overline(style)) {
+                                    && !GhosttyStyle.overline(style)
+                                    && !linkDebounced) {
                                 var hyperlinkUri = cellHyperlink(screenPoint, arena);
                                 var osc8Link = hyperlinkUri != null && !hyperlinkUri.isEmpty();
                                 if (matchedLink || osc8Link) {
