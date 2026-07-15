@@ -138,8 +138,10 @@ final class TerminalSession implements AutoCloseable {
     private final Consumer<String> titleChanged;
     private final Consumer<String> pwdChanged;
     private final Runnable bell;
+    private static final long LINK_MATCH_DEBOUNCE_NS = 50_000_000L; // 50ms
     private Size size;
     private TerminalView.FontMetrics fontMetrics;
+    private long lastWriteToTerminalNs;
 
     TerminalSession(
             int initialColumns,
@@ -455,6 +457,7 @@ final class TerminalSession implements AutoCloseable {
             var nativeBytes = arena.allocateFrom(ValueLayout.JAVA_BYTE, bytes);
             ghostty_vt_h.ghostty_terminal_vt_write(terminal, nativeBytes, bytes.length);
         }
+        lastWriteToTerminalNs = System.nanoTime();
         updateRenderState();
         event.commit();
     }
@@ -1044,6 +1047,10 @@ final class TerminalSession implements AutoCloseable {
 
     List<Selection> linkMatcherSelections(List<TerminalLinkMatcher> linkMatchers, int startRow, int endRow) {
         if (linkMatchers.isEmpty()) {
+            return List.of();
+        }
+        // Skip expensive link matching during rapid terminal output
+        if (System.nanoTime() - lastWriteToTerminalNs < LINK_MATCH_DEBOUNCE_NS) {
             return List.of();
         }
 
