@@ -32,7 +32,7 @@ jobs:
         with:
           name: ghosttyfx-linux-x86_64
           path: ghosttyfx-linux-x86_64/target/ghosttyfx-artifact/
-          retention-days: 1
+          retention-days: 60
           compression-level: 0
 
   linux-aarch64:
@@ -61,7 +61,7 @@ jobs:
         with:
           name: ghosttyfx-linux-aarch64
           path: ghosttyfx-linux-aarch64/target/ghosttyfx-artifact/
-          retention-days: 1
+          retention-days: 60
           compression-level: 0
 
   macos-aarch64:
@@ -90,7 +90,7 @@ jobs:
         with:
           name: ghosttyfx-macos-aarch64
           path: ghosttyfx-macos-aarch64/target/ghosttyfx-artifact/
-          retention-days: 1
+          retention-days: 60
           compression-level: 0
 
   macos-x86_64:
@@ -119,7 +119,7 @@ jobs:
         with:
           name: ghosttyfx-macos-x86_64
           path: ghosttyfx-macos-x86_64/target/ghosttyfx-artifact/
-          retention-days: 1
+          retention-days: 60
           compression-level: 0
 
   windows-x86_64:
@@ -148,7 +148,7 @@ jobs:
         with:
           name: ghosttyfx-windows-x86_64
           path: ghosttyfx-windows-x86_64/target/ghosttyfx-artifact/
-          retention-days: 1
+          retention-days: 60
           compression-level: 0
 
   publish:

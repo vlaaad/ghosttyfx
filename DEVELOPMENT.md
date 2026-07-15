@@ -68,8 +68,9 @@ Run:
 
 That command:
 
-- requires a clean checkout synced to `origin/main`
-- triggers `build-lib.yml` on CI
+- first searches successful `build-lib.yml` workflow dispatches for the current branch and commit
+- falls back to successful workflow runs from pushes to `main`, newest first
+- downloads the newest complete retained artifact set compatible with the checked-out `ghostty` submodule
 - downloads the produced artifact set into `dist/<ghostty-commit-sha>/`
 - validates that each artifact metadata file matches the current `ghostty` submodule commit
 

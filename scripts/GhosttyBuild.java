@@ -11,6 +11,7 @@ import java.nio.file.SimpleFileVisitor;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.security.MessageDigest;
+import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Locale;
@@ -18,7 +19,6 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Properties;
-import java.util.regex.Pattern;
 import java.util.zip.CRC32;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
@@ -35,8 +35,6 @@ public final class GhosttyBuild {
     private static final String GHOSTTY_OPTIMIZE = "ReleaseFast";
     private static final String DOWNLOAD_ARTIFACTS_COMMAND =
         "mvn -N -Pdownload-cross-platform-artifacts exec:exec@download-cross-platform-artifacts";
-    private static final Pattern RUN_URL_PATTERN =
-        Pattern.compile("https://github\\.com/[^/]+/[^/]+/actions/runs/(\\d+)");
     private static final HttpClient HTTP = HttpClient.newBuilder()
         .followRedirects(HttpClient.Redirect.NORMAL)
         .build();
@@ -270,103 +268,104 @@ public final class GhosttyBuild {
 
     private static void downloadArtifacts(Path repo) throws Exception {
         ensureRequiredSubmodules(repo);
-        ensureSyncedWithMain(repo);
         var ghosttyCommit = capture(repo.resolve(GHOSTTY_SUBMODULE), "git", "rev-parse", "HEAD").trim();
         var distDir = distDir(repo, ghosttyCommit);
-        deleteDirectory(distDir);
-        Files.createDirectories(distDir);
+        var currentBranch = capture(repo, "git", "branch", "--show-current").trim();
+        var headCommit = capture(repo, "git", "rev-parse", "HEAD").trim();
+        var runIds = new ArrayList<String>();
+        if (!currentBranch.isBlank()) {
+            runIds.addAll(workflowRunIds(repo, currentBranch, "workflow_dispatch", headCommit));
+        }
+        runIds.addAll(workflowRunIds(repo, "main", "push", ""));
+        var distRoot = repo.resolve("dist");
+        Files.createDirectories(distRoot);
 
-        System.out.println("Triggering workflow...");
-        var output = capture(repo, "gh", "workflow", "run", WORKFLOW_FILE, "--repo", WORKFLOW_REPO);
-        var runId = parseRunId(output);
-        System.out.println("Started workflow run: " + runId);
-
-        waitForWorkflow(repo, runId);
-
-        System.out.println("Downloading artifacts...");
-        for (var platform : PLATFORMS.values()) {
-            var artifactId = artifactId(platform.id);
-            var artifactDir = distDir.resolve(artifactId);
-            Files.createDirectories(artifactDir);
-            run(
+        for (var runId : runIds) {
+            var artifactNames = capture(
                 repo,
-                Map.of(),
                 "gh",
-                "run",
-                "download",
-                runId,
-                "--repo",
-                WORKFLOW_REPO,
-                "-n",
-                artifactId,
-                "-D",
-                artifactDir.toString()
-            );
-            if (!isValidArtifactBundle(artifactDir, platform, artifactId, ghosttyCommit)) {
-                throw new IllegalStateException(
-                    "downloaded artifact did not match ghostty commit " + ghosttyCommit + ": " + artifactDir
-                );
+                "api",
+                "repos/" + WORKFLOW_REPO + "/actions/runs/" + runId + "/artifacts",
+                "--paginate",
+                "--jq",
+                ".artifacts[] | select(.expired == false) | .name"
+            ).lines().filter(line -> !line.isBlank()).toList();
+            if (!PLATFORMS.values().stream().map(platform -> artifactId(platform.id)).allMatch(artifactNames::contains)) {
+                System.out.println("Skipping workflow run without a complete retained artifact set: " + runId);
+                continue;
             }
-        }
 
-        System.out.println("Artifacts downloaded to " + distDir);
-    }
-
-    private static void ensureSyncedWithMain(Path repo) throws Exception {
-        run(repo, Map.of(), "git", "fetch", "origin", "main", "--quiet");
-        var status = capture(repo, "git", "status", "--porcelain=v2", "--branch");
-        for (var line : status.split("\\R")) {
-            if (!line.isBlank() && !line.startsWith("#")) {
-                throw new IllegalStateException(
-                    "Refusing to trigger CI because the working tree is not clean. "
-                        + "Commit, stash, or remove local changes so the checkout matches origin/main."
-                );
-            }
-        }
-
-        var head = capture(repo, "git", "rev-parse", "HEAD").trim();
-        var originMain = capture(repo, "git", "rev-parse", "origin/main").trim();
-        if (!head.equals(originMain)) {
-            throw new IllegalStateException(
-                "Refusing to trigger CI because HEAD does not match origin/main. "
-                    + "Push or reset your local branch so the workflow runs against the same commit."
-            );
-        }
-    }
-
-    private static String parseRunId(String output) {
-        var matcher = RUN_URL_PATTERN.matcher(output);
-        if (!matcher.find()) {
-            throw new IllegalStateException("could not determine workflow run id from output: " + output);
-        }
-        return matcher.group(1);
-    }
-
-    private static void waitForWorkflow(Path repo, String runId) throws Exception {
-        System.out.println("Waiting for workflow to complete...");
-        while (true) {
-            var json = capture(repo, "gh", "run", "view", runId, "--repo", WORKFLOW_REPO, "--json", "status,conclusion,url");
-            var status = jsonField(json, "status");
-            var conclusion = jsonField(json, "conclusion");
-            var url = jsonField(json, "url");
-            if ("completed".equals(status)) {
-                if (!"success".equals(conclusion)) {
-                    throw new IllegalStateException("workflow completed with: " + conclusion + "\nRun URL: " + url);
+            System.out.println("Trying artifacts from https://github.com/" + WORKFLOW_REPO + "/actions/runs/" + runId);
+            var candidateDir = Files.createTempDirectory(distRoot, ".ghosttyfx-artifacts-");
+            try {
+                var valid = true;
+                for (var platform : PLATFORMS.values()) {
+                    var artifactId = artifactId(platform.id);
+                    var artifactDir = candidateDir.resolve(artifactId);
+                    Files.createDirectories(artifactDir);
+                    run(
+                        repo,
+                        Map.of(),
+                        "gh",
+                        "run",
+                        "download",
+                        runId,
+                        "--repo",
+                        WORKFLOW_REPO,
+                        "-n",
+                        artifactId,
+                        "-D",
+                        artifactDir.toString()
+                    );
+                    if (!isValidArtifactBundle(artifactDir, platform, artifactId, ghosttyCommit)) {
+                        valid = false;
+                        break;
+                    }
                 }
-                System.out.println("Workflow completed successfully!");
-                return;
+                if (valid) {
+                    deleteDirectory(distDir);
+                    Files.move(candidateDir, distDir);
+                    System.out.println("Artifacts downloaded to " + distDir);
+                    return;
+                }
+                System.out.println("Skipping workflow run with incompatible artifacts: " + runId);
+            } finally {
+                deleteDirectory(candidateDir);
             }
-            System.out.println("Status: " + status + "... waiting 5s");
-            Thread.sleep(5000);
         }
+
+        throw new IllegalStateException(
+            "No complete retained artifact set from the current branch or main matched ghostty commit " + ghosttyCommit
+        );
     }
 
-    private static String jsonField(String json, String field) {
-        var matcher = Pattern.compile("\"" + Pattern.quote(field) + "\"\\s*:\\s*(null|\"([^\"]*)\")").matcher(json);
-        if (!matcher.find()) {
-            throw new IllegalStateException("missing JSON field '" + field + "' in: " + json);
+    private static List<String> workflowRunIds(Path repo, String branch, String event, String commit) throws Exception {
+        var command = new ArrayList<>(List.of(
+            "gh",
+            "run",
+            "list",
+            "--repo",
+            WORKFLOW_REPO,
+            "--workflow",
+            WORKFLOW_FILE,
+            "--branch",
+            branch,
+            "--event",
+            event,
+            "--status",
+            "success",
+            "--limit",
+            "100",
+            "--json",
+            "databaseId",
+            "--jq",
+            ".[].databaseId"
+        ));
+        if (!commit.isBlank()) {
+            command.add("--commit");
+            command.add(commit);
         }
-        return "null".equals(matcher.group(1)) ? "" : matcher.group(2);
+        return capture(repo, command.toArray(String[]::new)).lines().filter(line -> !line.isBlank()).toList();
     }
 
     private static boolean restoreCachedArtifact(
