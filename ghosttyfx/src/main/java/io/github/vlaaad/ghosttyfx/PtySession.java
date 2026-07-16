@@ -1,13 +1,12 @@
 package io.github.vlaaad.ghosttyfx;
 
-import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.List;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.function.Consumer;
 
 final class PtySession implements AutoCloseable {
 
@@ -16,11 +15,13 @@ final class PtySession implements AutoCloseable {
     private static final ExecutorService COMMAND_DRAIN = Executors.newVirtualThreadPerTaskExecutor();
 
     private final BlockingQueue<Command> commands = new ArrayBlockingQueue<>(16_384);
-    private final BlockingQueue<ProcessOutput> processOutputs = new ArrayBlockingQueue<>(256);
+    // Process exit state, set by the IO thread when the terminal process exits.
+    // VT output is now fed directly to the terminal core on the IO thread.
+    private volatile TerminalState closedState;
     private final Future<?> ioTask;
 
-    PtySession(TerminalFactory terminalFactory, int initialColumns, int initialRows) {
-        ioTask = IO.submit(() -> runProcess(terminalFactory, initialColumns, initialRows));
+    PtySession(TerminalFactory terminalFactory, int initialColumns, int initialRows, Consumer<byte[]> vtWriter) {
+        ioTask = IO.submit(() -> runProcess(terminalFactory, initialColumns, initialRows, vtWriter));
     }
 
     @Override
@@ -32,28 +33,24 @@ final class PtySession implements AutoCloseable {
         commands.put(command);
     }
 
-    List<ProcessOutput> pollProcessOutputs() {
-        var firstOutput = processOutputs.poll();
-        if (firstOutput == null) {
-            return List.of();
-        }
-
-        var outputs = new ArrayList<ProcessOutput>(1 + processOutputs.size());
-        outputs.add(firstOutput);
-        processOutputs.drainTo(outputs);
-        return outputs;
+    /**
+     * Returns the terminal closed state if the process has exited, null otherwise.
+     * Called from the FX-thread AnimationTimer.
+     */
+    TerminalState pollClosed() {
+        return closedState;
     }
 
-    private Void runProcess(TerminalFactory terminalFactory, int initialColumns, int initialRows) throws Exception {
+    private Void runProcess(TerminalFactory terminalFactory, int initialColumns, int initialRows, Consumer<byte[]> vtWriter) throws Exception {
         try {
             try (var terminal = terminalFactory.open(initialColumns, initialRows)) {
-                // output task, no cleanup since we want to emit closed event when the process exits
+                // output task — feeds PTY output directly to the Ghostty terminal core on the IO thread
                 var outputTask = IO.submit(() -> {
                     try (var input = terminal.output()) {
                         var buffer = new byte[8 * 1024];
                         var read = input.read(buffer);
                         while (read >= 0) {
-                            processOutputs.put(new Chunk(Arrays.copyOf(buffer, read)));
+                            vtWriter.accept(Arrays.copyOf(buffer, read));
                             read = input.read(buffer);
                         }
                     }
@@ -84,9 +81,9 @@ final class PtySession implements AutoCloseable {
                     // proceed to closing the terminal
                 }
             }
-            processOutputs.put(new Closed(new TerminalState.Closed()));
+            closedState = new TerminalState.Closed();
         } catch (Exception e) {
-            processOutputs.put(new Closed(new TerminalState.Failed(e)));
+            closedState = new TerminalState.Failed(e);
         }
         return null;
     }
@@ -98,14 +95,5 @@ final class PtySession implements AutoCloseable {
     }
 
     record ResizePty(int columns, int rows) implements Command {
-    }
-
-    sealed interface ProcessOutput permits Chunk, Closed {
-    }
-
-    record Chunk(byte[] bytes) implements ProcessOutput {
-    }
-
-    record Closed(TerminalState state) implements ProcessOutput {
     }
 }

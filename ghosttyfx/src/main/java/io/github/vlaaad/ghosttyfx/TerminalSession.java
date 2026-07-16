@@ -13,6 +13,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
@@ -134,11 +135,15 @@ final class TerminalSession implements AutoCloseable {
     private final MemorySegment selectionGesture;
     private final MemorySegment xtversionString;
     private final ArrayList<Color> builtInPalette = new ArrayList<>(PALETTE_SIZE);
+    private final ReentrantLock terminalLock = new ReentrantLock();
+    private volatile boolean vtDirty;
     private final Consumer<byte[]> terminalInput;
     private final Consumer<String> titleChanged;
     private final Consumer<String> pwdChanged;
     private final Runnable bell;
     private static final long LINK_MATCH_DEBOUNCE_NS = 50_000_000L; // 50ms
+    // Cached on the FX thread for the IO-thread reportColorScheme callback
+    private volatile int cachedColorScheme = -1;
     private Size size;
     private TerminalView.FontMetrics fontMetrics;
     private long lastWriteToTerminalNs;
@@ -248,12 +253,13 @@ final class TerminalSession implements AutoCloseable {
                 ghostty_vt_h.ghostty_terminal_set(
                         terminal,
                         ghostty_vt_h.GHOSTTY_TERMINAL_OPT_BELL(),
-                        GhosttyTerminalBellFn.allocate((_, _) -> this.bell.run(), callbackArena)),
+                        GhosttyTerminalBellFn.allocate((_, _) -> Platform.runLater(this.bell), callbackArena)),
                 "ghostty_terminal_set");
         updateRenderState();
     }
 
     void applyTheme(TerminalTheme theme) {
+        terminalLock.lock();
         try (var arena = Arena.ofConfined()) {
             var background = toNativeColor(theme.background(), arena);
             var foreground = toNativeColor(theme.foreground(), arena);
@@ -282,11 +288,14 @@ final class TerminalSession implements AutoCloseable {
                             ghostty_vt_h.GHOSTTY_TERMINAL_OPT_COLOR_PALETTE(),
                             theme.palette().isEmpty() ? MemorySegment.NULL : nativePalette(theme, arena)),
                     "ghostty_terminal_set(color_palette)");
+            updateRenderState();
+        } finally {
+            terminalLock.unlock();
         }
-        updateRenderState();
     }
 
     void setCursorBlinking(boolean value) {
+        terminalLock.lock();
         try (var arena = Arena.ofConfined()) {
             var blink = arena.allocate(ValueLayout.JAVA_BOOLEAN);
             blink.set(ValueLayout.JAVA_BOOLEAN, 0, value);
@@ -296,8 +305,10 @@ final class TerminalSession implements AutoCloseable {
                             ghostty_vt_h.GHOSTTY_TERMINAL_OPT_DEFAULT_CURSOR_BLINK(),
                             blink),
                     "ghostty_terminal_set(default_cursor_blink)");
+            updateRenderState();
+        } finally {
+            terminalLock.unlock();
         }
-        updateRenderState();
     }
 
     private void setDefaultCursorStyle() {
@@ -355,18 +366,24 @@ final class TerminalSession implements AutoCloseable {
     }
 
     private boolean reportColorScheme(MemorySegment terminal, MemorySegment userdata, MemorySegment outScheme) {
-        var scheme = Platform.getPreferences().getColorScheme();
-        if (scheme == null) {
+        var scheme = cachedColorScheme;
+        if (scheme < 0) {
             return false;
         }
-
-        outScheme.set(
-                ValueLayout.JAVA_INT,
-                0,
-                scheme == ColorScheme.DARK
-                        ? ghostty_vt_h.GHOSTTY_COLOR_SCHEME_DARK()
-                        : ghostty_vt_h.GHOSTTY_COLOR_SCHEME_LIGHT());
+        outScheme.set(ValueLayout.JAVA_INT, 0, scheme);
         return true;
+    }
+
+    /**
+     * Caches the current color scheme for the IO-thread callback.
+     * Must be called from the FX thread.
+     */
+    void refreshColorScheme() {
+        var scheme = Platform.getPreferences().getColorScheme();
+        cachedColorScheme = scheme == null ? -1
+                : scheme == ColorScheme.DARK
+                        ? ghostty_vt_h.GHOSTTY_COLOR_SCHEME_DARK()
+                        : ghostty_vt_h.GHOSTTY_COLOR_SCHEME_LIGHT();
     }
 
     private MemorySegment reportXtversion(MemorySegment terminal, MemorySegment userdata) {
@@ -380,7 +397,8 @@ final class TerminalSession implements AutoCloseable {
                     this.terminal,
                     ghostty_vt_h.GHOSTTY_TERMINAL_DATA_TITLE(),
                     title) == GHOSTTY_SUCCESS) {
-                titleChanged.accept(toJavaString(title));
+                var titleStr = toJavaString(title);
+                Platform.runLater(() -> titleChanged.accept(titleStr));
             }
         }
     }
@@ -392,7 +410,8 @@ final class TerminalSession implements AutoCloseable {
                     this.terminal,
                     ghostty_vt_h.GHOSTTY_TERMINAL_DATA_PWD(),
                     pwd) == GHOSTTY_SUCCESS) {
-                pwdChanged.accept(toJavaString(pwd));
+                var pwdStr = toJavaString(pwd);
+                Platform.runLater(() -> pwdChanged.accept(pwdStr));
             }
         }
     }
@@ -415,6 +434,7 @@ final class TerminalSession implements AutoCloseable {
             return;
         }
 
+        terminalLock.lock();
         try (callbackArena) {
             ghostty_vt_h.ghostty_selection_gesture_free(selectionGesture, terminal);
             ghostty_vt_h.ghostty_mouse_event_free(mouseEvent);
@@ -425,6 +445,8 @@ final class TerminalSession implements AutoCloseable {
             ghostty_vt_h.ghostty_render_state_row_iterator_free(rowIterator);
             ghostty_vt_h.ghostty_render_state_free(renderState);
             ghostty_vt_h.ghostty_terminal_free(terminal);
+        } finally {
+            terminalLock.unlock();
         }
     }
 
@@ -435,31 +457,71 @@ final class TerminalSession implements AutoCloseable {
 
         var columns = Math.clamp((int) Math.floor(Math.max(0, widthPx - scrollbarReservedWidthPx) / metrics.cellWidthPx()), 1, MAX_GHOSTTY_DIMENSION);
         var rows = Math.clamp((int) Math.floor(heightPx / metrics.cellHeightPx()), 1, MAX_GHOSTTY_DIMENSION);
-        requireGhosttySuccess(
-                ghostty_vt_h.ghostty_terminal_resize(
-                        terminal,
-                        (short) columns,
-                        (short) rows,
-                        metrics.cellWidthPx(),
-                        metrics.cellHeightPx()),
-                "ghostty_terminal_resize");
-        size = new Size(columns, rows);
-        fontMetrics = metrics;
-        updateRenderState();
+        terminalLock.lock();
+        try {
+            requireGhosttySuccess(
+                    ghostty_vt_h.ghostty_terminal_resize(
+                            terminal,
+                            (short) columns,
+                            (short) rows,
+                            metrics.cellWidthPx(),
+                            metrics.cellHeightPx()),
+                    "ghostty_terminal_resize");
+            size = new Size(columns, rows);
+            fontMetrics = metrics;
+            updateRenderState();
+        } finally {
+            terminalLock.unlock();
+        }
         return new Size(columns, rows);
     }
 
+    /**
+     * Feeds bytes from the PTY into the Ghostty terminal core.
+     * <p>
+     * Thread-safe: called from the PTY I/O reader thread. Acquires {@link #terminalLock}
+     * to serialize with FX-thread operations on the terminal. Sets {@link #vtDirty} so
+     * the FX-thread AnimationTimer knows to call {@link #updateRenderState()} + redraw.
+     */
     void writeToTerminal(byte[] bytes) {
         var event = new JfrEvents.WriteToTerminalEvent();
         event.bytes = bytes.length;
         event.begin();
-        try (var arena = Arena.ofConfined()) {
-            var nativeBytes = arena.allocateFrom(ValueLayout.JAVA_BYTE, bytes);
-            ghostty_vt_h.ghostty_terminal_vt_write(terminal, nativeBytes, bytes.length);
+        terminalLock.lock();
+        try {
+            try (var arena = Arena.ofConfined()) {
+                var nativeBytes = arena.allocateFrom(ValueLayout.JAVA_BYTE, bytes);
+                ghostty_vt_h.ghostty_terminal_vt_write(terminal, nativeBytes, bytes.length);
+            }
+            lastWriteToTerminalNs = System.nanoTime();
+        } finally {
+            terminalLock.unlock();
         }
-        lastWriteToTerminalNs = System.nanoTime();
-        updateRenderState();
+        vtDirty = true;
         event.commit();
+    }
+
+    /**
+     * Returns true and clears the dirty flag if the IO thread has written to the terminal
+     * since the last call. Called from the FX-thread AnimationTimer.
+     */
+    boolean drainVtDirty() {
+        if (!vtDirty) return false;
+        vtDirty = false;
+        return true;
+    }
+
+    /**
+     * Snapshots the terminal state for rendering. Must be called on the FX thread
+     * after {@link #drainVtDirty()} returns true.
+     */
+    void refreshRenderState() {
+        terminalLock.lock();
+        try {
+            updateRenderState();
+        } finally {
+            terminalLock.unlock();
+        }
     }
 
     byte[] encodeFocus(boolean focused) {
@@ -485,52 +547,77 @@ final class TerminalSession implements AutoCloseable {
             return;
         }
 
-        try (var arena = Arena.ofConfined()) {
-            var behavior = GhosttyTerminalScrollViewport.allocate(arena);
-            GhosttyTerminalScrollViewport.tag(behavior, ghostty_vt_h.GHOSTTY_SCROLL_VIEWPORT_DELTA());
-            GhosttyTerminalScrollViewportValue.delta(GhosttyTerminalScrollViewport.value(behavior), deltaRows);
-            ghostty_vt_h.ghostty_terminal_scroll_viewport(terminal, behavior);
+        terminalLock.lock();
+        try {
+            try (var arena = Arena.ofConfined()) {
+                var behavior = GhosttyTerminalScrollViewport.allocate(arena);
+                GhosttyTerminalScrollViewport.tag(behavior, ghostty_vt_h.GHOSTTY_SCROLL_VIEWPORT_DELTA());
+                GhosttyTerminalScrollViewportValue.delta(GhosttyTerminalScrollViewport.value(behavior), deltaRows);
+                ghostty_vt_h.ghostty_terminal_scroll_viewport(terminal, behavior);
+            }
+            updateRenderState();
+        } finally {
+            terminalLock.unlock();
         }
-        updateRenderState();
     }
 
     void scrollViewportTo(long row) {
-        try (var arena = Arena.ofConfined()) {
-            var behavior = GhosttyTerminalScrollViewport.allocate(arena);
-            GhosttyTerminalScrollViewport.tag(behavior, ghostty_vt_h.GHOSTTY_SCROLL_VIEWPORT_ROW());
-            GhosttyTerminalScrollViewportValue.row(GhosttyTerminalScrollViewport.value(behavior), row);
-            ghostty_vt_h.ghostty_terminal_scroll_viewport(terminal, behavior);
+        terminalLock.lock();
+        try {
+            try (var arena = Arena.ofConfined()) {
+                var behavior = GhosttyTerminalScrollViewport.allocate(arena);
+                GhosttyTerminalScrollViewport.tag(behavior, ghostty_vt_h.GHOSTTY_SCROLL_VIEWPORT_ROW());
+                GhosttyTerminalScrollViewportValue.row(GhosttyTerminalScrollViewport.value(behavior), row);
+                ghostty_vt_h.ghostty_terminal_scroll_viewport(terminal, behavior);
+            }
+            updateRenderState();
+        } finally {
+            terminalLock.unlock();
         }
-        updateRenderState();
     }
 
     void scrollViewportToBottom() {
-        try (var arena = Arena.ofConfined()) {
-            var behavior = GhosttyTerminalScrollViewport.allocate(arena);
-            GhosttyTerminalScrollViewport.tag(behavior, ghostty_vt_h.GHOSTTY_SCROLL_VIEWPORT_BOTTOM());
-            ghostty_vt_h.ghostty_terminal_scroll_viewport(terminal, behavior);
+        terminalLock.lock();
+        try {
+            try (var arena = Arena.ofConfined()) {
+                var behavior = GhosttyTerminalScrollViewport.allocate(arena);
+                GhosttyTerminalScrollViewport.tag(behavior, ghostty_vt_h.GHOSTTY_SCROLL_VIEWPORT_BOTTOM());
+                ghostty_vt_h.ghostty_terminal_scroll_viewport(terminal, behavior);
+            }
+            updateRenderState();
+        } finally {
+            terminalLock.unlock();
         }
-        updateRenderState();
     }
 
     boolean mouseTrackingEnabled() {
-        try (var arena = Arena.ofConfined()) {
-            var mouseTracking = arena.allocate(ValueLayout.JAVA_BOOLEAN);
-            return ghostty_vt_h.ghostty_terminal_get(
-                    terminal,
-                    ghostty_vt_h.GHOSTTY_TERMINAL_DATA_MOUSE_TRACKING(),
-                    mouseTracking) == GHOSTTY_SUCCESS && mouseTracking.get(ValueLayout.JAVA_BOOLEAN, 0);
+        terminalLock.lock();
+        try {
+            try (var arena = Arena.ofConfined()) {
+                var mouseTracking = arena.allocate(ValueLayout.JAVA_BOOLEAN);
+                return ghostty_vt_h.ghostty_terminal_get(
+                        terminal,
+                        ghostty_vt_h.GHOSTTY_TERMINAL_DATA_MOUSE_TRACKING(),
+                        mouseTracking) == GHOSTTY_SUCCESS && mouseTracking.get(ValueLayout.JAVA_BOOLEAN, 0);
+            }
+        } finally {
+            terminalLock.unlock();
         }
     }
 
     boolean alternateScreenActive() {
-        try (var arena = Arena.ofConfined()) {
-            var activeScreen = arena.allocate(ValueLayout.JAVA_INT);
-            return ghostty_vt_h.ghostty_terminal_get(
-                    terminal,
-                    ghostty_vt_h.GHOSTTY_TERMINAL_DATA_ACTIVE_SCREEN(),
-                    activeScreen) == GHOSTTY_SUCCESS
-                    && activeScreen.get(ValueLayout.JAVA_INT, 0) == ghostty_vt_h.GHOSTTY_TERMINAL_SCREEN_ALTERNATE();
+        terminalLock.lock();
+        try {
+            try (var arena = Arena.ofConfined()) {
+                var activeScreen = arena.allocate(ValueLayout.JAVA_INT);
+                return ghostty_vt_h.ghostty_terminal_get(
+                        terminal,
+                        ghostty_vt_h.GHOSTTY_TERMINAL_DATA_ACTIVE_SCREEN(),
+                        activeScreen) == GHOSTTY_SUCCESS
+                        && activeScreen.get(ValueLayout.JAVA_INT, 0) == ghostty_vt_h.GHOSTTY_TERMINAL_SCREEN_ALTERNATE();
+            }
+        } finally {
+            terminalLock.unlock();
         }
     }
 
@@ -631,19 +718,25 @@ final class TerminalSession implements AutoCloseable {
     }
 
     int viewportRowCount(int fallback, int cellHeightPx, double heightPx) {
-        try (var arena = Arena.ofConfined()) {
-            var rows = arena.allocate(ValueLayout.JAVA_SHORT);
-            if (ghostty_vt_h.ghostty_terminal_get(
-                    terminal,
-                    ghostty_vt_h.GHOSTTY_TERMINAL_DATA_ROWS(),
-                    rows) != GHOSTTY_SUCCESS) {
-                return Math.max(1, fallback > 0 ? fallback : (int) Math.floor(heightPx / cellHeightPx));
+        terminalLock.lock();
+        try {
+            try (var arena = Arena.ofConfined()) {
+                var rows = arena.allocate(ValueLayout.JAVA_SHORT);
+                if (ghostty_vt_h.ghostty_terminal_get(
+                        terminal,
+                        ghostty_vt_h.GHOSTTY_TERMINAL_DATA_ROWS(),
+                        rows) != GHOSTTY_SUCCESS) {
+                    return Math.max(1, fallback > 0 ? fallback : (int) Math.floor(heightPx / cellHeightPx));
+                }
+                return Math.max(1, Short.toUnsignedInt(rows.get(ValueLayout.JAVA_SHORT, 0)));
             }
-            return Math.max(1, Short.toUnsignedInt(rows.get(ValueLayout.JAVA_SHORT, 0)));
+        } finally {
+            terminalLock.unlock();
         }
     }
 
     ScrollbarInfo scrollbarInfo(double widthPx, double heightPx, double scrollbarReservedWidthPx, double minScrollbarHeightPx) {
+        terminalLock.lock();
         try (var arena = Arena.ofConfined()) {
             var scrollbar = GhosttyTerminalScrollbar.allocate(arena);
             if (ghostty_vt_h.ghostty_terminal_get(
@@ -674,55 +767,75 @@ final class TerminalSession implements AutoCloseable {
                     Math.max(0, heightPx),
                     thumbY,
                     thumbHeight);
+        } finally {
+            terminalLock.unlock();
         }
     }
 
     int promptRowBefore(long row) {
-        var rows = totalRowCount();
-        if (rows <= 0 || row <= 0) {
-            return -1;
-        }
-
-        try (var arena = Arena.ofConfined()) {
-            for (var currentRow = Math.toIntExact(Math.min(row - 1, rows - 1L)); currentRow >= 0; currentRow--) {
-                if (rowSemanticPrompt(currentRow, arena) == ghostty_vt_h.GHOSTTY_ROW_SEMANTIC_PROMPT()) {
-                    return currentRow;
-                }
+        terminalLock.lock();
+        try {
+            var rows = totalRowCountLocked();
+            if (rows <= 0 || row <= 0) {
+                return -1;
             }
-            return -1;
+
+            try (var arena = Arena.ofConfined()) {
+                for (var currentRow = Math.toIntExact(Math.min(row - 1, rows - 1L)); currentRow >= 0; currentRow--) {
+                    if (rowSemanticPrompt(currentRow, arena) == ghostty_vt_h.GHOSTTY_ROW_SEMANTIC_PROMPT()) {
+                        return currentRow;
+                    }
+                }
+                return -1;
+            }
+        } finally {
+            terminalLock.unlock();
         }
     }
 
     int promptRowAfter(long row) {
-        var rows = totalRowCount();
-        if (rows <= 0 || row >= rows - 1L) {
-            return -1;
-        }
-
-        try (var arena = Arena.ofConfined()) {
-            for (var currentRow = Math.toIntExact(Math.max(0, row + 1)); currentRow < rows; currentRow++) {
-                if (rowSemanticPrompt(currentRow, arena) == ghostty_vt_h.GHOSTTY_ROW_SEMANTIC_PROMPT()) {
-                    return currentRow;
-                }
+        terminalLock.lock();
+        try {
+            var rows = totalRowCountLocked();
+            if (rows <= 0 || row >= rows - 1L) {
+                return -1;
             }
-            return -1;
+
+            try (var arena = Arena.ofConfined()) {
+                for (var currentRow = Math.toIntExact(Math.max(0, row + 1)); currentRow < rows; currentRow++) {
+                    if (rowSemanticPrompt(currentRow, arena) == ghostty_vt_h.GHOSTTY_ROW_SEMANTIC_PROMPT()) {
+                        return currentRow;
+                    }
+                }
+                return -1;
+            }
+        } finally {
+            terminalLock.unlock();
         }
     }
 
     boolean isPromptRow(long row) {
-        var rows = totalRowCount();
-        if (row < 0 || row >= rows) {
-            return false;
-        }
+        terminalLock.lock();
+        try {
+            var rows = totalRowCountLocked();
+            if (row < 0 || row >= rows) {
+                return false;
+            }
 
-        try (var arena = Arena.ofConfined()) {
-            return rowSemanticPrompt(Math.toIntExact(row), arena) == ghostty_vt_h.GHOSTTY_ROW_SEMANTIC_PROMPT();
+            try (var arena = Arena.ofConfined()) {
+                return rowSemanticPrompt(Math.toIntExact(row), arena) == ghostty_vt_h.GHOSTTY_ROW_SEMANTIC_PROMPT();
+            }
+        } finally {
+            terminalLock.unlock();
         }
     }
 
     boolean hasSelection() {
+        terminalLock.lock();
         try (var arena = Arena.ofConfined()) {
             return !activeSelection(arena).equals(MemorySegment.NULL);
+        } finally {
+            terminalLock.unlock();
         }
     }
 
@@ -731,46 +844,62 @@ final class TerminalSession implements AutoCloseable {
             return false;
         }
 
-        setActiveSelection(MemorySegment.NULL);
-        updateRenderState();
+        terminalLock.lock();
+        try {
+            setActiveSelection(MemorySegment.NULL);
+            updateRenderState();
+        } finally {
+            terminalLock.unlock();
+        }
         return true;
     }
 
     boolean selectAll() {
-        try (var arena = Arena.ofConfined()) {
-            var selection = GhosttySelection.allocate(arena);
-            GhosttySelection.size(selection, GhosttySelection.sizeof());
-            var result = ghostty_vt_h.ghostty_terminal_select_all(terminal, selection);
-            if (result == ghostty_vt_h.GHOSTTY_NO_VALUE()) {
-                setActiveSelection(MemorySegment.NULL);
-                updateRenderState();
-                return false;
-            }
+        terminalLock.lock();
+        try {
+            try (var arena = Arena.ofConfined()) {
+                var selection = GhosttySelection.allocate(arena);
+                GhosttySelection.size(selection, GhosttySelection.sizeof());
+                var result = ghostty_vt_h.ghostty_terminal_select_all(terminal, selection);
+                if (result == ghostty_vt_h.GHOSTTY_NO_VALUE()) {
+                    setActiveSelection(MemorySegment.NULL);
+                    updateRenderState();
+                    return false;
+                }
 
-            requireGhosttySuccess(result, "ghostty_terminal_select_all");
-            setActiveSelection(selection);
+                requireGhosttySuccess(result, "ghostty_terminal_select_all");
+                setActiveSelection(selection);
+            }
+            updateRenderState();
+            return true;
+        } finally {
+            terminalLock.unlock();
         }
-        updateRenderState();
-        return true;
     }
 
     boolean adjustSelection(int adjustment) {
-        try (var arena = Arena.ofConfined()) {
-            var selection = activeSelection(arena);
-            if (selection.equals(MemorySegment.NULL)) {
-                return false;
-            }
+        terminalLock.lock();
+        try {
+            try (var arena = Arena.ofConfined()) {
+                var selection = activeSelection(arena);
+                if (selection.equals(MemorySegment.NULL)) {
+                    return false;
+                }
 
-            requireGhosttySuccess(
-                    ghostty_vt_h.ghostty_terminal_selection_adjust(terminal, selection, adjustment),
-                    "ghostty_terminal_selection_adjust");
-            setActiveSelection(selection);
+                requireGhosttySuccess(
+                        ghostty_vt_h.ghostty_terminal_selection_adjust(terminal, selection, adjustment),
+                        "ghostty_terminal_selection_adjust");
+                setActiveSelection(selection);
+            }
+            updateRenderState();
+            return true;
+        } finally {
+            terminalLock.unlock();
         }
-        updateRenderState();
-        return true;
     }
 
     Selection.ScreenPoint selectionFocus() {
+        terminalLock.lock();
         try (var arena = Arena.ofConfined()) {
             var selection = activeSelection(arena);
             if (selection.equals(MemorySegment.NULL)) {
@@ -778,10 +907,13 @@ final class TerminalSession implements AutoCloseable {
             }
 
             return screenPoint(GhosttySelection.end(selection), arena);
+        } finally {
+            terminalLock.unlock();
         }
     }
 
     String selectedText() {
+        terminalLock.lock();
         try (var arena = Arena.ofConfined()) {
             var options = GhosttyTerminalSelectionFormatOptions.allocate(arena);
             GhosttyTerminalSelectionFormatOptions.size(options, GhosttyTerminalSelectionFormatOptions.sizeof());
@@ -814,6 +946,8 @@ final class TerminalSession implements AutoCloseable {
             } finally {
                 ghostty_vt_h.ghostty_free(MemorySegment.NULL, output, length);
             }
+        } finally {
+            terminalLock.unlock();
         }
     }
 
@@ -822,6 +956,7 @@ final class TerminalSession implements AutoCloseable {
             double x,
             double y,
             TerminalView.FontMetrics metrics) {
+        terminalLock.lock();
         try (var arena = Arena.ofConfined()) {
             var event = selectionGestureEvent(arena, ghostty_vt_h.GHOSTTY_SELECTION_GESTURE_EVENT_TYPE_PRESS());
             try {
@@ -839,6 +974,8 @@ final class TerminalSession implements AutoCloseable {
             } finally {
                 ghostty_vt_h.ghostty_selection_gesture_event_free(event);
             }
+        } finally {
+            terminalLock.unlock();
         }
     }
 
@@ -849,6 +986,7 @@ final class TerminalSession implements AutoCloseable {
             boolean rectangle,
             TerminalView.FontMetrics metrics,
             double heightPx) {
+        terminalLock.lock();
         try (var arena = Arena.ofConfined()) {
             var event = selectionGestureEvent(arena, ghostty_vt_h.GHOSTTY_SELECTION_GESTURE_EVENT_TYPE_DRAG());
             try {
@@ -865,6 +1003,8 @@ final class TerminalSession implements AutoCloseable {
             } finally {
                 ghostty_vt_h.ghostty_selection_gesture_event_free(event);
             }
+        } finally {
+            terminalLock.unlock();
         }
     }
 
@@ -875,6 +1015,7 @@ final class TerminalSession implements AutoCloseable {
             boolean rectangle,
             TerminalView.FontMetrics metrics,
             double heightPx) {
+        terminalLock.lock();
         try (var arena = Arena.ofConfined()) {
             var event = selectionGestureEvent(arena, ghostty_vt_h.GHOSTTY_SELECTION_GESTURE_EVENT_TYPE_AUTOSCROLL_TICK());
             try {
@@ -894,10 +1035,13 @@ final class TerminalSession implements AutoCloseable {
             } finally {
                 ghostty_vt_h.ghostty_selection_gesture_event_free(event);
             }
+        } finally {
+            terminalLock.unlock();
         }
     }
 
     void selectionGestureRelease(CellHit hit) {
+        terminalLock.lock();
         try (var arena = Arena.ofConfined()) {
             var event = selectionGestureEvent(arena, ghostty_vt_h.GHOSTTY_SELECTION_GESTURE_EVENT_TYPE_RELEASE());
             try {
@@ -911,14 +1055,22 @@ final class TerminalSession implements AutoCloseable {
             } finally {
                 ghostty_vt_h.ghostty_selection_gesture_event_free(event);
             }
+        } finally {
+            terminalLock.unlock();
         }
     }
 
     void resetSelectionGesture() {
-        ghostty_vt_h.ghostty_selection_gesture_reset(selectionGesture, terminal);
+        terminalLock.lock();
+        try {
+            ghostty_vt_h.ghostty_selection_gesture_reset(selectionGesture, terminal);
+        } finally {
+            terminalLock.unlock();
+        }
     }
 
     boolean selectionGestureDragged() {
+        terminalLock.lock();
         try (var arena = Arena.ofConfined()) {
             var dragged = arena.allocate(ValueLayout.JAVA_BOOLEAN);
             requireGhosttySuccess(
@@ -929,10 +1081,13 @@ final class TerminalSession implements AutoCloseable {
                             dragged),
                     "ghostty_selection_gesture_get(dragged)");
             return dragged.get(ValueLayout.JAVA_BOOLEAN, 0);
+        } finally {
+            terminalLock.unlock();
         }
     }
 
     int selectionGestureClickCount() {
+        terminalLock.lock();
         try (var arena = Arena.ofConfined()) {
             var clickCount = arena.allocate(ValueLayout.JAVA_BYTE);
             requireGhosttySuccess(
@@ -943,10 +1098,13 @@ final class TerminalSession implements AutoCloseable {
                             clickCount),
                     "ghostty_selection_gesture_get(click_count)");
             return Byte.toUnsignedInt(clickCount.get(ValueLayout.JAVA_BYTE, 0));
+        } finally {
+            terminalLock.unlock();
         }
     }
 
     SelectionAutoscroll selectionGestureAutoscroll() {
+        terminalLock.lock();
         try (var arena = Arena.ofConfined()) {
             var autoscroll = arena.allocate(ValueLayout.JAVA_INT);
             requireGhosttySuccess(
@@ -964,6 +1122,8 @@ final class TerminalSession implements AutoCloseable {
                 return SelectionAutoscroll.DOWN;
             }
             return SelectionAutoscroll.NONE;
+        } finally {
+            terminalLock.unlock();
         }
     }
 
@@ -981,6 +1141,7 @@ final class TerminalSession implements AutoCloseable {
 
         var changed = false;
         var start = System.nanoTime();
+        terminalLock.lock();
         try (var arena = Arena.ofConfined()) {
             do {
                 appendSearchRow(document, document.nextRow, arena);
@@ -988,6 +1149,8 @@ final class TerminalSession implements AutoCloseable {
                 changed = true;
             } while (document.nextRow < document.rows()
                     && (budgetNs == Long.MAX_VALUE || System.nanoTime() - start < budgetNs));
+        } finally {
+            terminalLock.unlock();
         }
         document.complete = document.nextRow >= document.rows();
         return changed;
@@ -1027,22 +1190,27 @@ final class TerminalSession implements AutoCloseable {
             return null;
         }
 
-        var line = logicalLine(point);
-        if (line.text().isEmpty()) {
-            return null;
-        }
+        terminalLock.lock();
+        try {
+            var line = logicalLine(point);
+            if (line.text().isEmpty()) {
+                return null;
+            }
 
-        for (var i = 0; i < linkMatchers.size(); i++) {
-            var linkMatcher = linkMatchers.get(i);
-            var matcher = linkMatcher.pattern().matcher(line.text());
-            while (matcher.find()) {
-                var selection = line.selection(matcher.start(), matcher.end());
-                if (!selection.isEmpty() && contains(selection, point)) {
-                    return new MatchedLinkMatcher(i, linkMatcher, matcher.toMatchResult(), selection);
+            for (var i = 0; i < linkMatchers.size(); i++) {
+                var linkMatcher = linkMatchers.get(i);
+                var matcher = linkMatcher.pattern().matcher(line.text());
+                while (matcher.find()) {
+                    var selection = line.selection(matcher.start(), matcher.end());
+                    if (!selection.isEmpty() && contains(selection, point)) {
+                        return new MatchedLinkMatcher(i, linkMatcher, matcher.toMatchResult(), selection);
+                    }
                 }
             }
+            return null;
+        } finally {
+            terminalLock.unlock();
         }
-        return null;
     }
 
     List<Selection> linkMatcherSelections(List<TerminalLinkMatcher> linkMatchers, int startRow, int endRow) {
@@ -1094,6 +1262,15 @@ final class TerminalSession implements AutoCloseable {
     }
 
     int columnCount() {
+        terminalLock.lock();
+        try {
+            return columnCountLocked();
+        } finally {
+            terminalLock.unlock();
+        }
+    }
+
+    private int columnCountLocked() {
         try (var arena = Arena.ofConfined()) {
             var cols = arena.allocate(ValueLayout.JAVA_SHORT);
             if (ghostty_vt_h.ghostty_terminal_get(terminal, ghostty_vt_h.GHOSTTY_TERMINAL_DATA_COLS(), cols) != GHOSTTY_SUCCESS) {
@@ -1104,6 +1281,15 @@ final class TerminalSession implements AutoCloseable {
     }
 
     int totalRowCount() {
+        terminalLock.lock();
+        try {
+            return totalRowCountLocked();
+        } finally {
+            terminalLock.unlock();
+        }
+    }
+
+    private int totalRowCountLocked() {
         try (var arena = Arena.ofConfined()) {
             var rows = arena.allocate(ValueLayout.JAVA_LONG);
             if (ghostty_vt_h.ghostty_terminal_get(terminal, ghostty_vt_h.GHOSTTY_TERMINAL_DATA_TOTAL_ROWS(), rows) != GHOSTTY_SUCCESS) {
@@ -1151,11 +1337,12 @@ final class TerminalSession implements AutoCloseable {
 
         var hitX = clamp ? Math.clamp(x, 0.0, Math.max(0.0, contentWidth - 1.0)) : x;
         var hitY = clamp ? Math.clamp(y, 0.0, Math.max(0.0, heightPx - 1.0)) : y;
+        terminalLock.lock();
         try (var arena = Arena.ofConfined()) {
             var point = GhosttyPoint.allocate(arena);
             GhosttyPoint.tag(point, ghostty_vt_h.GHOSTTY_POINT_TAG_VIEWPORT());
             var coordinate = GhosttyPointCoordinate.allocate(arena);
-            GhosttyPointCoordinate.x(coordinate, (short) Math.clamp((int) Math.floor(hitX / metrics.cellWidthPx()), 0, Math.max(0, columnCount() - 1)));
+            GhosttyPointCoordinate.x(coordinate, (short) Math.clamp((int) Math.floor(hitX / metrics.cellWidthPx()), 0, Math.max(0, columnCountLocked() - 1)));
             GhosttyPointCoordinate.y(coordinate, Math.max(0, (int) Math.floor(hitY / metrics.cellHeightPx())));
             GhosttyPointValue.coordinate(GhosttyPoint.value(point), coordinate);
 
@@ -1193,6 +1380,8 @@ final class TerminalSession implements AutoCloseable {
                     hitX % metrics.cellWidthPx(),
                     hasText.get(ValueLayout.JAVA_BOOLEAN, 0),
                     hyperlinkUri);
+        } finally {
+            terminalLock.unlock();
         }
     }
 
@@ -1229,12 +1418,14 @@ final class TerminalSession implements AutoCloseable {
             return Selection.empty();
         }
 
-        var columns = columnCount();
-        if (columns <= 0) {
-            return Selection.empty();
-        }
+        terminalLock.lock();
+        try {
+            var columns = columnCountLocked();
+            if (columns <= 0) {
+                return Selection.empty();
+            }
 
-        try (var arena = Arena.ofConfined()) {
+            try (var arena = Arena.ofConfined()) {
             if (!uri.equals(cellHyperlink(point, arena))) {
                 return Selection.empty();
             }
@@ -1258,14 +1449,20 @@ final class TerminalSession implements AutoCloseable {
             }
 
             return Selection.linear(start, end);
+            }
+        } finally {
+            terminalLock.unlock();
         }
     }
 
     boolean readMode(short mode) {
+        terminalLock.lock();
         try (var arena = Arena.ofConfined()) {
             var value = arena.allocate(ValueLayout.JAVA_BOOLEAN);
             return ghostty_vt_h.ghostty_terminal_mode_get(terminal, mode, value) == GHOSTTY_SUCCESS
                     && value.get(ValueLayout.JAVA_BOOLEAN, 0);
+        } finally {
+            terminalLock.unlock();
         }
     }
 
@@ -1375,6 +1572,7 @@ final class TerminalSession implements AutoCloseable {
         jfrEvent.begin();
         graphics.setFont(metrics.regular());
 
+        terminalLock.lock();
         try (var arena = Arena.ofConfined()) {
             var colors = GhosttyRenderStateColors.allocate(arena);
             GhosttyRenderStateColors.size(colors, GhosttyRenderStateColors.sizeof());
@@ -1647,6 +1845,8 @@ final class TerminalSession implements AutoCloseable {
             var result = new BlinkState(hasCursorBlink, hasTextBlink);
             jfrEvent.commit();
             return result;
+        } finally {
+            terminalLock.unlock();
         }
     }
 

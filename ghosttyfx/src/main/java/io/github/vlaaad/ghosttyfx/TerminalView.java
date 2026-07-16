@@ -14,6 +14,7 @@ import java.util.function.DoubleSupplier;
 import java.util.regex.Pattern;
 
 import io.github.vlaaad.ghostty.bindings.ghostty_vt_h;
+import javafx.application.Platform;
 import javafx.animation.Animation;
 import javafx.animation.AnimationTimer;
 import javafx.animation.KeyFrame;
@@ -204,19 +205,6 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
         NativeLibrary.ensureLoaded();
         title = new ReadOnlyStringWrapper(this, "title", "Terminal");
         currentDirectory = new ReadOnlyStringWrapper(this, "currentDirectory", "");
-        ptySession = new PtySession(Objects.requireNonNull(terminalFactory, "terminalFactory"), INITIAL_COLUMNS, INITIAL_ROWS);
-        processOutputDrain = new ProcessOutputDrain(this);
-        selectionAutoscroll = new AnimationTimer() {
-            @Override
-            public void handle(long now) {
-                handleSelectionAutoscroll();
-            }
-        };
-        cursorBlinkTimeline = new Timeline(new KeyFrame(BLINK_INTERVAL, _ -> tickCursorBlink()));
-        cursorBlinkTimeline.setCycleCount(Animation.INDEFINITE);
-        textBlinkTimeline = new Timeline(new KeyFrame(BLINK_INTERVAL, _ -> tickTextBlink()));
-        textBlinkTimeline.setCycleCount(Animation.INDEFINITE);
-        promptNavigationHighlightTimeline = new Timeline(new KeyFrame(PROMPT_NAVIGATION_HIGHLIGHT_DURATION, _ -> clearPromptNavigationHighlight()));
         var initialFontMetrics = fontMetrics.get();
         var thisRef = new WeakReference<>(this);
         terminalSession = new TerminalSession(
@@ -245,6 +233,24 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
                         }
                     }
                 });
+        terminalSession.refreshColorScheme();
+        ptySession = new PtySession(
+                Objects.requireNonNull(terminalFactory, "terminalFactory"),
+                INITIAL_COLUMNS,
+                INITIAL_ROWS,
+                terminalSession::writeToTerminal);
+        processOutputDrain = new ProcessOutputDrain(this);
+        selectionAutoscroll = new AnimationTimer() {
+            @Override
+            public void handle(long now) {
+                handleSelectionAutoscroll();
+            }
+        };
+        cursorBlinkTimeline = new Timeline(new KeyFrame(BLINK_INTERVAL, _ -> tickCursorBlink()));
+        cursorBlinkTimeline.setCycleCount(Animation.INDEFINITE);
+        textBlinkTimeline = new Timeline(new KeyFrame(BLINK_INTERVAL, _ -> tickTextBlink()));
+        textBlinkTimeline.setCycleCount(Animation.INDEFINITE);
+        promptNavigationHighlightTimeline = new Timeline(new KeyFrame(PROMPT_NAVIGATION_HIGHLIGHT_DURATION, _ -> clearPromptNavigationHighlight()));
         terminalShortcuts.addAll(defaultTerminalShortcuts());
         linkMatchers.addAll(defaultLinkMatchers());
 
@@ -307,6 +313,7 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
         setOnInputMethodTextChanged(this::handleInputMethodTextChanged);
         setInputMethodRequests(new TerminalInputMethodRequests());
         setCursor(Cursor.DEFAULT);
+        Platform.getPreferences().colorSchemeProperty().addListener((_, _, _) -> terminalSession.refreshColorScheme());
         sceneProperty().addListener((_, _, _) -> {
             updateBlinkTimelines();
             updatePromptNavigationHighlightTimeline();
@@ -1927,48 +1934,26 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
 
         @Override
         public void handle(long now) {
-            var outputs = ptySession.pollProcessOutputs();
-            if (outputs.isEmpty()) {
-                return;
-            }
-
             var terminal = terminalRef.get();
-            if (terminal != null) {
-                var totalBytes = 0;
-                for (var output : outputs) {
-                    if (output instanceof PtySession.Chunk(var bytes)) {
-                        totalBytes += bytes.length;
-                    }
-                }
 
-                var bytes = new byte[totalBytes];
-                var offset = 0;
-                for (var output : outputs) {
-                    if (output instanceof PtySession.Chunk(var chunk)) {
-                        System.arraycopy(chunk, 0, bytes, offset, chunk.length);
-                        offset += chunk.length;
-                    }
-                }
-
-                if (bytes.length != 0) {
-                    var ptyEvent = new JfrEvents.PtyOutputEvent();
-                    ptyEvent.bytes = bytes.length;
-                    ptyEvent.begin();
-                    terminal.resetCursorBlink();
-                    terminal.resetPromptNavigation();
-                    terminal.terminalSession.writeToTerminal(bytes);
-                    if (terminal.searchUi.visible()) {
-                        terminal.searchUi.refresh();
-                    } else {
-                        terminal.redraw();
-                    }
-                    ptyEvent.commit();
+            // Check if the IO thread wrote new VT data
+            if (terminal != null && terminal.terminalSession.drainVtDirty()) {
+                terminal.resetCursorBlink();
+                terminal.resetPromptNavigation();
+                terminal.terminalSession.refreshRenderState();
+                if (terminal.searchUi.visible()) {
+                    terminal.searchUi.refresh();
+                } else {
+                    terminal.redraw();
                 }
             }
-            if (outputs.get(outputs.size() - 1) instanceof PtySession.Closed(var state)) {
+
+            // Check if the process exited
+            var closedState = ptySession.pollClosed();
+            if (closedState != null) {
                 stop();
                 if (terminal != null) {
-                    terminal.terminalState.set(state);
+                    terminal.terminalState.set(closedState);
                 }
             }
         }
