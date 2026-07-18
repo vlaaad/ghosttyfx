@@ -11,6 +11,7 @@ import java.lang.foreign.ValueLayout;
 import java.lang.invoke.MethodHandle;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -25,6 +26,7 @@ import io.github.vlaaad.ghostty.bindings.GhosttyDeviceAttributesPrimary;
 import io.github.vlaaad.ghostty.bindings.GhosttyDeviceAttributesSecondary;
 import io.github.vlaaad.ghostty.bindings.GhosttyDeviceAttributesTertiary;
 import io.github.vlaaad.ghostty.bindings.GhosttyGridRef;
+import io.github.vlaaad.ghostty.bindings.GhosttyKittyGraphicsPlacementRenderInfo;
 import io.github.vlaaad.ghostty.bindings.GhosttyMouseEncoderSize;
 import io.github.vlaaad.ghostty.bindings.GhosttyMousePosition;
 import io.github.vlaaad.ghostty.bindings.GhosttyPoint;
@@ -56,6 +58,9 @@ import io.github.vlaaad.ghostty.bindings.ghostty_vt_h;
 import javafx.application.ColorScheme;
 import javafx.application.Platform;
 import javafx.scene.canvas.GraphicsContext;
+import javafx.scene.image.Image;
+import javafx.scene.image.PixelFormat;
+import javafx.scene.image.WritableImage;
 import javafx.scene.paint.Color;
 
 final class TerminalSession implements AutoCloseable {
@@ -69,8 +74,15 @@ final class TerminalSession implements AutoCloseable {
     private static final int PALETTE_SIZE = 256;
     private static final int MAX_GHOSTTY_DIMENSION = 0xFFFF;
     private static final long INITIAL_MAX_SCROLLBACK = 10_000_000;
+    private static final long KITTY_IMAGE_STORAGE_LIMIT = 128L * 1024 * 1024;
+    private static final long KITTY_APC_MAX_BYTES = 65L * 1024 * 1024;
     private static final double BLOCK_CURSOR_ALPHA = 0.5;
+    private static final int KITTY_BELOW_BACKGROUND_Z = Integer.MIN_VALUE / 2;
     private static final byte[] XTVERSION_BYTES = "ghosttyfx".getBytes(StandardCharsets.UTF_8);
+    private static final Comparator<KittyPlacement> KITTY_PLACEMENT_ORDER = (left, right) -> {
+        var z = Integer.compare(left.z(), right.z());
+        return z != 0 ? z : Integer.compareUnsigned(left.imageId(), right.imageId());
+    };
     private static final long SELECTION_REPEAT_INTERVAL_NS = 500_000_000L;
     private static final Allocator RENDER_STATE_ALLOCATOR = new Allocator() {
         @Override
@@ -88,6 +100,12 @@ final class TerminalSession implements AutoCloseable {
         @Override
         public int allocate(MemorySegment allocator, MemorySegment out) {
             return ghostty_vt_h.ghostty_render_state_row_cells_new(allocator, out);
+        }
+    };
+    private static final Allocator KITTY_PLACEMENT_ITERATOR_ALLOCATOR = new Allocator() {
+        @Override
+        public int allocate(MemorySegment allocator, MemorySegment out) {
+            return ghostty_vt_h.ghostty_kitty_graphics_placement_iterator_new(allocator, out);
         }
     };
     private static final Allocator KEY_ENCODER_ALLOCATOR = new Allocator() {
@@ -127,6 +145,7 @@ final class TerminalSession implements AutoCloseable {
     private final MemorySegment renderState;
     private final MemorySegment rowIterator;
     private final MemorySegment rowCells;
+    private final MemorySegment kittyPlacementIterator;
     private final MemorySegment keyEncoder;
     private final MemorySegment keyEvent;
     private final MemorySegment mouseEncoder;
@@ -134,12 +153,15 @@ final class TerminalSession implements AutoCloseable {
     private final MemorySegment selectionGesture;
     private final MemorySegment xtversionString;
     private final ArrayList<Color> builtInPalette = new ArrayList<>(PALETTE_SIZE);
+    private final Map<Long, CachedKittyImage> kittyImageCache = new HashMap<>();
     private final Consumer<byte[]> terminalInput;
     private final Consumer<String> titleChanged;
     private final Consumer<String> pwdChanged;
     private final Runnable bell;
     private Size size;
-    private TerminalView.FontMetrics fontMetrics;
+    private int physicalCellWidthPx;
+    private int physicalCellHeightPx;
+    private long kittyStorageGeneration;
 
     TerminalSession(
             int initialColumns,
@@ -153,8 +175,13 @@ final class TerminalSession implements AutoCloseable {
         this.titleChanged = titleChanged;
         this.pwdChanged = pwdChanged;
         this.bell = bell;
-        size = new Size(initialColumns, initialRows);
-        fontMetrics = initialFontMetrics;
+        size = new Size(
+                initialColumns,
+                initialRows,
+                initialColumns * initialFontMetrics.cellWidthPx(),
+                initialRows * initialFontMetrics.cellHeightPx());
+        physicalCellWidthPx = initialFontMetrics.cellWidthPx();
+        physicalCellHeightPx = initialFontMetrics.cellHeightPx();
         xtversionString = GhosttyString.allocate(callbackArena);
         GhosttyString.ptr(xtversionString, callbackArena.allocateFrom(ValueLayout.JAVA_BYTE, XTVERSION_BYTES));
         GhosttyString.len(xtversionString, XTVERSION_BYTES.length);
@@ -173,6 +200,7 @@ final class TerminalSession implements AutoCloseable {
             renderState = newAddress(arena, "ghostty_render_state_new", RENDER_STATE_ALLOCATOR);
             rowIterator = newAddress(arena, "ghostty_render_state_row_iterator_new", RENDER_STATE_ROW_ITERATOR_ALLOCATOR);
             rowCells = newAddress(arena, "ghostty_render_state_row_cells_new", RENDER_STATE_ROW_CELLS_ALLOCATOR);
+            kittyPlacementIterator = newAddress(arena, "ghostty_kitty_graphics_placement_iterator_new", KITTY_PLACEMENT_ITERATOR_ALLOCATOR);
             keyEncoder = newAddress(arena, "ghostty_key_encoder_new", KEY_ENCODER_ALLOCATOR);
             keyEvent = newAddress(arena, "ghostty_key_event_new", KEY_EVENT_ALLOCATOR);
             mouseEncoder = newAddress(arena, "ghostty_mouse_encoder_new", MOUSE_ENCODER_ALLOCATOR);
@@ -187,6 +215,7 @@ final class TerminalSession implements AutoCloseable {
                             initialFontMetrics.cellWidthPx(),
                             initialFontMetrics.cellHeightPx()),
                     "ghostty_terminal_resize");
+            configureKittyGraphics(arena);
             setDefaultCursorStyle();
             setCursorBlinking(true);
             var palette = GhosttyColorRgb.allocateArray(PALETTE_SIZE, arena);
@@ -311,6 +340,60 @@ final class TerminalSession implements AutoCloseable {
         }
     }
 
+    private void configureKittyGraphics(Arena arena) {
+        var storageLimit = arena.allocate(ValueLayout.JAVA_LONG);
+        storageLimit.set(ValueLayout.JAVA_LONG, 0, KITTY_IMAGE_STORAGE_LIMIT);
+        requireGhosttySuccess(
+                ghostty_vt_h.ghostty_terminal_set(
+                        terminal,
+                        ghostty_vt_h.GHOSTTY_TERMINAL_OPT_KITTY_IMAGE_STORAGE_LIMIT(),
+                        storageLimit),
+                "ghostty_terminal_set(kitty_image_storage_limit)");
+
+        var disabled = arena.allocate(ValueLayout.JAVA_BOOLEAN);
+        disabled.set(ValueLayout.JAVA_BOOLEAN, 0, false);
+        requireGhosttySuccess(
+                ghostty_vt_h.ghostty_terminal_set(
+                        terminal,
+                        ghostty_vt_h.GHOSTTY_TERMINAL_OPT_KITTY_IMAGE_MEDIUM_FILE(),
+                        disabled),
+                "ghostty_terminal_set(kitty_image_medium_file)");
+        requireGhosttySuccess(
+                ghostty_vt_h.ghostty_terminal_set(
+                        terminal,
+                        ghostty_vt_h.GHOSTTY_TERMINAL_OPT_KITTY_IMAGE_MEDIUM_TEMP_FILE(),
+                        disabled),
+                "ghostty_terminal_set(kitty_image_medium_temp_file)");
+        requireGhosttySuccess(
+                ghostty_vt_h.ghostty_terminal_set(
+                        terminal,
+                        ghostty_vt_h.GHOSTTY_TERMINAL_OPT_KITTY_IMAGE_MEDIUM_SHARED_MEM(),
+                        disabled),
+                "ghostty_terminal_set(kitty_image_medium_shared_mem)");
+
+        var apcLimit = arena.allocate(ValueLayout.JAVA_LONG);
+        apcLimit.set(ValueLayout.JAVA_LONG, 0, KITTY_APC_MAX_BYTES);
+        requireGhosttySuccess(
+                ghostty_vt_h.ghostty_terminal_set(
+                        terminal,
+                        ghostty_vt_h.GHOSTTY_TERMINAL_OPT_APC_MAX_BYTES_KITTY(),
+                        apcLimit),
+                "ghostty_terminal_set(apc_max_bytes_kitty)");
+    }
+
+    private void restoreKittyImageStorageLimit() {
+        try (var arena = Arena.ofConfined()) {
+            var storageLimit = arena.allocate(ValueLayout.JAVA_LONG);
+            storageLimit.set(ValueLayout.JAVA_LONG, 0, KITTY_IMAGE_STORAGE_LIMIT);
+            requireGhosttySuccess(
+                    ghostty_vt_h.ghostty_terminal_set(
+                            terminal,
+                            ghostty_vt_h.GHOSTTY_TERMINAL_OPT_KITTY_IMAGE_STORAGE_LIMIT(),
+                            storageLimit),
+                    "ghostty_terminal_set(kitty_image_storage_limit)");
+        }
+    }
+
     private void writePty(MemorySegment terminal, MemorySegment userdata, MemorySegment data, long length) {
         if (length == 0) {
             return;
@@ -321,11 +404,10 @@ final class TerminalSession implements AutoCloseable {
     private boolean reportSize(MemorySegment terminal, MemorySegment userdata, MemorySegment outSize) {
         var sizeReport = outSize.reinterpret(GhosttySizeReportSize.sizeof());
         var currentSize = size;
-        var currentFontMetrics = fontMetrics;
         GhosttySizeReportSize.rows(sizeReport, (short) currentSize.rows());
         GhosttySizeReportSize.columns(sizeReport, (short) currentSize.columns());
-        GhosttySizeReportSize.cell_width(sizeReport, currentFontMetrics.cellWidthPx());
-        GhosttySizeReportSize.cell_height(sizeReport, currentFontMetrics.cellHeightPx());
+        GhosttySizeReportSize.cell_width(sizeReport, physicalCellWidthPx);
+        GhosttySizeReportSize.cell_height(sizeReport, physicalCellHeightPx);
         return true;
     }
 
@@ -417,30 +499,47 @@ final class TerminalSession implements AutoCloseable {
             ghostty_vt_h.ghostty_key_encoder_free(keyEncoder);
             ghostty_vt_h.ghostty_render_state_row_cells_free(rowCells);
             ghostty_vt_h.ghostty_render_state_row_iterator_free(rowIterator);
+            ghostty_vt_h.ghostty_kitty_graphics_placement_iterator_free(kittyPlacementIterator);
             ghostty_vt_h.ghostty_render_state_free(renderState);
             ghostty_vt_h.ghostty_terminal_free(terminal);
+            kittyImageCache.clear();
         }
     }
 
-    Size resize(double widthPx, double heightPx, TerminalView.FontMetrics metrics, double scrollbarReservedWidthPx) {
+    Size resize(
+            double widthPx,
+            double heightPx,
+            TerminalView.FontMetrics metrics,
+            double scrollbarReservedWidthPx,
+            double scaleX,
+            double scaleY) {
         if (widthPx <= 0 || heightPx <= 0) {
             return null;
         }
 
-        var columns = Math.clamp((int) Math.floor(Math.max(0, widthPx - scrollbarReservedWidthPx) / metrics.cellWidthPx()), 1, MAX_GHOSTTY_DIMENSION);
-        var rows = Math.clamp((int) Math.floor(heightPx / metrics.cellHeightPx()), 1, MAX_GHOSTTY_DIMENSION);
+        var cellWidthPx = Math.clamp((int) Math.round(metrics.cellWidthPx() * scaleX), 1, MAX_GHOSTTY_DIMENSION);
+        var cellHeightPx = Math.clamp((int) Math.round(metrics.cellHeightPx() * scaleY), 1, MAX_GHOSTTY_DIMENSION);
+        var columns = Math.clamp(
+                (int) Math.floor(Math.max(0, widthPx - scrollbarReservedWidthPx) / metrics.cellWidthPx()),
+                1,
+                MAX_GHOSTTY_DIMENSION / cellWidthPx);
+        var rows = Math.clamp(
+                (int) Math.floor(heightPx / metrics.cellHeightPx()),
+                1,
+                MAX_GHOSTTY_DIMENSION / cellHeightPx);
         requireGhosttySuccess(
                 ghostty_vt_h.ghostty_terminal_resize(
                         terminal,
                         (short) columns,
                         (short) rows,
-                        metrics.cellWidthPx(),
-                        metrics.cellHeightPx()),
+                        cellWidthPx,
+                        cellHeightPx),
                 "ghostty_terminal_resize");
-        size = new Size(columns, rows);
-        fontMetrics = metrics;
+        size = new Size(columns, rows, columns * cellWidthPx, rows * cellHeightPx);
+        physicalCellWidthPx = cellWidthPx;
+        physicalCellHeightPx = cellHeightPx;
         updateRenderState();
-        return new Size(columns, rows);
+        return size;
     }
 
     void writeToTerminal(byte[] bytes) {
@@ -448,6 +547,7 @@ final class TerminalSession implements AutoCloseable {
             var nativeBytes = arena.allocateFrom(ValueLayout.JAVA_BYTE, bytes);
             ghostty_vt_h.ghostty_terminal_vt_write(terminal, nativeBytes, bytes.length);
         }
+        restoreKittyImageStorageLimit();
         updateRenderState();
     }
 
@@ -1336,6 +1436,271 @@ final class TerminalSession implements AutoCloseable {
         }
     }
 
+    private ArrayList<KittyPlacement> kittyPlacements(
+            Arena arena,
+            double canvasWidth,
+            double canvasHeight,
+            TerminalView.FontMetrics metrics) {
+        var placements = new ArrayList<KittyPlacement>();
+        var graphicsPointer = arena.allocate(ValueLayout.ADDRESS);
+        if (ghostty_vt_h.ghostty_terminal_get(
+                terminal,
+                ghostty_vt_h.GHOSTTY_TERMINAL_DATA_KITTY_GRAPHICS(),
+                graphicsPointer) != GHOSTTY_SUCCESS) {
+            kittyImageCache.clear();
+            kittyStorageGeneration = 0;
+            return placements;
+        }
+        var graphics = graphicsPointer.get(ValueLayout.ADDRESS, 0);
+        if (graphics.equals(MemorySegment.NULL)) {
+            kittyImageCache.clear();
+            kittyStorageGeneration = 0;
+            return placements;
+        }
+
+        var storageGenerationValue = arena.allocate(ValueLayout.JAVA_LONG);
+        if (ghostty_vt_h.ghostty_kitty_graphics_get(
+                graphics,
+                ghostty_vt_h.GHOSTTY_KITTY_GRAPHICS_DATA_GENERATION(),
+                storageGenerationValue) != GHOSTTY_SUCCESS) {
+            return placements;
+        }
+        var storageGeneration = storageGenerationValue.get(ValueLayout.JAVA_LONG, 0);
+
+        var iteratorPointer = arena.allocate(ValueLayout.ADDRESS);
+        iteratorPointer.set(ValueLayout.ADDRESS, 0, kittyPlacementIterator);
+        if (ghostty_vt_h.ghostty_kitty_graphics_get(
+                graphics,
+                ghostty_vt_h.GHOSTTY_KITTY_GRAPHICS_DATA_PLACEMENT_ITERATOR(),
+                iteratorPointer) != GHOSTTY_SUCCESS) {
+            return placements;
+        }
+
+        var placementKeys = arena.allocate(MemoryLayout.sequenceLayout(4, ValueLayout.JAVA_INT));
+        placementKeys.setAtIndex(ValueLayout.JAVA_INT, 0, ghostty_vt_h.GHOSTTY_KITTY_GRAPHICS_PLACEMENT_DATA_IMAGE_ID());
+        placementKeys.setAtIndex(ValueLayout.JAVA_INT, 1, ghostty_vt_h.GHOSTTY_KITTY_GRAPHICS_PLACEMENT_DATA_X_OFFSET());
+        placementKeys.setAtIndex(ValueLayout.JAVA_INT, 2, ghostty_vt_h.GHOSTTY_KITTY_GRAPHICS_PLACEMENT_DATA_Y_OFFSET());
+        placementKeys.setAtIndex(ValueLayout.JAVA_INT, 3, ghostty_vt_h.GHOSTTY_KITTY_GRAPHICS_PLACEMENT_DATA_Z());
+        var imageIdValue = arena.allocate(ValueLayout.JAVA_INT);
+        var xOffsetValue = arena.allocate(ValueLayout.JAVA_INT);
+        var yOffsetValue = arena.allocate(ValueLayout.JAVA_INT);
+        var zValue = arena.allocate(ValueLayout.JAVA_INT);
+        var placementValues = arena.allocate(MemoryLayout.sequenceLayout(4, ValueLayout.ADDRESS));
+        placementValues.setAtIndex(ValueLayout.ADDRESS, 0, imageIdValue);
+        placementValues.setAtIndex(ValueLayout.ADDRESS, 1, xOffsetValue);
+        placementValues.setAtIndex(ValueLayout.ADDRESS, 2, yOffsetValue);
+        placementValues.setAtIndex(ValueLayout.ADDRESS, 3, zValue);
+
+        var imageKeys = arena.allocate(MemoryLayout.sequenceLayout(6, ValueLayout.JAVA_INT));
+        imageKeys.setAtIndex(ValueLayout.JAVA_INT, 0, ghostty_vt_h.GHOSTTY_KITTY_IMAGE_DATA_WIDTH());
+        imageKeys.setAtIndex(ValueLayout.JAVA_INT, 1, ghostty_vt_h.GHOSTTY_KITTY_IMAGE_DATA_HEIGHT());
+        imageKeys.setAtIndex(ValueLayout.JAVA_INT, 2, ghostty_vt_h.GHOSTTY_KITTY_IMAGE_DATA_FORMAT());
+        imageKeys.setAtIndex(ValueLayout.JAVA_INT, 3, ghostty_vt_h.GHOSTTY_KITTY_IMAGE_DATA_DATA_PTR());
+        imageKeys.setAtIndex(ValueLayout.JAVA_INT, 4, ghostty_vt_h.GHOSTTY_KITTY_IMAGE_DATA_DATA_LEN());
+        imageKeys.setAtIndex(ValueLayout.JAVA_INT, 5, ghostty_vt_h.GHOSTTY_KITTY_IMAGE_DATA_GENERATION());
+        var imageWidthValue = arena.allocate(ValueLayout.JAVA_INT);
+        var imageHeightValue = arena.allocate(ValueLayout.JAVA_INT);
+        var imageFormatValue = arena.allocate(ValueLayout.JAVA_INT);
+        var imageDataValue = arena.allocate(ValueLayout.ADDRESS);
+        var imageDataLengthValue = arena.allocate(ValueLayout.JAVA_LONG);
+        var imageGenerationValue = arena.allocate(ValueLayout.JAVA_LONG);
+        var imageValues = arena.allocate(MemoryLayout.sequenceLayout(6, ValueLayout.ADDRESS));
+        imageValues.setAtIndex(ValueLayout.ADDRESS, 0, imageWidthValue);
+        imageValues.setAtIndex(ValueLayout.ADDRESS, 1, imageHeightValue);
+        imageValues.setAtIndex(ValueLayout.ADDRESS, 2, imageFormatValue);
+        imageValues.setAtIndex(ValueLayout.ADDRESS, 3, imageDataValue);
+        imageValues.setAtIndex(ValueLayout.ADDRESS, 4, imageDataLengthValue);
+        imageValues.setAtIndex(ValueLayout.ADDRESS, 5, imageGenerationValue);
+
+        var renderInfo = GhosttyKittyGraphicsPlacementRenderInfo.allocate(arena);
+        while (ghostty_vt_h.ghostty_kitty_graphics_placement_next(kittyPlacementIterator)) {
+            if (ghostty_vt_h.ghostty_kitty_graphics_placement_get_multi(
+                    kittyPlacementIterator,
+                    4,
+                    placementKeys,
+                    placementValues,
+                    MemorySegment.NULL) != GHOSTTY_SUCCESS) {
+                continue;
+            }
+            var imageId = imageIdValue.get(ValueLayout.JAVA_INT, 0);
+            var image = ghostty_vt_h.ghostty_kitty_graphics_image(graphics, imageId);
+            if (image.equals(MemorySegment.NULL)) {
+                continue;
+            }
+
+            GhosttyKittyGraphicsPlacementRenderInfo.size(renderInfo, GhosttyKittyGraphicsPlacementRenderInfo.sizeof());
+            if (ghostty_vt_h.ghostty_kitty_graphics_placement_render_info(
+                    kittyPlacementIterator,
+                    image,
+                    terminal,
+                    renderInfo) != GHOSTTY_SUCCESS
+                    || !GhosttyKittyGraphicsPlacementRenderInfo.viewport_visible(renderInfo)) {
+                continue;
+            }
+
+            if (ghostty_vt_h.ghostty_kitty_graphics_image_get_multi(
+                    image,
+                    6,
+                    imageKeys,
+                    imageValues,
+                    MemorySegment.NULL) != GHOSTTY_SUCCESS) {
+                continue;
+            }
+            var imageGeneration = imageGenerationValue.get(ValueLayout.JAVA_LONG, 0);
+            var cachedImage = kittyImageCache.get(imageGeneration);
+            if (cachedImage == null) {
+                var copiedImage = copyKittyImage(
+                        imageWidthValue.get(ValueLayout.JAVA_INT, 0),
+                        imageHeightValue.get(ValueLayout.JAVA_INT, 0),
+                        imageFormatValue.get(ValueLayout.JAVA_INT, 0),
+                        imageDataValue.get(ValueLayout.ADDRESS, 0),
+                        imageDataLengthValue.get(ValueLayout.JAVA_LONG, 0));
+                if (copiedImage == null) {
+                    continue;
+                }
+                cachedImage = new CachedKittyImage(imageId, copiedImage);
+                kittyImageCache.put(imageGeneration, cachedImage);
+            }
+
+            var sourceX = Integer.toUnsignedLong(GhosttyKittyGraphicsPlacementRenderInfo.source_x(renderInfo));
+            var sourceY = Integer.toUnsignedLong(GhosttyKittyGraphicsPlacementRenderInfo.source_y(renderInfo));
+            var sourceWidth = Integer.toUnsignedLong(GhosttyKittyGraphicsPlacementRenderInfo.source_width(renderInfo));
+            var sourceHeight = Integer.toUnsignedLong(GhosttyKittyGraphicsPlacementRenderInfo.source_height(renderInfo));
+            var destinationWidthPx = Integer.toUnsignedLong(GhosttyKittyGraphicsPlacementRenderInfo.pixel_width(renderInfo));
+            var destinationHeightPx = Integer.toUnsignedLong(GhosttyKittyGraphicsPlacementRenderInfo.pixel_height(renderInfo));
+            if (sourceWidth == 0 || sourceHeight == 0 || destinationWidthPx == 0 || destinationHeightPx == 0) {
+                continue;
+            }
+            var terminalScaleX = physicalCellWidthPx / (double) metrics.cellWidthPx();
+            var terminalScaleY = physicalCellHeightPx / (double) metrics.cellHeightPx();
+            var destinationX = GhosttyKittyGraphicsPlacementRenderInfo.viewport_col(renderInfo) * metrics.cellWidthPx()
+                    + Integer.toUnsignedLong(xOffsetValue.get(ValueLayout.JAVA_INT, 0)) / terminalScaleX;
+            var destinationY = GhosttyKittyGraphicsPlacementRenderInfo.viewport_row(renderInfo) * metrics.cellHeightPx()
+                    + Integer.toUnsignedLong(yOffsetValue.get(ValueLayout.JAVA_INT, 0)) / terminalScaleY;
+            var destinationWidth = destinationWidthPx / terminalScaleX;
+            var destinationHeight = destinationHeightPx / terminalScaleY;
+            if (destinationX >= canvasWidth
+                    || destinationY >= canvasHeight
+                    || destinationX + destinationWidth <= 0
+                    || destinationY + destinationHeight <= 0) {
+                continue;
+            }
+            placements.add(new KittyPlacement(
+                    imageId,
+                    zValue.get(ValueLayout.JAVA_INT, 0),
+                    sourceX,
+                    sourceY,
+                    sourceWidth,
+                    sourceHeight,
+                    destinationX,
+                    destinationY,
+                    destinationWidth,
+                    destinationHeight,
+                    cachedImage.image()));
+        }
+
+        if (storageGeneration != kittyStorageGeneration) {
+            kittyImageCache.entrySet().removeIf(entry -> {
+                var image = ghostty_vt_h.ghostty_kitty_graphics_image(graphics, entry.getValue().imageId());
+                if (image.equals(MemorySegment.NULL)
+                        || ghostty_vt_h.ghostty_kitty_graphics_image_get(
+                                image,
+                                ghostty_vt_h.GHOSTTY_KITTY_IMAGE_DATA_GENERATION(),
+                                imageGenerationValue) != GHOSTTY_SUCCESS) {
+                    return true;
+                }
+                return imageGenerationValue.get(ValueLayout.JAVA_LONG, 0) != entry.getKey();
+            });
+            kittyStorageGeneration = storageGeneration;
+        }
+        placements.sort(KITTY_PLACEMENT_ORDER);
+        return placements;
+    }
+
+    private static Image copyKittyImage(int widthValue, int heightValue, int format, MemorySegment data, long dataLength) {
+        var width = Integer.toUnsignedLong(widthValue);
+        var height = Integer.toUnsignedLong(heightValue);
+        var bytesPerPixel = format == ghostty_vt_h.GHOSTTY_KITTY_IMAGE_FORMAT_RGB()
+                ? 3
+                : format == ghostty_vt_h.GHOSTTY_KITTY_IMAGE_FORMAT_RGBA() ? 4 : 0;
+        if (width == 0
+                || height == 0
+                || width > Integer.MAX_VALUE
+                || height > Integer.MAX_VALUE
+                || bytesPerPixel == 0
+                || dataLength < 0
+                || data.equals(MemorySegment.NULL)) {
+            return null;
+        }
+
+        final long expectedLength;
+        try {
+            expectedLength = Math.multiplyExact(Math.multiplyExact(width, height), bytesPerPixel);
+        } catch (ArithmeticException _) {
+            return null;
+        }
+        if (dataLength != expectedLength || expectedLength > Integer.MAX_VALUE) {
+            return null;
+        }
+
+        var pixelWidth = (int) width;
+        var pixelHeight = (int) height;
+        var source = data.reinterpret(dataLength).toArray(ValueLayout.JAVA_BYTE);
+        var image = new WritableImage(pixelWidth, pixelHeight);
+        if (bytesPerPixel == 3) {
+            image.getPixelWriter().setPixels(
+                    0,
+                    0,
+                    pixelWidth,
+                    pixelHeight,
+                    PixelFormat.getByteRgbInstance(),
+                    source,
+                    0,
+                    Math.multiplyExact(pixelWidth, 3));
+            return image;
+        }
+
+        var bgra = new byte[source.length];
+        for (var i = 0; i < source.length; i += 4) {
+            bgra[i] = source[i + 2];
+            bgra[i + 1] = source[i + 1];
+            bgra[i + 2] = source[i];
+            bgra[i + 3] = source[i + 3];
+        }
+        image.getPixelWriter().setPixels(
+                0,
+                0,
+                pixelWidth,
+                pixelHeight,
+                PixelFormat.getByteBgraInstance(),
+                bgra,
+                0,
+                Math.multiplyExact(pixelWidth, 4));
+        return image;
+    }
+
+    private static void drawKittyPlacements(
+            GraphicsContext graphics,
+            List<KittyPlacement> placements,
+            long minimumZ,
+            long maximumZ) {
+        for (var placement : placements) {
+            if (placement.z() < minimumZ || placement.z() >= maximumZ) {
+                continue;
+            }
+            graphics.drawImage(
+                    placement.image(),
+                    placement.sourceX(),
+                    placement.sourceY(),
+                    placement.sourceWidth(),
+                    placement.sourceHeight(),
+                    placement.destinationX(),
+                    placement.destinationY(),
+                    placement.destinationWidth(),
+                    placement.destinationHeight());
+        }
+    }
+
     BlinkState render(
             GraphicsContext graphics,
             double width,
@@ -1366,6 +1731,9 @@ final class TerminalSession implements AutoCloseable {
             var defaultBackground = toFxColor(GhosttyRenderStateColors.background(colors));
             graphics.setFill(defaultBackground);
             graphics.fillRect(0, 0, width, height);
+
+            var kittyPlacements = kittyPlacements(arena, width, height, metrics);
+            drawKittyPlacements(graphics, kittyPlacements, Long.MIN_VALUE, KITTY_BELOW_BACKGROUND_Z);
 
             var rowIteratorPointer = arena.allocate(ValueLayout.ADDRESS);
             rowIteratorPointer.set(ValueLayout.ADDRESS, 0, rowIterator);
@@ -1402,16 +1770,36 @@ final class TerminalSession implements AutoCloseable {
                     : -1;
             var cursor = cursorInfo(arena);
             var preeditCellCount = preedit.text().codePointCount(0, preedit.text().length());
-            var y = 0.0;
-            var viewportY = 0;
             var cursorText = "";
             var cursorBold = false;
             var cursorItalic = false;
             var hasCursorBlink = focused && cursor != null && cursor.blinking();
             var hasTextBlink = false;
 
-            while (ghostty_vt_h.ghostty_render_state_row_iterator_next(rowIterator)) {
-                if (viewportY == highlightedViewportRow) {
+            var splitCellRendering = false;
+            for (var placement : kittyPlacements) {
+                if (placement.z() >= KITTY_BELOW_BACKGROUND_Z && placement.z() < 0) {
+                    splitCellRendering = true;
+                    break;
+                }
+            }
+            for (var pass = 0; pass < (splitCellRendering ? 2 : 1); pass++) {
+                var backgroundOnly = splitCellRendering && pass == 0;
+                if (pass > 0) {
+                    drawKittyPlacements(graphics, kittyPlacements, KITTY_BELOW_BACKGROUND_Z, 0);
+                    rowIteratorPointer.set(ValueLayout.ADDRESS, 0, rowIterator);
+                    requireGhosttySuccess(
+                            ghostty_vt_h.ghostty_render_state_get(
+                                    renderState,
+                                    ghostty_vt_h.GHOSTTY_RENDER_STATE_DATA_ROW_ITERATOR(),
+                                    rowIteratorPointer),
+                            "ghostty_render_state_get(row_iterator)");
+                }
+
+                var y = 0.0;
+                var viewportY = 0;
+                while (ghostty_vt_h.ghostty_render_state_row_iterator_next(rowIterator)) {
+                if ((!splitCellRendering || backgroundOnly) && viewportY == highlightedViewportRow) {
                     graphics.setFill(applyOpacity(theme.foreground(), 0.16));
                     graphics.fillRect(0, y, Math.max(0.0, width - scrollbarReservedWidthPx), metrics.cellHeightPx());
                 }
@@ -1468,24 +1856,26 @@ final class TerminalSession implements AutoCloseable {
                     }
                     var graphemeByteLength = GhosttyBuffer.len(graphemeBuffer);
                     if (graphemeByteLength == 0) {
-                        if (selected) {
-                            graphics.setFill(theme.selectionColor());
-                            graphics.fillRect(x, y, metrics.cellWidthPx(), metrics.cellHeightPx());
-                        } else if (ghostty_vt_h.ghostty_render_state_row_cells_get(
-                                rowCells,
-                                ghostty_vt_h.GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_BG_COLOR(),
-                                background) == GHOSTTY_SUCCESS) {
-                            graphics.setFill(toFxColor(background));
-                            graphics.fillRect(x, y, metrics.cellWidthPx(), metrics.cellHeightPx());
-                        }
-                        if (!selected && searchHighlighted) {
-                            drawSearchHighlightBackground(
-                                    graphics,
-                                    x,
-                                    y,
-                                    metrics,
-                                    theme,
-                                    currentSearchMatch);
+                        if (!splitCellRendering || backgroundOnly) {
+                            if (selected) {
+                                graphics.setFill(theme.selectionColor());
+                                graphics.fillRect(x, y, metrics.cellWidthPx(), metrics.cellHeightPx());
+                            } else if (ghostty_vt_h.ghostty_render_state_row_cells_get(
+                                    rowCells,
+                                    ghostty_vt_h.GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_BG_COLOR(),
+                                    background) == GHOSTTY_SUCCESS) {
+                                graphics.setFill(toFxColor(background));
+                                graphics.fillRect(x, y, metrics.cellWidthPx(), metrics.cellHeightPx());
+                            }
+                            if (!selected && searchHighlighted) {
+                                drawSearchHighlightBackground(
+                                        graphics,
+                                        x,
+                                        y,
+                                        metrics,
+                                        theme,
+                                        currentSearchMatch);
+                            }
                         }
                         x += metrics.cellWidthPx();
                         viewportX++;
@@ -1531,18 +1921,25 @@ final class TerminalSession implements AutoCloseable {
                         hasBackground = true;
                     }
 
-                    if (selected || hasBackground) {
-                        graphics.setFill(selected ? theme.selectionColor() : toFxColor(background));
-                        graphics.fillRect(x, y, metrics.cellWidthPx(), metrics.cellHeightPx());
-                    }
-                    if (!selected && searchHighlighted) {
-                        drawSearchHighlightBackground(
-                                graphics,
-                                x,
-                                y,
-                                metrics,
-                                theme,
-                                currentSearchMatch);
+                    if (!splitCellRendering || backgroundOnly) {
+                        if (selected || hasBackground) {
+                            graphics.setFill(selected ? theme.selectionColor() : toFxColor(background));
+                            graphics.fillRect(x, y, metrics.cellWidthPx(), metrics.cellHeightPx());
+                        }
+                        if (!selected && searchHighlighted) {
+                            drawSearchHighlightBackground(
+                                    graphics,
+                                    x,
+                                    y,
+                                    metrics,
+                                    theme,
+                                    currentSearchMatch);
+                        }
+                        if (backgroundOnly) {
+                            x += metrics.cellWidthPx();
+                            viewportX++;
+                            continue;
+                        }
                     }
 
                     var faint = GhosttyStyle.faint(style);
@@ -1557,6 +1954,11 @@ final class TerminalSession implements AutoCloseable {
                                         .reinterpret(graphemeByteLength)
                                         .toArray(ValueLayout.JAVA_BYTE),
                                 StandardCharsets.UTF_8);
+                        if (renderedText.codePointAt(0) == 0x10EEEE) {
+                            x += metrics.cellWidthPx();
+                            viewportX++;
+                            continue;
+                        }
                         if (cursor != null && viewportX == cursor.x() && viewportY == cursor.y()) {
                             cursorText = renderedText;
                             cursorBold = GhosttyStyle.bold(style);
@@ -1596,21 +1998,25 @@ final class TerminalSession implements AutoCloseable {
                     viewportX++;
                 }
 
-                drawSearchHighlightBorders(
-                        graphics,
-                        y,
-                        metrics,
-                        theme,
-                        searchResult,
-                        selectedSearchMatch,
-                        viewportTop + viewportY);
+                if (!backgroundOnly) {
+                    drawSearchHighlightBorders(
+                            graphics,
+                            y,
+                            metrics,
+                            theme,
+                            searchResult,
+                            selectedSearchMatch,
+                            viewportTop + viewportY);
+                }
                 y += metrics.cellHeightPx();
                 viewportY++;
+            }
             }
 
             renderCursor(graphics, metrics, colors, focused, theme, cursorBlinkVisible, cursor, cursorText, cursorBold, cursorItalic);
             graphics.setFont(metrics.regular());
             renderPreedit(graphics, metrics, preedit, cursor, theme);
+            drawKittyPlacements(graphics, kittyPlacements, 0, Long.MAX_VALUE);
 
             var scrollbarInfo = scrollbarInfo(width, height, scrollbarReservedWidthPx, minScrollbarHeightPx);
             if (scrollbarInfo != null && scrollbarInfo.scrollable()) {
@@ -2902,6 +3308,25 @@ final class TerminalSession implements AutoCloseable {
 
     }
 
+    private record CachedKittyImage(int imageId, Image image) {
+
+    }
+
+    private record KittyPlacement(
+            int imageId,
+            int z,
+            double sourceX,
+            double sourceY,
+            double sourceWidth,
+            double sourceHeight,
+            double destinationX,
+            double destinationY,
+            double destinationWidth,
+            double destinationHeight,
+            Image image) {
+
+    }
+
     record CellHit(
             Selection.ScreenPoint screenPoint,
             int viewportX,
@@ -2912,7 +3337,7 @@ final class TerminalSession implements AutoCloseable {
 
     }
 
-    record Size(int columns, int rows) {
+    record Size(int columns, int rows, int widthPx, int heightPx) {
 
     }
 }

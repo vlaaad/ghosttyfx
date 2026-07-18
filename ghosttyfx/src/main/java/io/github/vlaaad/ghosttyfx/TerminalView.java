@@ -18,8 +18,11 @@ import javafx.animation.Animation;
 import javafx.animation.AnimationTimer;
 import javafx.animation.KeyFrame;
 import javafx.animation.Timeline;
+import javafx.application.Platform;
 import javafx.beans.binding.Bindings;
 import javafx.beans.binding.ObjectBinding;
+import javafx.beans.value.ChangeListener;
+import javafx.beans.value.ObservableValue;
 import javafx.beans.property.BooleanProperty;
 import javafx.beans.property.ObjectProperty;
 import javafx.beans.property.ReadOnlyObjectProperty;
@@ -35,6 +38,7 @@ import javafx.collections.ListChangeListener;
 import javafx.collections.ObservableList;
 import javafx.geometry.Point2D;
 import javafx.scene.Cursor;
+import javafx.scene.Scene;
 import javafx.scene.canvas.Canvas;
 import javafx.scene.input.Clipboard;
 import javafx.scene.input.ClipboardContent;
@@ -54,6 +58,7 @@ import javafx.scene.text.FontPosture;
 import javafx.scene.text.FontWeight;
 import javafx.scene.text.Text;
 import javafx.scene.text.TextBoundsType;
+import javafx.stage.Window;
 import javafx.util.Duration;
 
 /// A JavaFX terminal control backed by Ghostty's terminal emulator.
@@ -129,6 +134,13 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
             new ReadOnlyObjectWrapper<>(this, "terminalState", new TerminalState.Running());
     private final ReadOnlyObjectWrapper<TerminalSize> terminalSize =
             new ReadOnlyObjectWrapper<>(this, "terminalSize", new TerminalSize(INITIAL_COLUMNS, INITIAL_ROWS));
+    private final ObservableValue<Window> outputScaleWindow = sceneProperty().flatMap(Scene::windowProperty);
+    private final ObservableValue<Number> outputScaleX =
+            outputScaleWindow.flatMap(Window::outputScaleXProperty).orElse(1.0);
+    private final ObservableValue<Number> outputScaleY =
+            outputScaleWindow.flatMap(Window::outputScaleYProperty).orElse(1.0);
+    private final ChangeListener<Number> outputScaleListener = (_, _, _) -> scheduleOutputScaleResize();
+    private boolean outputScaleResizeScheduled;
 
     private final ObjectBinding<FontMetrics> fontMetrics = Bindings.createObjectBinding(() -> {
         var font = this.font.get();
@@ -269,6 +281,8 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
         AnchorPane.setRightAnchor(searchUi.view(), 8.0);
         widthProperty().addListener((_, _, _) -> handleResize());
         heightProperty().addListener((_, _, _) -> handleResize());
+        outputScaleX.addListener(outputScaleListener);
+        outputScaleY.addListener(outputScaleListener);
         resize(prefWidth(-1), prefHeight(-1));
         fontMetrics.addListener((_, oldMetrics, newMetrics) -> {
             if (oldMetrics == null
@@ -614,9 +628,26 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
         ptySession.close();
     }
 
+    private void scheduleOutputScaleResize() {
+        if (outputScaleResizeScheduled) {
+            return;
+        }
+        outputScaleResizeScheduled = true;
+        Platform.runLater(() -> {
+            outputScaleResizeScheduled = false;
+            handleResize();
+        });
+    }
+
     private void handleResize() {
         var metrics = fontMetrics.get();
-        var size = terminalSession.resize(getWidth(), getHeight(), metrics, scrollbarReservedWidthPx());
+        var size = terminalSession.resize(
+                getWidth(),
+                getHeight(),
+                metrics,
+                scrollbarReservedWidthPx(),
+                outputScaleX.getValue().doubleValue(),
+                outputScaleY.getValue().doubleValue());
         if (size == null) {
             return;
         }
@@ -625,7 +656,11 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
         if (currentTerminalSize.columns() != size.columns() || currentTerminalSize.rows() != size.rows()) {
             terminalSize.set(new TerminalSize(size.columns(), size.rows()));
         }
-        writeCommand(new PtySession.ResizePty(size.columns(), size.rows()));
+        writeCommand(new PtySession.ResizePty(
+                size.columns(),
+                size.rows(),
+                size.widthPx(),
+                size.heightPx()));
         if (searchUi.visible()) {
             searchUi.refresh(false);
             return;

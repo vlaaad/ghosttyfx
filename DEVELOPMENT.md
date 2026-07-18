@@ -30,7 +30,6 @@ licenses.
 14.0.2. note: plain prompts without osc 133 markers reproduce libghostty cursor pin reflow behavior (`38,0 -> 5,0 -> 5,0`), so shell integration is required for prompt redraw after shrink/grow.
 
 ### v2
-6. kitty graphics
 7. check out `_get_multi` for perf
 8. explore backarrow key mode support
 

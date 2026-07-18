@@ -21,6 +21,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.Base64;
 import java.util.HashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -46,6 +47,7 @@ import javafx.scene.input.MouseButton;
 import javafx.scene.input.MouseEvent;
 import javafx.scene.control.Label;
 import javafx.scene.control.TextField;
+import javafx.scene.image.WritableImage;
 import javafx.scene.layout.HBox;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.BeforeAll;
@@ -182,6 +184,85 @@ final class TerminalViewTest {
     void terminalSizeRejectsNonPositiveDimensions() {
         assertThrows(IllegalArgumentException.class, () -> new TerminalSize(0, 1));
         assertThrows(IllegalArgumentException.class, () -> new TerminalSize(1, 0));
+    }
+
+    @Test
+    void rendersDirectRgbRgbaAndPngImages() throws Exception {
+        var output = "\u001B[?25l"
+                + "\u001B[1;1H\u001B_Ga=T,t=d,f=24,i=1,p=1,s=1,v=1,c=1,r=1,C=1,q=2;/wAA\u001B\\"
+                + "\u001B[1;2H\u001B[48;2;0;0;255m \u001B[0m"
+                + "\u001B[1;2H\u001B_Ga=T,t=d,f=32,i=2,p=2,s=1,v=1,c=1,r=1,C=1,q=2;/wAAgA==\u001B\\"
+                + "\u001B[1;3H\u001B_Ga=T,t=d,f=100,i=3,p=3,c=1,r=1,C=1,q=2;"
+                + "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==\u001B\\";
+        try (var view = createView(output)) {
+            awaitTerminalClosed(view);
+            var colors = runOnFxThread(() -> List.of(cellColor(view, 0, 0), cellColor(view, 1, 0), cellColor(view, 2, 0)));
+            assertColor(Color.RED, colors.get(0));
+            assertColor(Color.rgb(128, 0, 127), colors.get(1));
+            assertColor(Color.RED, colors.get(2));
+        }
+    }
+
+    @Test
+    void rendersLargeUnchunkedDirectImage() throws Exception {
+        var pixels = new byte[150 * 150 * 3];
+        for (var i = 0; i < pixels.length; i += 3) {
+            pixels[i] = (byte) 0xFF;
+        }
+        var output = "\u001B[?25l\u001B_Ga=T,t=d,f=24,s=150,v=150,c=1,r=1,C=1,q=2;"
+                + Base64.getEncoder().encodeToString(pixels)
+                + "\u001B\\";
+
+        try (var view = createView(output)) {
+            awaitTerminalClosed(view);
+            assertColor(Color.RED, runOnFxThread(() -> cellColor(view, 0, 0)));
+        }
+    }
+
+    @Test
+    void rendersKittyImagesInAllZLayers() throws Exception {
+        var output = "\u001B[?25l"
+                + "\u001B[38;2;0;255;0;48;2;0;0;255m ██\u001B[0m"
+                + "\u001B_Ga=t,t=d,f=24,i=20,s=1,v=1,q=2;/wAA\u001B\\"
+                + "\u001B[1;1H\u001B_Ga=p,i=20,p=1,c=1,r=1,C=1,q=2,z=-1073741825;\u001B\\"
+                + "\u001B[1;2H\u001B_Ga=p,i=20,p=2,c=1,r=1,C=1,q=2,z=-1;\u001B\\"
+                + "\u001B[1;3H\u001B_Ga=p,i=20,p=3,c=1,r=1,C=1,q=2,z=0;\u001B\\";
+        try (var view = createView(output)) {
+            awaitTerminalClosed(view);
+            var colors = runOnFxThread(() -> List.of(cellColor(view, 0, 0), cellColor(view, 1, 0), cellColor(view, 2, 0)));
+            assertColor(Color.BLUE, colors.get(0));
+            assertColor(Color.LIME, colors.get(1));
+            assertColor(Color.RED, colors.get(2));
+        }
+    }
+
+    @Test
+    void rendersImageOnlyAfterFinalCompressedChunk() throws Exception {
+        var terminal = new ControlledTerminal();
+        try (var view = new TerminalView((_, _) -> terminal)) {
+            terminal.emit("\u001B[?25l"
+                    + "\u001B_Ga=T,t=d,f=24,o=z,i=4,p=4,s=1,v=1,c=1,r=1,C=1,q=2,m=1;eAEBAwD8\u001B\\"
+                    + "\u001B]0;first-chunk\u001B\\");
+            awaitTitle(view, "first-chunk");
+            assertColor(Color.BLACK, runOnFxThread(() -> cellColor(view, 0, 0)));
+
+            terminal.emit("\u001B_Gm=0;//8AAAMAAQA=\u001B\\\u001B]0;final-chunk\u001B\\");
+            awaitTitle(view, "final-chunk");
+            awaitCellColor(view, 0, 0, Color.RED);
+        }
+    }
+
+    @Test
+    void refreshesCachedImageOnSameIdRetransmission() throws Exception {
+        var terminal = new ControlledTerminal();
+        try (var view = new TerminalView((_, _) -> terminal)) {
+            terminal.emit("\u001B[?25l"
+                    + "\u001B_Ga=T,t=d,f=24,i=31,p=31,s=1,v=1,c=1,r=1,C=1,q=2;/wAA\u001B\\");
+            awaitCellColor(view, 0, 0, Color.RED);
+
+            terminal.emit("\u001B_Ga=t,t=d,f=24,i=31,s=1,v=1,q=2;AAD/\u001B\\");
+            awaitCellColor(view, 0, 0, Color.BLUE);
+        }
     }
 
     @Test
@@ -1200,6 +1281,53 @@ final class TerminalViewTest {
             Event.fireEvent(view, mouseEvent(MouseEvent.MOUSE_RELEASED, cellX(view, 0, 0.1), cellY(view, 5, 0.5), false));
             return null;
         });
+    }
+
+    private static void awaitTerminalClosed(TerminalView view) throws Exception {
+        await("terminal output to close", START_TIMEOUT, () -> runOnFxThread(() ->
+                view.getTerminalState() instanceof TerminalState.Closed
+                        ? Optional.of(Boolean.TRUE)
+                        : Optional.empty()));
+    }
+
+    private static void awaitTitle(TerminalView view, String title) throws Exception {
+        await("terminal title " + title, START_TIMEOUT, () -> runOnFxThread(() ->
+                title.equals(view.getTitle()) ? Optional.of(Boolean.TRUE) : Optional.empty()));
+    }
+
+    private static void awaitCellColor(TerminalView view, int column, int row, Color expected) throws Exception {
+        await("cell color " + expected, START_TIMEOUT, () -> runOnFxThread(() ->
+                colorsEqual(expected, cellColor(view, column, row))
+                        ? Optional.of(Boolean.TRUE)
+                        : Optional.empty()));
+    }
+
+    private static Color cellColor(TerminalView view, int column, int row) {
+        attachToScene(view);
+        var width = Math.ceil(view.prefWidth(-1));
+        var height = Math.ceil(view.prefHeight(-1));
+        view.resize(width, height);
+        view.applyCss();
+        view.layout();
+        var snapshot = new WritableImage((int) width, (int) height);
+        view.snapshot(null, snapshot);
+        return snapshot.getPixelReader().getColor(
+                (int) Math.floor(cellX(view, column, 0.5)),
+                (int) Math.floor(cellY(view, row, 0.5)));
+    }
+
+    private static void assertColor(Color expected, Color actual) {
+        assertEquals(expected.getRed(), actual.getRed(), 0.01);
+        assertEquals(expected.getGreen(), actual.getGreen(), 0.01);
+        assertEquals(expected.getBlue(), actual.getBlue(), 0.01);
+        assertEquals(expected.getOpacity(), actual.getOpacity(), 0.01);
+    }
+
+    private static boolean colorsEqual(Color expected, Color actual) {
+        return Math.abs(expected.getRed() - actual.getRed()) <= 0.01
+                && Math.abs(expected.getGreen() - actual.getGreen()) <= 0.01
+                && Math.abs(expected.getBlue() - actual.getBlue()) <= 0.01
+                && Math.abs(expected.getOpacity() - actual.getOpacity()) <= 0.01;
     }
 
     private static void clickCell(TerminalView view, int column, int row) {

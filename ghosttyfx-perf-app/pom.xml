@@ -17,6 +17,7 @@
 
     <properties>
         <maven.deploy.skip>true</maven.deploy.skip>
+        <ghosttyfx.renderPerf.outputDir>${project.build.directory}/render-perf-results</ghosttyfx.renderPerf.outputDir>
     </properties>
 
     <dependencies>
@@ -72,6 +73,36 @@
                                         <systemProperty>
                                             <key>ghosttyfx.perf.cwd</key>
                                             <value>${project.parent.basedir}</value>
+                                        </systemProperty>
+                                    </systemProperties>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+        <profile>
+            <id>render-perf-app</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.codehaus.mojo</groupId>
+                        <artifactId>exec-maven-plugin</artifactId>
+                        <executions>
+                            <execution>
+                                <id>render-perf-app</id>
+                                <phase>compile</phase>
+                                <goals>
+                                    <goal>java</goal>
+                                </goals>
+                                <configuration>
+                                    <mainClass>io.github.vlaaad.ghosttyfx.perfapp.RenderPerfApp</mainClass>
+                                    <cleanupDaemonThreads>false</cleanupDaemonThreads>
+                                    <systemProperties>
+                                        <systemProperty>
+                                            <key>ghosttyfx.renderPerf.outputDir</key>
+                                            <value>${ghosttyfx.renderPerf.outputDir}</value>
                                         </systemProperty>
                                     </systemProperties>
                                 </configuration>

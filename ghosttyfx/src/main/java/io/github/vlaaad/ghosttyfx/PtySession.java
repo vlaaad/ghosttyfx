@@ -66,8 +66,8 @@ final class PtySession implements AutoCloseable {
                             switch (commands.take()) {
                                 case WriteInput(var bytes) ->
                                     output.write(bytes);
-                                case ResizePty(var columns, var rows) ->
-                                    terminal.resize(columns, rows);
+                                case ResizePty(var columns, var rows, var widthPx, var heightPx) ->
+                                    terminal.resize(columns, rows, widthPx, heightPx);
                             }
                         }
                     } catch (Exception _) {
@@ -97,7 +97,7 @@ final class PtySession implements AutoCloseable {
     record WriteInput(byte[] bytes) implements Command {
     }
 
-    record ResizePty(int columns, int rows) implements Command {
+    record ResizePty(int columns, int rows, int widthPx, int heightPx) implements Command {
     }
 
     sealed interface ProcessOutput permits Chunk, Closed {

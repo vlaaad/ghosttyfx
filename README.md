@@ -48,7 +48,9 @@ First, adapt pty4j to GhosttyFX's `Terminal` interface:
 import com.pty4j.PtyProcess;
 import com.pty4j.PtyProcessBuilder;
 import com.pty4j.WinSize;
+import com.pty4j.unix.UnixPtyProcess;
 import io.github.vlaaad.ghosttyfx.Terminal;
+import io.github.vlaaad.ghosttyfx.UnixPtyFileDescriptor;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.file.Path;
@@ -83,8 +85,13 @@ final class PtyTerminal implements Terminal {
     }
 
     @Override
-    public void resize(int columns, int rows) {
-        process.setWinSize(new WinSize(columns, rows));
+    public void resize(int columns, int rows, int widthPx, int heightPx) {
+        if (process instanceof UnixPtyProcess unix) {
+            UnixPtyFileDescriptor.resize(
+                    unix.getPty().getMasterFD(), columns, rows, widthPx, heightPx);
+        } else {
+            process.setWinSize(new WinSize(columns, rows));
+        }
     }
 
     @Override
@@ -144,6 +151,11 @@ returning a `Terminal`.
 GhosttyFX does not prescribe a PTY library. Your application can adapt pty4j,
 JNA, a native backend, or another process/session implementation to `Terminal`.
 
+`Terminal.resize(...)` receives the grid size in character cells and the content
+size in physical pixels. The pty4j adapter above uses
+`UnixPtyFileDescriptor.resize(...)` on Unix because pty4j's `WinSize` does not
+carry pixel dimensions.
+
 `TerminalView` owns the backend lifecycle. Call `TerminalView.close()` when the
 view is no longer needed; it can be called from the JavaFX UI thread, actual
 backend cleanup happens on the background terminal task, and repeated calls are
@@ -159,6 +171,10 @@ the shell starts. Integration lets the terminal observe shell lifecycle events,
 including prompts and command boundaries, which enables prompt navigation and
 better redraw behavior. Supported shells are Bash, Cmd, Fish, PowerShell, and
 Zsh. Unknown commands are returned unchanged.
+
+### Kitty graphics
+
+GhosttyFX supports Kitty graphics protocol images in RGB, RGBA, and PNG formats.
 
 ## The View
 

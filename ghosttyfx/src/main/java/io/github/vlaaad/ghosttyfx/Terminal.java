@@ -29,7 +29,24 @@ public interface Terminal extends AutoCloseable {
     /// @param columns the terminal width, measured in character cells
     /// @param rows the terminal height, measured in character cells
     /// @throws Exception if the backend cannot be resized
-    void resize(int columns, int rows) throws Exception;
+    ///
+    /// This callback is retained for compatibility with existing implementations.
+    /// New implementations should override [#resize(int, int, int, int)] to
+    /// receive both the grid and pixel dimensions.
+    @Deprecated
+    default void resize(int columns, int rows) throws Exception {
+    }
+
+    /// Resizes the terminal's pseudoterminal or equivalent backend.
+    ///
+    /// @param columns the terminal width, measured in character cells
+    /// @param rows the terminal height, measured in character cells
+    /// @param widthPx the terminal width, measured in pixels
+    /// @param heightPx the terminal height, measured in pixels
+    /// @throws Exception if the backend cannot be resized
+    default void resize(int columns, int rows, int widthPx, int heightPx) throws Exception {
+        resize(columns, rows);
+    }
 
     /// Closes the terminal and releases its associated resources.
     ///
