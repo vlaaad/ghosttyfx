@@ -50,9 +50,11 @@ The Maven build invokes [scripts/GhosttyBuild.java](/C:/Users/Vlaaad/Projects/gh
 - writes generated resources under `target/generated-resources/ghosttyfx`
 - writes CI/download artifacts under `target/ghosttyfx-artifact`
 
-If the local Windows toolchain is unavailable, the build will also look for a matching downloaded artifact cache under:
+If the local Windows toolchain is unavailable, the build looks for a matching downloaded artifact cache under:
 
 - `dist/<ghostty-commit-sha>/<artifactId>/`
+
+If it is missing, the build automatically downloads the current platform artifact from a successful CI run.
 
 Artifacts contain:
 
@@ -73,7 +75,7 @@ That command:
 - downloads the produced artifact set into `dist/<ghostty-commit-sha>/`
 - validates that each artifact metadata file matches the current `ghostty` submodule commit
 
-After that, on Windows machines without MSVC Build Tools + Windows SDK, `mvn clean test` can reuse the downloaded artifact for the current host platform.
+This explicit command is only needed to download a complete cross-platform artifact set. Normal local builds download only the current platform when its native toolchain is unavailable.
 
 ## Manual App
 
@@ -99,12 +101,13 @@ CI only needs to:
 
 1. check out this repository with submodules
 2. set up Java
-3. run `mvn clean test`
+3. run `mvn "-Dghosttyfx.native.mode=build" clean test`
 4. upload `<platform-module>/target/ghosttyfx-artifact/`
 
 ## Notes
 
 - Local generation is host-only.
+- `ghosttyfx.native.mode=build` disables artifact reuse and downloading, so CI builds from source or fails.
 - Cross-platform artifact sets come from CI running the same build on each target host.
 - Local Windows source builds still require Visual Studio Build Tools plus the Windows SDK.
 - `ghostling` is for source reference only and is not part of the build path.

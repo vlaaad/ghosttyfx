@@ -46,6 +46,7 @@
                                 <argument>${ghosttyfx.platform.id}</argument>
                                 <argument>${project.artifactId}</argument>
                                 <argument>${project.build.directory}</argument>
+                                <argument>${ghosttyfx.native.mode}</argument>
                             </arguments>
                         </configuration>
                     </execution>

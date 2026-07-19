@@ -173,12 +173,12 @@ public final class GhosttyBuild {
             downloadArtifacts(Path.of("").toAbsolutePath().normalize());
             return;
         }
-        if (args.length == 4 && "generate-platform".equals(args[0])) {
+        if (args.length == 5 && "generate-platform".equals(args[0])) {
             generatePlatform(args);
             return;
         }
         throw new IllegalArgumentException(
-            "usage: generate-platform <platform-id> <artifact-id> <build-dir> | download-artifacts"
+            "usage: generate-platform <platform-id> <artifact-id> <build-dir> <auto|build> | download-artifacts"
         );
     }
 
@@ -187,15 +187,16 @@ public final class GhosttyBuild {
         var platform = platform(args[1]);
         var artifactId = args[2];
         var buildDir = Path.of(args[3]).toAbsolutePath().normalize();
+        var mode = NativeMode.parse(args[4]);
 
         ensureRequiredSubmodules(repo);
         var ghosttyCommit = capture(repo.resolve(GHOSTTY_SUBMODULE), "git", "rev-parse", "HEAD").trim();
         var outputs = outputs(buildDir);
-        if (isUpToDate(outputs, platform, artifactId, ghosttyCommit)) {
+        if (mode == NativeMode.AUTO && isUpToDate(outputs, platform, artifactId, ghosttyCommit)) {
             System.out.println("ghosttyfx artifact is up to date: " + outputs.artifactDir);
             return;
         }
-        if (restoreCachedArtifact(repo, outputs, platform, artifactId, ghosttyCommit)) {
+        if (mode == NativeMode.AUTO && restoreCachedArtifact(repo, outputs, platform, artifactId, ghosttyCommit)) {
             System.out.println("restored cached ghosttyfx artifact: " + outputs.artifactDir);
             return;
         }
@@ -209,10 +210,17 @@ public final class GhosttyBuild {
         }
 
         if (!canBuildLocally()) {
-            throw new IllegalStateException(
-                "No cached artifact found for ghostty commit " + ghosttyCommit + ". "
-                    + "Run `" + DOWNLOAD_ARTIFACTS_COMMAND + "` first."
-            );
+            if (mode == NativeMode.BUILD) {
+                throw new IllegalStateException(
+                    "Native mode build requires Visual Studio Build Tools and the Windows SDK on this host."
+                );
+            }
+            downloadArtifacts(repo, List.of(platform));
+            if (!restoreCachedArtifact(repo, outputs, platform, artifactId, ghosttyCommit)) {
+                throw new IllegalStateException("Downloaded artifact is invalid for ghostty commit " + ghosttyCommit);
+            }
+            System.out.println("restored downloaded ghosttyfx artifact: " + outputs.artifactDir);
+            return;
         }
 
         var zigHome = ensureTool(repo, platform.zig);
@@ -267,6 +275,10 @@ public final class GhosttyBuild {
     }
 
     private static void downloadArtifacts(Path repo) throws Exception {
+        downloadArtifacts(repo, List.copyOf(PLATFORMS.values()));
+    }
+
+    private static void downloadArtifacts(Path repo, List<PlatformSpec> platforms) throws Exception {
         ensureRequiredSubmodules(repo);
         var ghosttyCommit = capture(repo.resolve(GHOSTTY_SUBMODULE), "git", "rev-parse", "HEAD").trim();
         var distDir = distDir(repo, ghosttyCommit);
@@ -290,8 +302,8 @@ public final class GhosttyBuild {
                 "--jq",
                 ".artifacts[] | select(.expired == false) | .name"
             ).lines().filter(line -> !line.isBlank()).toList();
-            if (!PLATFORMS.values().stream().map(platform -> artifactId(platform.id)).allMatch(artifactNames::contains)) {
-                System.out.println("Skipping workflow run without a complete retained artifact set: " + runId);
+            if (!platforms.stream().map(platform -> artifactId(platform.id)).allMatch(artifactNames::contains)) {
+                System.out.println("Skipping workflow run without the requested retained artifacts: " + runId);
                 continue;
             }
 
@@ -299,7 +311,7 @@ public final class GhosttyBuild {
             var candidateDir = Files.createTempDirectory(distRoot, ".ghosttyfx-artifacts-");
             try {
                 var valid = true;
-                for (var platform : PLATFORMS.values()) {
+                for (var platform : platforms) {
                     var artifactId = artifactId(platform.id);
                     var artifactDir = candidateDir.resolve(artifactId);
                     Files.createDirectories(artifactDir);
@@ -323,9 +335,14 @@ public final class GhosttyBuild {
                     }
                 }
                 if (valid) {
-                    deleteDirectory(distDir);
-                    Files.move(candidateDir, distDir);
-                    System.out.println("Artifacts downloaded to " + distDir);
+                    Files.createDirectories(distDir);
+                    for (var platform : platforms) {
+                        var artifactId = artifactId(platform.id);
+                        var targetDir = distDir.resolve(artifactId);
+                        deleteDirectory(targetDir);
+                        Files.move(candidateDir.resolve(artifactId), targetDir);
+                    }
+                    System.out.println("Requested artifacts downloaded to " + distDir);
                     return;
                 }
                 System.out.println("Skipping workflow run with incompatible artifacts: " + runId);
@@ -335,7 +352,7 @@ public final class GhosttyBuild {
         }
 
         throw new IllegalStateException(
-            "No complete retained artifact set from the current branch or main matched ghostty commit " + ghosttyCommit
+            "No retained requested artifacts from the current branch or main matched ghostty commit " + ghosttyCommit
         );
     }
 
@@ -949,6 +966,19 @@ public final class GhosttyBuild {
     private enum ArchiveType {
         TAR,
         ZIP
+    }
+
+    private enum NativeMode {
+        AUTO,
+        BUILD;
+
+        private static NativeMode parse(String value) {
+            try {
+                return valueOf(value.toUpperCase(Locale.ROOT));
+            } catch (IllegalArgumentException exception) {
+                throw new IllegalArgumentException("unsupported native mode: " + value + "; expected auto or build", exception);
+            }
+        }
     }
 
     private record DownloadSpec(

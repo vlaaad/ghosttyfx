@@ -44,6 +44,7 @@
         <javafx.version>25.0.2</javafx.version>
         <pty4j.version>0.13.12</pty4j.version>
         <ghosttyfx.script>${project.basedir}/scripts/GhosttyBuild.java</ghosttyfx.script>
+        <ghosttyfx.native.mode>auto</ghosttyfx.native.mode>
     </properties>
 
     <modules>
