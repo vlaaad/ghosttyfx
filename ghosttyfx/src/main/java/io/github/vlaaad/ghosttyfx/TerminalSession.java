@@ -398,7 +398,15 @@ final class TerminalSession implements AutoCloseable {
         if (length == 0) {
             return;
         }
+        var event = JfrEvents.ptyWrite();
+        if (event != null) {
+            event.bytes = length;
+            event.begin();
+        }
         terminalInput.accept(data.reinterpret(length).toArray(ValueLayout.JAVA_BYTE));
+        if (event != null) {
+            event.commit();
+        }
     }
 
     private boolean reportSize(MemorySegment terminal, MemorySegment userdata, MemorySegment outSize) {
@@ -543,12 +551,20 @@ final class TerminalSession implements AutoCloseable {
     }
 
     void writeToTerminal(byte[] bytes) {
+        var event = JfrEvents.writeToTerminal();
+        if (event != null) {
+            event.bytes = bytes.length;
+            event.begin();
+        }
         try (var arena = Arena.ofConfined()) {
             var nativeBytes = arena.allocateFrom(ValueLayout.JAVA_BYTE, bytes);
             ghostty_vt_h.ghostty_terminal_vt_write(terminal, nativeBytes, bytes.length);
         }
         restoreKittyImageStorageLimit();
         updateRenderState();
+        if (event != null) {
+            event.commit();
+        }
     }
 
     byte[] encodeFocus(boolean focused) {
@@ -1719,6 +1735,14 @@ final class TerminalSession implements AutoCloseable {
             double scrollbarReservedWidthPx,
             double minScrollbarHeightPx,
             int promptNavigationHighlightRow) {
+        var event = JfrEvents.render();
+        if (event != null) {
+            event.columns = size.columns();
+            event.rows = size.rows();
+            event.searchVisible = searchResult != null && !searchResult.matches().isEmpty();
+            event.focused = focused;
+            event.begin();
+        }
         graphics.setFont(metrics.regular());
 
         try (var arena = Arena.ofConfined()) {
@@ -2030,6 +2054,10 @@ final class TerminalSession implements AutoCloseable {
                         TerminalView.SCROLLBAR_ARC_PX);
             }
             return new BlinkState(hasCursorBlink, hasTextBlink);
+        } finally {
+            if (event != null) {
+                event.commit();
+            }
         }
     }
 

@@ -12,10 +12,21 @@ import java.text.DecimalFormatSymbols;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.stream.Collectors;
+import jdk.jfr.Category;
+import jdk.jfr.Configuration;
+import jdk.jfr.Event;
+import jdk.jfr.EventType;
+import jdk.jfr.Label;
+import jdk.jfr.Name;
+import jdk.jfr.Recording;
+import jdk.jfr.StackTrace;
+import jdk.jfr.Timespan;
+import jdk.jfr.consumer.RecordingFile;
 import javafx.animation.AnimationTimer;
 import javafx.application.Platform;
 import javafx.scene.Scene;
@@ -58,6 +69,11 @@ public final class GhosttyFxPerfApp {
         var terminal = detectTerminal();
         statusLog.write("terminal=" + terminal.label());
         var view = new TerminalView((columns, rows) -> {
+            if (config.scenario().usesProbe()) {
+                var command = probeCommand(config);
+                statusLog.write("probe=" + String.join(" ", command));
+                return new PtyTerminal(command, config.cwd(), System.getenv(), columns, rows);
+            }
             var launcher = Shell.integrate(terminal.command(), System.getenv());
             return new PtyTerminal(launcher.command(), config.cwd(), launcher.environment(), columns, rows);
         });
@@ -75,6 +91,25 @@ public final class GhosttyFxPerfApp {
         var controller = new Controller(stage, view, config, terminal, recorder, completion, statusLog);
         statusLog.write("controller-start");
         controller.start();
+    }
+
+    private static List<String> probeCommand(PerfConfig config) {
+        var java = Path.of(System.getProperty("java.home"), "bin", "java").toString();
+        var classpath = classesDir();
+        return switch (config.scenario()) {
+            case LATENCY -> List.of(java, "-cp", classpath, "io.github.vlaaad.ghosttyfx.perfapp.LatencyProbe");
+            case THROUGHPUT -> List.of(java, "-cp", classpath, "io.github.vlaaad.ghosttyfx.perfapp.ThroughputProbe", Long.toString(config.throughputBytes()));
+            default -> throw new IllegalStateException("not a probe scenario: " + config.scenario());
+        };
+    }
+
+    private static String classesDir() {
+        var url = GhosttyFxPerfApp.class.getProtectionDomain().getCodeSource().getLocation();
+        try {
+            return Path.of(url.toURI()).toString();
+        } catch (Exception e) {
+            throw new IllegalStateException("Cannot resolve classes directory from " + url, e);
+        }
     }
 
     private static void closeView(TerminalView view) {
@@ -283,6 +318,9 @@ public final class GhosttyFxPerfApp {
         report.add("- View size: " + Math.round(viewWidth) + "x" + Math.round(viewHeight));
         report.add("- Scenario: " + config.scenario().description(config));
         report.add("- Run inputs: " + runInputCount);
+        if (config.scenario() == Scenario.THROUGHPUT) {
+            report.add("- Run bytes: " + config.throughputBytes());
+        }
         report.add("- Batch size per pulse: " + config.batchSize());
         report.add("- Prelude settle: " + config.preludeSettleDuration().toMillis() + " ms");
         report.add("");
@@ -316,6 +354,22 @@ public final class GhosttyFxPerfApp {
         report.add("");
         report.add("- `dispatch-samples.csv`");
         report.add("- `pulse-samples.csv`");
+        if (config.jfrEnabled()) {
+            report.add("- `recording.jfr`");
+            report.add("- `jfr-events.csv`");
+        }
+
+        var jfrStats = aggregateJfr(config.outputDirectory().resolve("recording.jfr"));
+        if (!jfrStats.isEmpty()) {
+            report.add("");
+            report.add("## JFR");
+            report.add("");
+            report.add("| Event | Count | Avg ms | P50 ms | P95 ms | P99 ms | Max ms | Bytes | MB/s | Count/s |");
+            report.add("| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |");
+            for (var entry : jfrStats.entrySet()) {
+                report.add(jfrRow(entry.getKey(), entry.getValue(), runSeconds));
+            }
+        }
 
         Files.writeString(config.outputDirectory().resolve("summary.md"), String.join(System.lineSeparator(), report));
         System.out.println("GhosttyFX perf report written to " + config.outputDirectory().resolve("summary.md"));
@@ -327,6 +381,64 @@ public final class GhosttyFxPerfApp {
 
     private static void writeSamples(Path path, List<String> samples) throws IOException {
         Files.write(path, samples);
+    }
+
+    private static LinkedHashMap<String, JfrSummary> aggregateJfr(Path jfrPath) throws IOException {
+        if (!Files.isRegularFile(jfrPath)) {
+            return new LinkedHashMap<>();
+        }
+        var durations = new LinkedHashMap<String, ArrayList<Long>>();
+        var bytes = new LinkedHashMap<String, Long>();
+        var eventRows = new ArrayList<String>();
+        eventRows.add("event,duration_ns,bytes");
+        try (var recording = new RecordingFile(jfrPath)) {
+            while (recording.hasMoreEvents()) {
+                var event = recording.readEvent();
+                var type = event.getEventType().getName();
+                if (!type.startsWith("ghosttyfx.")) {
+                    continue;
+                }
+                var label = type.substring("ghosttyfx.".length());
+                var durationNs = event.getDuration().toNanos();
+                var byteCount = hasField(event, "bytes") ? event.getLong("bytes") : 0L;
+                durations.computeIfAbsent(label, _ -> new ArrayList<>()).add(durationNs);
+                bytes.merge(label, byteCount, Long::sum);
+                eventRows.add(label + "," + durationNs + "," + byteCount);
+            }
+        }
+        Files.write(jfrPath.resolveSibling("jfr-events.csv"), eventRows);
+        var result = new LinkedHashMap<String, JfrSummary>();
+        for (var entry : durations.entrySet()) {
+            result.put(entry.getKey(), new JfrSummary(summarize(entry.getValue()), bytes.getOrDefault(entry.getKey(), 0L)));
+        }
+        return result;
+    }
+
+    private static boolean hasField(jdk.jfr.consumer.RecordedEvent event, String name) {
+        for (var descriptor : event.getFields()) {
+            if (descriptor.getName().equals(name)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static String jfrRow(String label, JfrSummary jfrSummary, double runSeconds) {
+        var summary = jfrSummary.summary();
+        var bytes = jfrSummary.bytes();
+        var mbPerSecond = runSeconds == 0 ? 0 : bytes / 1_000_000d / runSeconds;
+        var countPerSecond = runSeconds == 0 ? 0 : summary.count() / runSeconds;
+        return "| " + label
+                + " | " + summary.count()
+                + " | " + DECIMAL.format(summary.averageMs())
+                + " | " + DECIMAL.format(summary.p50Ms())
+                + " | " + DECIMAL.format(summary.p95Ms())
+                + " | " + DECIMAL.format(summary.p99Ms())
+                + " | " + DECIMAL.format(summary.maxMs())
+                + " | " + bytes
+                + " | " + DECIMAL.format(mbPerSecond)
+                + " | " + DECIMAL.format(countPerSecond)
+                + " |";
     }
 
     private static String summaryRow(String label, Summary summary) {
@@ -432,10 +544,30 @@ public final class GhosttyFxPerfApp {
             String description(PerfConfig config) {
                 return "load " + config.linkOutputLines() + " URL-heavy terminal lines then scroll";
             }
+        },
+        LATENCY {
+            @Override
+            String description(PerfConfig config) {
+                return "PING/PONG latency probe, " + config.repeatCount() + " round-trips at " + config.latencyRateHz() + " Hz";
+            }
+
+            @Override boolean usesProbe() { return true; }
+        },
+        THROUGHPUT {
+            @Override
+            String description(PerfConfig config) {
+                return "PTY throughput probe, " + config.throughputBytes() + " bytes";
+            }
+
+            @Override boolean usesProbe() { return true; }
         };
 
         boolean loadsOutput() {
             return this == SEARCH_FIELD || this == LINK_OUTPUT;
+        }
+
+        boolean usesProbe() {
+            return false;
         }
 
         abstract String description(PerfConfig config);
@@ -460,7 +592,10 @@ public final class GhosttyFxPerfApp {
             Scenario scenario,
             int searchOutputLines,
             String searchQuery,
-            int linkOutputLines) {
+            int linkOutputLines,
+            int latencyRateHz,
+            long throughputBytes,
+            boolean jfrEnabled) {
 
         static PerfConfig load() {
             var cwd = Path.of(System.getProperty("ghosttyfx.perf.cwd", System.getProperty("user.dir", ".")))
@@ -485,6 +620,9 @@ public final class GhosttyFxPerfApp {
             var searchOutputLines = intProperty("ghosttyfx.perf.searchOutputLines", 20_000, 1);
             var searchQuery = System.getProperty("ghosttyfx.perf.searchQuery", "needle");
             var linkOutputLines = intProperty("ghosttyfx.perf.linkOutputLines", 20_000, 1);
+            var latencyRateHz = intProperty("ghosttyfx.perf.latencyRateHz", 15, 1);
+            var throughputBytes = longProperty("ghosttyfx.perf.throughputBytes", 1_000_000L, 1L);
+            var jfrEnabled = Boolean.parseBoolean(System.getProperty("ghosttyfx.perf.jfr", "true"));
             if (preludeText.isEmpty()) {
                 throw new IllegalArgumentException("ghosttyfx.perf.preludeText must not be empty");
             }
@@ -507,11 +645,18 @@ public final class GhosttyFxPerfApp {
                     scenario,
                     searchOutputLines,
                     searchQuery,
-                    linkOutputLines);
+                    linkOutputLines,
+                    latencyRateHz,
+                    throughputBytes,
+                    jfrEnabled);
         }
 
         private static int intProperty(String name, int defaultValue, int minimum) {
-            var value = Integer.parseInt(System.getProperty(name, Integer.toString(defaultValue)));
+            return Math.toIntExact(longProperty(name, defaultValue, minimum));
+        }
+
+        private static long longProperty(String name, long defaultValue, long minimum) {
+            var value = Long.parseLong(System.getProperty(name, Long.toString(defaultValue)));
             if (value < minimum) {
                 throw new IllegalArgumentException(name + " must be >= " + minimum + ", got " + value);
             }
@@ -525,6 +670,9 @@ public final class GhosttyFxPerfApp {
     }
 
     private record Summary(int count, double averageMs, double p50Ms, double p95Ms, double p99Ms, double maxMs) {
+    }
+
+    private record JfrSummary(Summary summary, long bytes) {
     }
 
     private record PhaseSummary(Summary summary, long over16Ms, long over33Ms, long over50Ms) {
@@ -623,6 +771,7 @@ public final class GhosttyFxPerfApp {
         private final Recorder recorder;
         private final Completion completion;
         private final StatusLog statusLog;
+        private Recording jfrRecording;
         private long lastPulseNs;
         private long phaseStartedNs;
         private int repeatsSent;
@@ -651,7 +800,14 @@ public final class GhosttyFxPerfApp {
         public void handle(long now) {
             try {
                 if (lastPulseNs != 0) {
-                    recorder.recordPulse(phase, now - lastPulseNs);
+                    var interval = now - lastPulseNs;
+                    recorder.recordPulse(phase, interval);
+                    if (config.jfrEnabled() && EventType.getEventType(PulseEvent.class).isEnabled()) {
+                        var event = new PulseEvent();
+                        event.phase = phase.name().toLowerCase(Locale.ROOT);
+                        event.interval = interval;
+                        event.commit();
+                    }
                 }
                 lastPulseNs = now;
                 if (phaseStartedNs == 0) {
@@ -676,6 +832,7 @@ public final class GhosttyFxPerfApp {
 
         private void handleStartup(long now) {
             view.requestFocus();
+            startJfr();
             if (now - phaseStartedNs >= config.startupDelay().toNanos()) {
                 switchPhase(Phase.BASELINE, now);
             }
@@ -683,7 +840,7 @@ public final class GhosttyFxPerfApp {
 
         private void handleBaseline(long now) {
             if (now - phaseStartedNs >= config.baselineDuration().toNanos()) {
-                switchPhase(config.scenario().loadsOutput() ? Phase.LOAD_OUTPUT : Phase.PRELUDE, now);
+                switchPhase(config.scenario().usesProbe() ? Phase.SETTLE : config.scenario().loadsOutput() ? Phase.LOAD_OUTPUT : Phase.PRELUDE, now);
             }
         }
 
@@ -727,13 +884,12 @@ public final class GhosttyFxPerfApp {
                 statusLog.write("run-start");
             }
 
-            if (config.scenario() == Scenario.SEARCH_FIELD) {
-                handleSearchRun();
-                return;
-            }
-            if (config.scenario() == Scenario.LINK_OUTPUT) {
-                handleLinkOutputRun();
-                return;
+            switch (config.scenario()) {
+                case SEARCH_FIELD -> { handleSearchRun(); return; }
+                case LINK_OUTPUT -> { handleLinkOutputRun(); return; }
+                case LATENCY -> { handleLatencyRun(); return; }
+                case THROUGHPUT -> { handleThroughputRun(); return; }
+                default -> {}
             }
 
             var batch = Math.min(config.batchSize(), config.repeatCount() - repeatsSent);
@@ -764,6 +920,51 @@ public final class GhosttyFxPerfApp {
             }
 
             if (repeatsSent == query.length()) {
+                recorder.markRunEnd();
+                switchPhase(Phase.COOLDOWN, lastPulseNs);
+            }
+        }
+
+        private long latencyNextSendNs;
+
+        private void handleLatencyRun() {
+            var now = System.nanoTime();
+            if (repeatsSent == 0) {
+                latencyNextSendNs = now;
+            }
+            if (now < latencyNextSendNs) {
+                return;
+            }
+            dispatchText(view, recorder, "PING " + repeatsSent);
+            recorder.recordDispatch(DispatchKind.RELEASE, dispatch(view, keyPressed(KeyCode.ENTER)));
+            recorder.recordDispatch(DispatchKind.RELEASE, dispatch(view, keyReleased(KeyCode.ENTER)));
+            repeatsSent++;
+            latencyNextSendNs = now + 1_000_000_000L / config.latencyRateHz();
+            if (repeatsSent == 1 || repeatsSent == config.repeatCount() || repeatsSent % 100 == 0) {
+                statusLog.write("pings=" + repeatsSent);
+            }
+            if (repeatsSent >= config.repeatCount()) {
+                recorder.markRunEnd();
+                switchPhase(Phase.COOLDOWN, lastPulseNs);
+            }
+        }
+
+        private long throughputClosedAtNs;
+
+        private void handleThroughputRun() {
+            if (repeatsSent == 0) {
+                dispatchText(view, recorder, "START");
+                recorder.recordDispatch(DispatchKind.RELEASE, dispatch(view, keyPressed(KeyCode.ENTER)));
+                recorder.recordDispatch(DispatchKind.RELEASE, dispatch(view, keyReleased(KeyCode.ENTER)));
+                repeatsSent = 1;
+                statusLog.write("throughput-started");
+            }
+            if (throughputClosedAtNs == 0
+                    && !(view.getTerminalState() instanceof io.github.vlaaad.ghosttyfx.TerminalState.Running)) {
+                throughputClosedAtNs = System.nanoTime();
+                statusLog.write("throughput-process-closed");
+            }
+            if (throughputClosedAtNs != 0 && System.nanoTime() - throughputClosedAtNs > 1_000_000_000L) {
                 recorder.markRunEnd();
                 switchPhase(Phase.COOLDOWN, lastPulseNs);
             }
@@ -822,6 +1023,44 @@ public final class GhosttyFxPerfApp {
             statusLog.write("phase=" + nextPhase.name().toLowerCase(Locale.ROOT));
         }
 
+        private void startJfr() {
+            if (!config.jfrEnabled() || jfrRecording != null) {
+                return;
+            }
+            try {
+                var recording = new Recording(Configuration.getConfiguration("profile"));
+                recording.enable("ghosttyfx.Redraw");
+                recording.enable("ghosttyfx.Render");
+                recording.enable("ghosttyfx.PtyDrain");
+                recording.enable("ghosttyfx.WriteToTerminal");
+                recording.enable("ghosttyfx.PtyWrite");
+                recording.enable("ghosttyfx.KeyInput");
+                recording.enable("ghosttyfx.Pulse");
+                recording.start();
+                jfrRecording = recording;
+                statusLog.write("jfr-started");
+            } catch (Exception e) {
+                statusLog.write("jfr-start-failed=" + e.getMessage());
+            }
+        }
+
+        private void dumpJfr() {
+            if (jfrRecording == null) {
+                return;
+            }
+            try {
+                var path = config.outputDirectory().resolve("recording.jfr");
+                jfrRecording.stop();
+                jfrRecording.dump(path);
+                jfrRecording.close();
+                statusLog.write("jfr-dumped=" + path);
+            } catch (Exception e) {
+                statusLog.write("jfr-dump-failed=" + e.getMessage());
+            } finally {
+                jfrRecording = null;
+            }
+        }
+
         private void completeSuccessfully() {
             if (completed) {
                 return;
@@ -829,6 +1068,7 @@ public final class GhosttyFxPerfApp {
             completed = true;
             stop();
             try {
+                dumpJfr();
                 statusLog.write("writing-report");
                 writeReport(config, terminal, recorder, view.getWidth(), view.getHeight());
                 closeView(view);
@@ -848,12 +1088,23 @@ public final class GhosttyFxPerfApp {
             }
             completed = true;
             stop();
+            dumpJfr();
             statusLog.write("failure=" + t.getClass().getName() + ":" + t.getMessage());
             closeView(view);
             stage.close();
             completion.fail(t);
             Platform.exit();
         }
+    }
+
+    @Name("ghosttyfx.Pulse")
+    @Label("JavaFX pulse interval")
+    @Category("GhosttyFX")
+    @StackTrace(false)
+    private static final class PulseEvent extends Event {
+        String phase;
+        @Timespan(Timespan.NANOSECONDS)
+        long interval;
     }
 
     private static final class StatusLog {

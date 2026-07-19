@@ -77,6 +77,26 @@ That command:
 
 This explicit command is only needed to download a complete cross-platform artifact set. Normal local builds download only the current platform when its native toolchain is unavailable.
 
+## Perf App
+
+Run the interactive throughput harness:
+
+`mvn -pl ghosttyfx-perf-app -am -Pperf-app compile`
+
+Useful scenarios:
+
+- `-Dghosttyfx.perf.scenario=REPEAT_INPUT`
+- `-Dghosttyfx.perf.scenario=SEARCH_FIELD`
+- `-Dghosttyfx.perf.scenario=LINK_OUTPUT`
+- `-Dghosttyfx.perf.scenario=LATENCY`
+- `-Dghosttyfx.perf.scenario=THROUGHPUT -Dghosttyfx.perf.throughputBytes=10000000`
+
+The perf app writes `summary.md`, `dispatch-samples.csv`, `pulse-samples.csv`, `recording.jfr`, and `jfr-events.csv` under `ghosttyfx-perf-app/target/perf-results` by default. Disable JFR with `-Dghosttyfx.perf.jfr=false`.
+
+Compare two runs with:
+
+`java scripts/PerfCompare.java baseline/summary.md candidate/summary.md comparison.md`
+
 ## Manual App
 
 The repository includes a JavaFX manual app in
