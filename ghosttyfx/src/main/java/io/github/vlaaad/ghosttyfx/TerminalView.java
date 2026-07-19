@@ -122,6 +122,7 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
         }
     };
     private final BooleanProperty cursorBlinking = new SimpleBooleanProperty(this, "cursorBlinking", true);
+    private final BooleanProperty alwaysShowLinks = new SimpleBooleanProperty(this, "alwaysShowLinks", false);
     private final StringProperty searchPromptText = new SimpleStringProperty(this, "searchPromptText", "Type to search...") {
         @Override
         public void set(String value) {
@@ -294,6 +295,7 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
             }
         });
         linkMatchers.addListener((ListChangeListener<TerminalLinkMatcher>) _ -> redraw());
+        alwaysShowLinks.addListener((_, _, _) -> redraw());
         cursorBlinking.addListener((_, _, value) -> {
             terminalSession.setCursorBlinking(value);
             cursorBlinkVisible = true;
@@ -537,6 +539,33 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
     /// @return the mutable terminal link matcher list
     public ObservableList<TerminalLinkMatcher> getLinkMatchers() {
         return linkMatchers;
+    }
+
+    /// Returns whether links are detected and underlined during every redraw.
+    ///
+    /// When false, links are detected on hover only. OSC8 links and regex link
+    /// matchers still work on hover/click, but render avoids the expensive
+    /// always-on URL scan.
+    ///
+    /// @return true if links are always shown, false for hover-only links
+    public boolean isAlwaysShowLinks() {
+        return alwaysShowLinks.get();
+    }
+
+    /// Sets whether links are detected and underlined during every redraw.
+    ///
+    /// @param value true to restore always-on link underlines, false for hover-only links
+    public void setAlwaysShowLinks(boolean value) {
+        alwaysShowLinks.set(value);
+    }
+
+    /// Whether links are detected and underlined during every redraw.
+    ///
+    /// Defaults to false so URL regex matching only runs on hover/click.
+    ///
+    /// @return the always-show-links property
+    public BooleanProperty alwaysShowLinksProperty() {
+        return alwaysShowLinks;
     }
 
     /// Returns the terminal title.
@@ -1851,7 +1880,8 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
                 fontMetrics.get(),
                 keyInputState.preedit(),
                 hoveredLink == null ? Selection.empty() : hoveredLink.selection(),
-                getLinkMatchers(),
+                isAlwaysShowLinks() ? getLinkMatchers() : List.of(),
+                isAlwaysShowLinks(),
                 searchUi.visible() ? searchUi.result() : TerminalSession.SearchResult.empty(),
                 searchUi.visible() ? searchUi.selectedMatch() : -1,
                 isFocused(),

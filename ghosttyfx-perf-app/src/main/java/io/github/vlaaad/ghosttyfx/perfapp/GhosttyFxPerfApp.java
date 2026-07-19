@@ -61,6 +61,7 @@ public final class GhosttyFxPerfApp {
             var launcher = Shell.integrate(terminal.command(), System.getenv());
             return new PtyTerminal(launcher.command(), config.cwd(), launcher.environment(), columns, rows);
         });
+        view.setAlwaysShowLinks(config.alwaysShowLinks());
         var root = new BorderPane(view);
         var scene = new Scene(root, config.width(), config.height());
         var stage = new Stage();
@@ -285,6 +286,7 @@ public final class GhosttyFxPerfApp {
         report.add("- Run inputs: " + runInputCount);
         report.add("- Batch size per pulse: " + config.batchSize());
         report.add("- Prelude settle: " + config.preludeSettleDuration().toMillis() + " ms");
+        report.add("- Always show links: " + config.alwaysShowLinks());
         report.add("");
         report.add("## Summary");
         report.add("");
@@ -460,7 +462,8 @@ public final class GhosttyFxPerfApp {
             Scenario scenario,
             int searchOutputLines,
             String searchQuery,
-            int linkOutputLines) {
+            int linkOutputLines,
+            boolean alwaysShowLinks) {
 
         static PerfConfig load() {
             var cwd = Path.of(System.getProperty("ghosttyfx.perf.cwd", System.getProperty("user.dir", ".")))
@@ -485,6 +488,7 @@ public final class GhosttyFxPerfApp {
             var searchOutputLines = intProperty("ghosttyfx.perf.searchOutputLines", 20_000, 1);
             var searchQuery = System.getProperty("ghosttyfx.perf.searchQuery", "needle");
             var linkOutputLines = intProperty("ghosttyfx.perf.linkOutputLines", 20_000, 1);
+            var alwaysShowLinks = Boolean.parseBoolean(System.getProperty("ghosttyfx.perf.alwaysShowLinks", "false"));
             if (preludeText.isEmpty()) {
                 throw new IllegalArgumentException("ghosttyfx.perf.preludeText must not be empty");
             }
@@ -507,7 +511,8 @@ public final class GhosttyFxPerfApp {
                     scenario,
                     searchOutputLines,
                     searchQuery,
-                    linkOutputLines);
+                    linkOutputLines,
+                    alwaysShowLinks);
         }
 
         private static int intProperty(String name, int defaultValue, int minimum) {

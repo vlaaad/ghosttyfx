@@ -1709,6 +1709,7 @@ final class TerminalSession implements AutoCloseable {
             KeyInput.Preedit preedit,
             Selection hoveredLink,
             List<TerminalLinkMatcher> linkMatchers,
+            boolean showNonHoveredLinks,
             SearchResult searchResult,
             int selectedSearchMatch,
             boolean focused,
@@ -1760,10 +1761,12 @@ final class TerminalSession implements AutoCloseable {
                     ? Math.toIntExact(GhosttyTerminalScrollbar.offset(scrollbar))
                     : 0;
             var visibleRows = Math.max(1, (int) Math.ceil(height / metrics.cellHeightPx()));
-            var linkResult = SearchResult.append(
-                    SearchResult.empty(),
-                    linkMatcherSelections(linkMatchers, viewportTop, viewportTop + visibleRows - 1),
-                    columnCount());
+            var linkResult = showNonHoveredLinks
+                    ? SearchResult.append(
+                            SearchResult.empty(),
+                            linkMatcherSelections(linkMatchers, viewportTop, viewportTop + visibleRows - 1),
+                            columnCount())
+                    : SearchResult.empty();
             var highlightedViewportRow = promptNavigationHighlightRow >= viewportTop
                     && promptNavigationHighlightRow < viewportTop + visibleRows
                     ? promptNavigationHighlightRow - viewportTop
@@ -1980,9 +1983,12 @@ final class TerminalSession implements AutoCloseable {
                             if (GhosttyStyle.underline(style) == ghostty_vt_h.GHOSTTY_SGR_UNDERLINE_NONE()
                                     && !GhosttyStyle.strikethrough(style)
                                     && !GhosttyStyle.overline(style)) {
-                                var hyperlinkUri = cellHyperlink(screenPoint, arena);
-                                var osc8Link = hyperlinkUri != null && !hyperlinkUri.isEmpty();
-                                if (matchedLink || osc8Link) {
+                                var osc8Link = false;
+                                if (showNonHoveredLinks) {
+                                    var hyperlinkUri = cellHyperlink(screenPoint, arena);
+                                    osc8Link = hyperlinkUri != null && !hyperlinkUri.isEmpty();
+                                }
+                                if (hovered || matchedLink || osc8Link) {
                                     var linkUnderlineOpacity = hovered
                                             ? theme.hoveredLinkUnderlineOpacity()
                                             : (osc8Link ? theme.osc8LinkUnderlineOpacity() : theme.matchedLinkUnderlineOpacity());
