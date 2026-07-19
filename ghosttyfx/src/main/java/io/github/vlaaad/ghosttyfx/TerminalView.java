@@ -10,6 +10,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.DoubleSupplier;
 import java.util.regex.Pattern;
 
@@ -89,7 +90,7 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
 
     private final TerminalSession terminalSession;
     private final PtySession ptySession;
-    private final AnimationTimer processOutputDrain;
+    private final ProcessOutputDrain processOutputDrain;
     private final AnimationTimer selectionAutoscroll;
     private final Timeline cursorBlinkTimeline;
     private final Timeline textBlinkTimeline;
@@ -216,8 +217,8 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
         NativeLibrary.ensureLoaded();
         title = new ReadOnlyStringWrapper(this, "title", "Terminal");
         currentDirectory = new ReadOnlyStringWrapper(this, "currentDirectory", "");
-        ptySession = new PtySession(Objects.requireNonNull(terminalFactory, "terminalFactory"), INITIAL_COLUMNS, INITIAL_ROWS);
         processOutputDrain = new ProcessOutputDrain(this);
+        Objects.requireNonNull(terminalFactory, "terminalFactory");
         selectionAutoscroll = new AnimationTimer() {
             @Override
             public void handle(long now) {
@@ -283,7 +284,6 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
         heightProperty().addListener((_, _, _) -> handleResize());
         outputScaleX.addListener(outputScaleListener);
         outputScaleY.addListener(outputScaleListener);
-        resize(prefWidth(-1), prefHeight(-1));
         fontMetrics.addListener((_, oldMetrics, newMetrics) -> {
             if (oldMetrics == null
                     || oldMetrics.cellWidthPx() != newMetrics.cellWidthPx()
@@ -326,6 +326,12 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
             updatePromptNavigationHighlightTimeline();
         });
         terminalSession.applyTheme(getTheme());
+        ptySession = new PtySession(
+                terminalFactory,
+                INITIAL_COLUMNS,
+                INITIAL_ROWS,
+                processOutputDrain::requestDrain);
+        resize(prefWidth(-1), prefHeight(-1));
         redraw();
         processOutputDrain.start();
 
@@ -1937,29 +1943,41 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
     private static final class ProcessOutputDrain extends AnimationTimer {
 
         private final WeakReference<TerminalView> terminalRef;
-        private final PtySession ptySession;
+        private final AtomicBoolean drainScheduled = new AtomicBoolean();
+        private boolean redrawPending;
+        private boolean closed;
 
         private ProcessOutputDrain(TerminalView terminal) {
             terminalRef = new WeakReference<>(terminal);
-            ptySession = terminal.ptySession;
         }
 
-        @Override
-        public void handle(long now) {
+        private void requestDrain(PtySession ptySession) {
+            if (drainScheduled.compareAndSet(false, true)) {
+                Platform.runLater(() -> drain(ptySession));
+            }
+        }
+
+        private void drain(PtySession ptySession) {
+            // Output arriving during this drain schedules one follow-up; everything already queued is drained below.
+            drainScheduled.set(false);
+            var terminal = terminalRef.get();
+            if (terminal == null) {
+                return;
+            }
+
             var outputs = ptySession.pollProcessOutputs();
             if (outputs.isEmpty()) {
                 return;
             }
 
-            var terminal = terminalRef.get();
-            if (terminal != null) {
-                var totalBytes = 0;
-                for (var output : outputs) {
-                    if (output instanceof PtySession.Chunk(var bytes)) {
-                        totalBytes += bytes.length;
-                    }
+            var totalBytes = 0;
+            for (var output : outputs) {
+                if (output instanceof PtySession.Chunk(var bytes)) {
+                    totalBytes += bytes.length;
                 }
+            }
 
+            if (totalBytes != 0) {
                 var bytes = new byte[totalBytes];
                 var offset = 0;
                 for (var output : outputs) {
@@ -1968,23 +1986,37 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
                         offset += chunk.length;
                     }
                 }
+                terminal.resetCursorBlink();
+                terminal.resetPromptNavigation();
+                terminal.terminalSession.writeToTerminal(bytes);
+                redrawPending = true;
+            }
 
-                if (bytes.length != 0) {
-                    terminal.resetCursorBlink();
-                    terminal.resetPromptNavigation();
-                    terminal.terminalSession.writeToTerminal(bytes);
-                    if (terminal.searchUi.visible()) {
-                        terminal.searchUi.refresh();
-                    } else {
-                        terminal.redraw();
-                    }
+            if (outputs.getLast() instanceof PtySession.Closed(var state)) {
+                terminal.terminalState.set(state);
+                closed = true;
+            }
+        }
+
+        @Override
+        public void handle(long now) {
+            var terminal = terminalRef.get();
+            if (terminal == null) {
+                stop();
+                return;
+            }
+
+            if (redrawPending) {
+                redrawPending = false;
+                if (terminal.searchUi.visible()) {
+                    terminal.searchUi.refresh();
+                } else {
+                    terminal.redraw();
                 }
             }
-            if (outputs.get(outputs.size() - 1) instanceof PtySession.Closed(var state)) {
+
+            if (closed) {
                 stop();
-                if (terminal != null) {
-                    terminal.terminalState.set(state);
-                }
             }
         }
     }

@@ -605,6 +605,17 @@ final class TerminalViewTest {
     }
 
     @Test
+    void terminalQueriesAreNotPacedByRenderingPulses() throws Exception {
+        var terminal = new QueryTerminal(180);
+        try (var view = new TerminalView((_, _) -> terminal)) {
+            await("180 terminal query round trips", Duration.ofSeconds(2), () -> runOnFxThread(() ->
+                    QueryTerminal.COMPLETED_TITLE.equals(view.getTitle())
+                            ? Optional.of(Boolean.TRUE)
+                            : Optional.empty()));
+        }
+    }
+
+    @Test
     void exposesCurrentDirectoryFromTerminalOutput() throws Exception {
         assertCurrentDirectoryFromOutput("\u001B]7;file:///tmp/ghosttyfx\u001B\\", "file:///tmp/ghosttyfx");
         assertCurrentDirectoryFromOutput("\u001B]9;9;C:\\tmp\\ghosttyfx\u001B\\", "C:\\tmp\\ghosttyfx");
@@ -1719,6 +1730,62 @@ final class TerminalViewTest {
         @Override
         public OutputStream input() {
             return OutputStream.nullOutputStream();
+        }
+
+        @Override
+        public void resize(int columns, int rows) {
+        }
+
+        @Override
+        public void close() throws IOException {
+            outputWriter.close();
+            output.close();
+        }
+    }
+
+    private static final class QueryTerminal implements Terminal {
+        private static final String COMPLETED_TITLE = "terminal-queries-completed";
+        private static final byte[] CURSOR_POSITION_QUERY = "\u001B[6n".getBytes(StandardCharsets.UTF_8);
+
+        private final PipedInputStream output = new PipedInputStream();
+        private final PipedOutputStream outputWriter;
+        private final OutputStream input = new OutputStream() {
+            @Override
+            public void write(int value) throws IOException {
+                synchronized (QueryTerminal.this) {
+                    if (value == 'R') {
+                        if (--remainingQueries == 0) {
+                            emit("\u001B]2;" + COMPLETED_TITLE + "\u001B\\");
+                        } else {
+                            outputWriter.write(CURSOR_POSITION_QUERY);
+                            outputWriter.flush();
+                        }
+                    }
+                }
+            }
+        };
+        private int remainingQueries;
+
+        private QueryTerminal(int queryCount) throws IOException {
+            remainingQueries = queryCount;
+            outputWriter = new PipedOutputStream(output);
+            outputWriter.write(CURSOR_POSITION_QUERY);
+            outputWriter.flush();
+        }
+
+        private void emit(String text) throws IOException {
+            outputWriter.write(text.getBytes(StandardCharsets.UTF_8));
+            outputWriter.flush();
+        }
+
+        @Override
+        public InputStream output() {
+            return output;
+        }
+
+        @Override
+        public OutputStream input() {
+            return input;
         }
 
         @Override

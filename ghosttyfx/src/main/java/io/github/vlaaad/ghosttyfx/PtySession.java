@@ -8,6 +8,7 @@ import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.function.Consumer;
 
 final class PtySession implements AutoCloseable {
 
@@ -17,9 +18,11 @@ final class PtySession implements AutoCloseable {
 
     private final BlockingQueue<Command> commands = new ArrayBlockingQueue<>(16_384);
     private final BlockingQueue<ProcessOutput> processOutputs = new ArrayBlockingQueue<>(256);
+    private final Consumer<PtySession> processOutputAvailable;
     private final Future<?> ioTask;
 
-    PtySession(TerminalFactory terminalFactory, int initialColumns, int initialRows) {
+    PtySession(TerminalFactory terminalFactory, int initialColumns, int initialRows, Consumer<PtySession> processOutputAvailable) {
+        this.processOutputAvailable = processOutputAvailable;
         ioTask = IO.submit(() -> runProcess(terminalFactory, initialColumns, initialRows));
     }
 
@@ -53,7 +56,7 @@ final class PtySession implements AutoCloseable {
                         var buffer = new byte[8 * 1024];
                         var read = input.read(buffer);
                         while (read >= 0) {
-                            processOutputs.put(new Chunk(Arrays.copyOf(buffer, read)));
+                            putProcessOutput(new Chunk(Arrays.copyOf(buffer, read)));
                             read = input.read(buffer);
                         }
                     }
@@ -84,11 +87,16 @@ final class PtySession implements AutoCloseable {
                     // proceed to closing the terminal
                 }
             }
-            processOutputs.put(new Closed(new TerminalState.Closed()));
+            putProcessOutput(new Closed(new TerminalState.Closed()));
         } catch (Exception e) {
-            processOutputs.put(new Closed(new TerminalState.Failed(e)));
+            putProcessOutput(new Closed(new TerminalState.Failed(e)));
         }
         return null;
+    }
+
+    private void putProcessOutput(ProcessOutput processOutput) throws InterruptedException {
+        processOutputs.put(processOutput);
+        processOutputAvailable.accept(this);
     }
 
     sealed interface Command permits WriteInput, ResizePty {
