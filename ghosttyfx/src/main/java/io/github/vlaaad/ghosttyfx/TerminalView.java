@@ -293,7 +293,10 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
                 redraw();
             }
         });
-        linkMatchers.addListener((ListChangeListener<TerminalLinkMatcher>) _ -> redraw());
+        linkMatchers.addListener((ListChangeListener<TerminalLinkMatcher>) _ -> {
+            terminalSession.clearLinkCache();
+            redraw();
+        });
         cursorBlinking.addListener((_, _, value) -> {
             terminalSession.setCursorBlinking(value);
             cursorBlinkVisible = true;

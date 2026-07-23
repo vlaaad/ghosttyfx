@@ -431,6 +431,91 @@ final class TerminalViewTest {
     }
 
     @Test
+    void refreshesVisibleLinkUnderlineWhenTerminalTextChanges() throws Exception {
+        var terminal = new ControlledTerminal();
+        try (var view = new TerminalView((_, _) -> terminal)) {
+            terminal.emit("A".repeat(80) + "X");
+            awaitText(view, "X");
+            runOnFxThread(() -> {
+                var theme = view.getTheme();
+                view.setTheme(new TerminalTheme(
+                        theme.background(),
+                        Color.RED,
+                        theme.palette(),
+                        theme.cursorColor(),
+                        theme.cursorText(),
+                        theme.selectionColor(),
+                        theme.selectionText(),
+                        theme.faintOpacity(),
+                        theme.scrollbarColor(),
+                        theme.scrollbarActiveColor(),
+                        theme.searchMatchColor(),
+                        theme.searchMatchBorderColor(),
+                        theme.searchCurrentMatchColor(),
+                        theme.searchCurrentMatchBorderColor(),
+                        1.0,
+                        theme.osc8LinkUnderlineOpacity(),
+                        theme.hoveredLinkUnderlineOpacity()));
+                view.getLinkMatchers().setAll(new TerminalLinkMatcher(Pattern.compile(".*X"), _ -> {}));
+                assertTrue(cellHasRedUnderline(view, 0, 1));
+                return null;
+            });
+
+            terminal.emit("\u001B[2;1HY\u001B[K\u001B]0;row-changed\u001B\\");
+            awaitTitle(view, "row-changed");
+            await("changed row to lose its link underline", START_TIMEOUT, () -> runOnFxThread(() ->
+                    !cellHasRedUnderline(view, 0, 1)
+                            ? Optional.of(Boolean.TRUE)
+                            : Optional.empty()));
+        }
+    }
+
+    @Test
+    void invalidatesVisibleLinksAfterReentrantTitleCallbackRedraw() throws Exception {
+        var terminal = new ControlledTerminal();
+        try (var view = new TerminalView((_, _) -> terminal)) {
+            terminal.emit("X");
+            awaitText(view, "X");
+            runOnFxThread(() -> {
+                var theme = view.getTheme();
+                view.setTheme(new TerminalTheme(
+                        theme.background(),
+                        Color.RED,
+                        theme.palette(),
+                        theme.cursorColor(),
+                        theme.cursorText(),
+                        theme.selectionColor(),
+                        theme.selectionText(),
+                        theme.faintOpacity(),
+                        theme.scrollbarColor(),
+                        theme.scrollbarActiveColor(),
+                        theme.searchMatchColor(),
+                        theme.searchMatchBorderColor(),
+                        theme.searchCurrentMatchColor(),
+                        theme.searchCurrentMatchBorderColor(),
+                        1.0,
+                        theme.osc8LinkUnderlineOpacity(),
+                        theme.hoveredLinkUnderlineOpacity()));
+                view.getLinkMatchers().setAll(new TerminalLinkMatcher(Pattern.compile("X"), _ -> {}));
+                view.titleProperty().addListener((_, _, title) -> {
+                    if ("mid-write".equals(title)) {
+                        view.getLinkMatchers().setAll(new TerminalLinkMatcher(Pattern.compile("X"), _ -> {}));
+                    }
+                });
+                assertTrue(cellHasRedUnderline(view, 0, 0));
+                return null;
+            });
+
+            terminal.emit("\u001B]0;mid-write\u001B\\\u001B[1;1HY\u001B[K");
+            awaitTitle(view, "mid-write");
+            await("overwritten link to lose its underline", START_TIMEOUT, () -> runOnFxThread(() ->
+                    !cellHasRedUnderline(view, 0, 0)
+                            ? Optional.of(Boolean.TRUE)
+                            : Optional.empty()));
+        }
+    }
+
+    @Test
     void builtInUrlLinkMatcherIsAvailableByDefault() throws Exception {
         try (var view = createView("https://example.test")) {
             awaitText(view, "https://example.test");
@@ -1325,6 +1410,31 @@ final class TerminalViewTest {
         return snapshot.getPixelReader().getColor(
                 (int) Math.floor(cellX(view, column, 0.5)),
                 (int) Math.floor(cellY(view, row, 0.5)));
+    }
+
+    private static boolean cellHasRedUnderline(TerminalView view, int column, int row) {
+        attachToScene(view);
+        var width = Math.ceil(view.prefWidth(-1));
+        var height = Math.ceil(view.prefHeight(-1));
+        view.resize(width, height);
+        view.applyCss();
+        view.layout();
+        var snapshot = new WritableImage((int) width, (int) height);
+        view.snapshot(null, snapshot);
+        var pixels = snapshot.getPixelReader();
+        var minX = (int) Math.floor(cellX(view, column, 0.0));
+        var maxX = (int) Math.ceil(cellX(view, column, 1.0));
+        var minY = (int) Math.floor(cellY(view, row, 1.0)) - 4;
+        var maxY = (int) Math.ceil(cellY(view, row, 1.0));
+        for (var y = minY; y < maxY; y++) {
+            for (var x = minX; x < maxX; x++) {
+                var color = pixels.getColor(x, y);
+                if (color.getRed() > 0.5 && color.getGreen() < 0.2 && color.getBlue() < 0.2) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     private static void assertColor(Color expected, Color actual) {

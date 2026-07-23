@@ -130,6 +130,53 @@ public final class RenderPerfApp {
         return output.toString().getBytes(StandardCharsets.UTF_8);
     }
 
+    private static byte[] linkScreen() {
+        var output = new StringBuilder("\u001B[?25l\u001B[2J\u001B[H");
+        for (var row = 0; row < 80; row++) {
+            switch (row % 6) {
+                case 0 -> output.append("plain output row ").append(row).append(" without links");
+                case 1 -> output.append("https://x.test/").append(row);
+                case 2 -> output
+                        .append("prefix https://example.test/docs/")
+                        .append(row)
+                        .append("/getting-started suffix");
+                case 3 -> {
+                    for (var link = 0; link < 4; link++) {
+                        output
+                                .append("https://link")
+                                .append(link)
+                                .append(".test/")
+                                .append(row)
+                                .append('/')
+                                .append(link)
+                                .append(' ');
+                    }
+                }
+                case 4 -> output
+                        .append("https://example.test/")
+                        .append(row)
+                        .append('/')
+                        .append("long-path-segment/".repeat(12));
+                case 5 -> {
+                    for (var link = 0; link < 12; link++) {
+                        output
+                                .append("https://many")
+                                .append(link)
+                                .append(".test/")
+                                .append(row)
+                                .append("/path/")
+                                .append(link)
+                                .append(' ');
+                    }
+                }
+                default -> throw new AssertionError();
+            }
+            output.append("\r\n");
+        }
+        output.append("\u001B[H");
+        return output.toString().getBytes(StandardCharsets.UTF_8);
+    }
+
     private static byte[] withImage(int z) {
         return concat(denseScreen(), kittyTransmission(true, 24, rgb(), z));
     }
@@ -223,6 +270,7 @@ public final class RenderPerfApp {
     private enum Scenario {
         EMPTY_REDRAW,
         DENSE_REDRAW,
+        LINK_REDRAW,
         TEXT_UPDATE,
         KITTY_ABOVE,
         KITTY_MIDDLE,
@@ -234,6 +282,7 @@ public final class RenderPerfApp {
             return switch (this) {
                 case EMPTY_REDRAW -> emptyScreen();
                 case DENSE_REDRAW, TEXT_UPDATE -> denseScreen();
+                case LINK_REDRAW -> linkScreen();
                 case KITTY_ABOVE -> withImage(0);
                 case KITTY_MIDDLE, RGB_RETRANSMIT, RGBA_RETRANSMIT, PNG_RETRANSMIT -> withImage(-1);
             };
@@ -241,7 +290,7 @@ public final class RenderPerfApp {
 
         Operation operation(Access access) {
             return switch (this) {
-                case EMPTY_REDRAW, DENSE_REDRAW, KITTY_ABOVE, KITTY_MIDDLE -> access::redraw;
+                case EMPTY_REDRAW, DENSE_REDRAW, LINK_REDRAW, KITTY_ABOVE, KITTY_MIDDLE -> access::redraw;
                 case TEXT_UPDATE -> updateOperation(access, textUpdate());
                 case RGB_RETRANSMIT -> updateOperation(access, kittyTransmission(false, 24, rgb(), 0));
                 case RGBA_RETRANSMIT -> updateOperation(access, kittyTransmission(false, 32, rgba(), 0));

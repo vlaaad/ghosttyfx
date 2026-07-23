@@ -162,6 +162,7 @@ final class TerminalSession implements AutoCloseable {
     private int physicalCellWidthPx;
     private int physicalCellHeightPx;
     private long kittyStorageGeneration;
+    private CachedLinks cachedLinks;
 
     TerminalSession(
             int initialColumns,
@@ -527,6 +528,7 @@ final class TerminalSession implements AutoCloseable {
                 (int) Math.floor(heightPx / metrics.cellHeightPx()),
                 1,
                 MAX_GHOSTTY_DIMENSION / cellHeightPx);
+        clearLinkCache();
         requireGhosttySuccess(
                 ghostty_vt_h.ghostty_terminal_resize(
                         terminal,
@@ -545,7 +547,11 @@ final class TerminalSession implements AutoCloseable {
     void writeToTerminal(byte[] bytes) {
         try (var arena = Arena.ofConfined()) {
             var nativeBytes = arena.allocateFrom(ValueLayout.JAVA_BYTE, bytes);
-            ghostty_vt_h.ghostty_terminal_vt_write(terminal, nativeBytes, bytes.length);
+            try {
+                ghostty_vt_h.ghostty_terminal_vt_write(terminal, nativeBytes, bytes.length);
+            } finally {
+                clearLinkCache();
+            }
         }
         restoreKittyImageStorageLimit();
         updateRenderState();
@@ -1178,6 +1184,52 @@ final class TerminalSession implements AutoCloseable {
         return selections;
     }
 
+    private SearchResult linkMatcherResult(
+            List<TerminalLinkMatcher> linkMatchers,
+            int viewportTop,
+            int viewportBottom) {
+        if (linkMatchers.isEmpty()) {
+            clearLinkCache();
+            return SearchResult.empty();
+        }
+
+        var result = cachedLinks;
+        if (result == null
+                || result.viewportTop() != viewportTop
+                || result.viewportBottom() != viewportBottom) {
+            var columns = columnCount();
+            var visibleSelections = new ArrayList<Selection>();
+            for (var selection : linkMatcherSelections(linkMatchers, viewportTop, viewportBottom)) {
+                var normalized = selection.normalized();
+                if (normalized.to().y() < viewportTop || normalized.from().y() > viewportBottom) {
+                    continue;
+                }
+                var fromRow = Math.max(viewportTop, normalized.from().y());
+                var toRow = Math.min(viewportBottom, normalized.to().y());
+                visibleSelections.add(Selection.linear(
+                        new Selection.ScreenPoint(
+                                fromRow == normalized.from().y() ? normalized.from().x() : 0,
+                                fromRow),
+                        new Selection.ScreenPoint(
+                                toRow == normalized.to().y() ? normalized.to().x() : Math.max(0, columns - 1),
+                                toRow)));
+            }
+            result = new CachedLinks(
+                    viewportTop,
+                    viewportBottom,
+                    SearchResult.append(
+                            SearchResult.empty(),
+                            visibleSelections,
+                            columns));
+            cachedLinks = result;
+        }
+        return result.result();
+    }
+
+    void clearLinkCache() {
+        cachedLinks = null;
+    }
+
     int columnCount() {
         try (var arena = Arena.ofConfined()) {
             var cols = arena.allocate(ValueLayout.JAVA_SHORT);
@@ -1760,10 +1812,7 @@ final class TerminalSession implements AutoCloseable {
                     ? Math.toIntExact(GhosttyTerminalScrollbar.offset(scrollbar))
                     : 0;
             var visibleRows = Math.max(1, (int) Math.ceil(height / metrics.cellHeightPx()));
-            var linkResult = SearchResult.append(
-                    SearchResult.empty(),
-                    linkMatcherSelections(linkMatchers, viewportTop, viewportTop + visibleRows - 1),
-                    columnCount());
+            var linkResult = linkMatcherResult(linkMatchers, viewportTop, viewportTop + visibleRows - 1);
             var highlightedViewportRow = promptNavigationHighlightRow >= viewportTop
                     && promptNavigationHighlightRow < viewportTop + visibleRows
                     ? promptNavigationHighlightRow - viewportTop
@@ -2938,6 +2987,10 @@ final class TerminalSession implements AutoCloseable {
     }
 
     private record SearchSpan(int fromX, int toX, int matchIndex) {
+
+    }
+
+    private record CachedLinks(int viewportTop, int viewportBottom, SearchResult result) {
 
     }
 
