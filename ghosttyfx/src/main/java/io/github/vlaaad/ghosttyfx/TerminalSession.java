@@ -371,7 +371,7 @@ final class TerminalSession implements AutoCloseable {
                 ghostty_vt_h.ghostty_terminal_set(
                         terminal,
                         ghostty_vt_h.GHOSTTY_TERMINAL_OPT_KITTY_IMAGE_MEDIUM_TEMP_FILE(),
-                        disabled),
+                        MemorySegment.NULL),
                 "ghostty_terminal_set(kitty_image_medium_temp_file)");
         requireGhosttySuccess(
                 ghostty_vt_h.ghostty_terminal_set(
