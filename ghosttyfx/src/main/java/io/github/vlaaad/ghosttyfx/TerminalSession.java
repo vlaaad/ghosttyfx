@@ -1232,9 +1232,9 @@ final class TerminalSession implements AutoCloseable {
             if (!lineStartsOutsideViewport) {
                 requireGhosttySuccess(
                         ghostty_vt_h.ghostty_render_state_row_get(
-                            linkRowIterator,
-                            ghostty_vt_h.GHOSTTY_RENDER_STATE_ROW_DATA_CELLS(),
-                            rowCellsPointer),
+                                linkRowIterator,
+                                ghostty_vt_h.GHOSTTY_RENDER_STATE_ROW_DATA_CELLS(),
+                                rowCellsPointer),
                         "ghostty_render_state_row_get(cells)");
                 var pendingEmptyCount = 0;
                 var column = 0;
@@ -1291,11 +1291,16 @@ final class TerminalSession implements AutoCloseable {
                             var firstByte = Byte.toUnsignedInt(graphemeBytes.get(ValueLayout.JAVA_BYTE, offset));
                             var byteCount = firstByte < 0x80 ? 1 : firstByte < 0xE0 ? 2 : firstByte < 0xF0 ? 3 : 4;
                             var codePoint = switch (byteCount) {
-                                case 1 -> firstByte;
-                                case 2 -> firstByte & 0x1F;
-                                case 3 -> firstByte & 0x0F;
-                                case 4 -> firstByte & 0x07;
-                                default -> throw new AssertionError();
+                                case 1 ->
+                                    firstByte;
+                                case 2 ->
+                                    firstByte & 0x1F;
+                                case 3 ->
+                                    firstByte & 0x0F;
+                                case 4 ->
+                                    firstByte & 0x07;
+                                default ->
+                                    throw new AssertionError();
                             };
                             for (var i = 1; i < byteCount; i++) {
                                 codePoint = codePoint << 6
@@ -1982,8 +1987,8 @@ final class TerminalSession implements AutoCloseable {
             var linkResult = linkMatcherResult(linkMatchers, viewportTop, viewportTop + visibleRows - 1);
             var highlightedViewportRow = promptNavigationHighlightRow >= viewportTop
                     && promptNavigationHighlightRow < viewportTop + visibleRows
-                    ? promptNavigationHighlightRow - viewportTop
-                    : -1;
+                            ? promptNavigationHighlightRow - viewportTop
+                            : -1;
             var cursor = cursorInfo(arena);
             var preeditCellCount = preedit.text().codePointCount(0, preedit.text().length());
             var cursorText = "";
@@ -2015,85 +2020,144 @@ final class TerminalSession implements AutoCloseable {
                 var y = 0.0;
                 var viewportY = 0;
                 while (ghostty_vt_h.ghostty_render_state_row_iterator_next(rowIterator)) {
-                requireGhosttySuccess(
-                        ghostty_vt_h.ghostty_render_state_row_get(
-                                rowIterator,
-                                ghostty_vt_h.GHOSTTY_RENDER_STATE_ROW_DATA_RAW(),
-                                rawRow),
-                        "ghostty_render_state_row_get(raw)");
-                requireGhosttySuccess(
-                        ghostty_vt_h.ghostty_row_get(
-                                rawRow.get(ValueLayout.JAVA_LONG, 0),
-                                ghostty_vt_h.GHOSTTY_ROW_DATA_HYPERLINK(),
-                                rowHasHyperlink),
-                        "ghostty_row_get(hyperlink)");
-                var rowMayHaveHyperlink = rowHasHyperlink.get(ValueLayout.JAVA_BOOLEAN, 0);
-                if ((!splitCellRendering || backgroundOnly) && viewportY == highlightedViewportRow) {
-                    graphics.setFill(applyOpacity(theme.foreground(), 0.16));
-                    graphics.fillRect(0, y, Math.max(0.0, width - scrollbarReservedWidthPx), metrics.cellHeightPx());
-                }
-
-                requireGhosttySuccess(
-                        ghostty_vt_h.ghostty_render_state_row_get(
-                                rowIterator,
-                                ghostty_vt_h.GHOSTTY_RENDER_STATE_ROW_DATA_CELLS(),
-                                rowCellsPointer),
-                        "ghostty_render_state_row_get(cells)");
-
-                var x = 0.0;
-                var viewportX = 0;
-                while (ghostty_vt_h.ghostty_render_state_row_cells_next(rowCells)) {
-                    var screenPoint = new Selection.ScreenPoint(viewportX, viewportTop + viewportY);
                     requireGhosttySuccess(
-                            ghostty_vt_h.ghostty_render_state_row_cells_get(
-                                    rowCells,
-                                    ghostty_vt_h.GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_SELECTED(),
-                                    selectedValue),
-                            "ghostty_render_state_row_cells_get(selected)");
-                    var selected = selectedValue.get(ValueLayout.JAVA_BOOLEAN, 0);
-                    var hovered = contains(hoveredLink, screenPoint);
-                    var matchedLink = linkResult.matchIndex(screenPoint) >= 0;
-                    var searchMatch = searchResult.matchIndex(screenPoint);
-                    var searchHighlighted = searchMatch >= 0;
-                    var currentSearchMatch = searchMatch == selectedSearchMatch;
-                    var preeditCell = cursor != null
-                            && preeditCellCount > 0
-                            && viewportY == cursor.y()
-                            && viewportX >= cursor.x()
-                            && viewportX < cursor.x() + preeditCellCount;
-                    GhosttyBuffer.ptr(graphemeBuffer, graphemeBytes);
-                    GhosttyBuffer.cap(graphemeBuffer, graphemeBytesCapacity);
-                    GhosttyBuffer.len(graphemeBuffer, 0);
-                    var graphemeResult = ghostty_vt_h.ghostty_render_state_row_cells_get(
-                            rowCells,
-                            ghostty_vt_h.GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_GRAPHEMES_UTF8(),
-                            graphemeBuffer);
-                    if (graphemeResult == ghostty_vt_h.GHOSTTY_OUT_OF_SPACE()) {
-                        graphemeBytesCapacity = Math.toIntExact(GhosttyBuffer.len(graphemeBuffer));
-                        graphemeBytes = arena.allocate(graphemeBytesCapacity);
-                        GhosttyBuffer.ptr(graphemeBuffer, graphemeBytes);
-                        GhosttyBuffer.cap(graphemeBuffer, graphemeBytesCapacity);
-                        GhosttyBuffer.len(graphemeBuffer, 0);
+                            ghostty_vt_h.ghostty_render_state_row_get(
+                                    rowIterator,
+                                    ghostty_vt_h.GHOSTTY_RENDER_STATE_ROW_DATA_RAW(),
+                                    rawRow),
+                            "ghostty_render_state_row_get(raw)");
+                    requireGhosttySuccess(
+                            ghostty_vt_h.ghostty_row_get(
+                                    rawRow.get(ValueLayout.JAVA_LONG, 0),
+                                    ghostty_vt_h.GHOSTTY_ROW_DATA_HYPERLINK(),
+                                    rowHasHyperlink),
+                            "ghostty_row_get(hyperlink)");
+                    var rowMayHaveHyperlink = rowHasHyperlink.get(ValueLayout.JAVA_BOOLEAN, 0);
+                    if ((!splitCellRendering || backgroundOnly) && viewportY == highlightedViewportRow) {
+                        graphics.setFill(applyOpacity(theme.foreground(), 0.16));
+                        graphics.fillRect(0, y, Math.max(0.0, width - scrollbarReservedWidthPx), metrics.cellHeightPx());
+                    }
+
+                    requireGhosttySuccess(
+                            ghostty_vt_h.ghostty_render_state_row_get(
+                                    rowIterator,
+                                    ghostty_vt_h.GHOSTTY_RENDER_STATE_ROW_DATA_CELLS(),
+                                    rowCellsPointer),
+                            "ghostty_render_state_row_get(cells)");
+
+                    var x = 0.0;
+                    var viewportX = 0;
+                    while (ghostty_vt_h.ghostty_render_state_row_cells_next(rowCells)) {
+                        var screenPoint = new Selection.ScreenPoint(viewportX, viewportTop + viewportY);
                         requireGhosttySuccess(
                                 ghostty_vt_h.ghostty_render_state_row_cells_get(
                                         rowCells,
-                                        ghostty_vt_h.GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_GRAPHEMES_UTF8(),
-                                        graphemeBuffer),
-                                "ghostty_render_state_row_cells_get(graphemes_utf8)");
-                    } else {
-                        requireGhosttySuccess(graphemeResult, "ghostty_render_state_row_cells_get(graphemes_utf8)");
-                    }
-                    var graphemeByteLength = GhosttyBuffer.len(graphemeBuffer);
-                    if (graphemeByteLength == 0) {
+                                        ghostty_vt_h.GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_SELECTED(),
+                                        selectedValue),
+                                "ghostty_render_state_row_cells_get(selected)");
+                        var selected = selectedValue.get(ValueLayout.JAVA_BOOLEAN, 0);
+                        var hovered = contains(hoveredLink, screenPoint);
+                        var matchedLink = linkResult.matchIndex(screenPoint) >= 0;
+                        var searchMatch = searchResult.matchIndex(screenPoint);
+                        var searchHighlighted = searchMatch >= 0;
+                        var currentSearchMatch = searchMatch == selectedSearchMatch;
+                        var preeditCell = cursor != null
+                                && preeditCellCount > 0
+                                && viewportY == cursor.y()
+                                && viewportX >= cursor.x()
+                                && viewportX < cursor.x() + preeditCellCount;
+                        GhosttyBuffer.ptr(graphemeBuffer, graphemeBytes);
+                        GhosttyBuffer.cap(graphemeBuffer, graphemeBytesCapacity);
+                        GhosttyBuffer.len(graphemeBuffer, 0);
+                        var graphemeResult = ghostty_vt_h.ghostty_render_state_row_cells_get(
+                                rowCells,
+                                ghostty_vt_h.GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_GRAPHEMES_UTF8(),
+                                graphemeBuffer);
+                        if (graphemeResult == ghostty_vt_h.GHOSTTY_OUT_OF_SPACE()) {
+                            graphemeBytesCapacity = Math.toIntExact(GhosttyBuffer.len(graphemeBuffer));
+                            graphemeBytes = arena.allocate(graphemeBytesCapacity);
+                            GhosttyBuffer.ptr(graphemeBuffer, graphemeBytes);
+                            GhosttyBuffer.cap(graphemeBuffer, graphemeBytesCapacity);
+                            GhosttyBuffer.len(graphemeBuffer, 0);
+                            requireGhosttySuccess(
+                                    ghostty_vt_h.ghostty_render_state_row_cells_get(
+                                            rowCells,
+                                            ghostty_vt_h.GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_GRAPHEMES_UTF8(),
+                                            graphemeBuffer),
+                                    "ghostty_render_state_row_cells_get(graphemes_utf8)");
+                        } else {
+                            requireGhosttySuccess(graphemeResult, "ghostty_render_state_row_cells_get(graphemes_utf8)");
+                        }
+                        var graphemeByteLength = GhosttyBuffer.len(graphemeBuffer);
+                        if (graphemeByteLength == 0) {
+                            if (!splitCellRendering || backgroundOnly) {
+                                if (selected) {
+                                    graphics.setFill(theme.selectionColor());
+                                    graphics.fillRect(x, y, metrics.cellWidthPx(), metrics.cellHeightPx());
+                                } else if (ghostty_vt_h.ghostty_render_state_row_cells_get(
+                                        rowCells,
+                                        ghostty_vt_h.GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_BG_COLOR(),
+                                        background) == GHOSTTY_SUCCESS) {
+                                    graphics.setFill(toFxColor(background));
+                                    graphics.fillRect(x, y, metrics.cellWidthPx(), metrics.cellHeightPx());
+                                }
+                                if (!selected && searchHighlighted) {
+                                    drawSearchHighlightBackground(
+                                            graphics,
+                                            x,
+                                            y,
+                                            metrics,
+                                            theme,
+                                            currentSearchMatch);
+                                }
+                            }
+                            x += metrics.cellWidthPx();
+                            viewportX++;
+                            continue;
+                        }
+
+                        GhosttyStyle.size(style, GhosttyStyle.sizeof());
+                        requireGhosttySuccess(
+                                ghostty_vt_h.ghostty_render_state_row_cells_get(
+                                        rowCells,
+                                        ghostty_vt_h.GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_STYLE(),
+                                        style),
+                                "ghostty_render_state_row_cells_get(style)");
+
+                        MemorySegment.copy(
+                                GhosttyRenderStateColors.foreground(colors),
+                                0,
+                                foreground,
+                                0,
+                                GhosttyColorRgb.sizeof());
+                        ghostty_vt_h.ghostty_render_state_row_cells_get(
+                                rowCells,
+                                ghostty_vt_h.GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_FG_COLOR(),
+                                foreground);
+
+                        var hasBackground = ghostty_vt_h.ghostty_render_state_row_cells_get(
+                                rowCells,
+                                ghostty_vt_h.GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_BG_COLOR(),
+                                background) == GHOSTTY_SUCCESS;
+                        if (!hasBackground) {
+                            MemorySegment.copy(
+                                    GhosttyRenderStateColors.background(colors),
+                                    0,
+                                    background,
+                                    0,
+                                    GhosttyColorRgb.sizeof());
+                        }
+
+                        if (GhosttyStyle.inverse(style)) {
+                            MemorySegment.copy(background, 0, swappedColor, 0, GhosttyColorRgb.sizeof());
+                            MemorySegment.copy(foreground, 0, background, 0, GhosttyColorRgb.sizeof());
+                            MemorySegment.copy(swappedColor, 0, foreground, 0, GhosttyColorRgb.sizeof());
+                            hasBackground = true;
+                        }
+
                         if (!splitCellRendering || backgroundOnly) {
-                            if (selected) {
-                                graphics.setFill(theme.selectionColor());
-                                graphics.fillRect(x, y, metrics.cellWidthPx(), metrics.cellHeightPx());
-                            } else if (ghostty_vt_h.ghostty_render_state_row_cells_get(
-                                    rowCells,
-                                    ghostty_vt_h.GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_BG_COLOR(),
-                                    background) == GHOSTTY_SUCCESS) {
-                                graphics.setFill(toFxColor(background));
+                            if (selected || hasBackground) {
+                                graphics.setFill(selected ? theme.selectionColor() : toFxColor(background));
                                 graphics.fillRect(x, y, metrics.cellWidthPx(), metrics.cellHeightPx());
                             }
                             if (!selected && searchHighlighted) {
@@ -2105,155 +2169,96 @@ final class TerminalSession implements AutoCloseable {
                                         theme,
                                         currentSearchMatch);
                             }
-                        }
-                        x += metrics.cellWidthPx();
-                        viewportX++;
-                        continue;
-                    }
-
-                    GhosttyStyle.size(style, GhosttyStyle.sizeof());
-                    requireGhosttySuccess(
-                            ghostty_vt_h.ghostty_render_state_row_cells_get(
-                                    rowCells,
-                                    ghostty_vt_h.GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_STYLE(),
-                                    style),
-                            "ghostty_render_state_row_cells_get(style)");
-
-                    MemorySegment.copy(
-                            GhosttyRenderStateColors.foreground(colors),
-                            0,
-                            foreground,
-                            0,
-                            GhosttyColorRgb.sizeof());
-                    ghostty_vt_h.ghostty_render_state_row_cells_get(
-                            rowCells,
-                            ghostty_vt_h.GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_FG_COLOR(),
-                            foreground);
-
-                    var hasBackground = ghostty_vt_h.ghostty_render_state_row_cells_get(
-                            rowCells,
-                            ghostty_vt_h.GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_BG_COLOR(),
-                            background) == GHOSTTY_SUCCESS;
-                    if (!hasBackground) {
-                        MemorySegment.copy(
-                                GhosttyRenderStateColors.background(colors),
-                                0,
-                                background,
-                                0,
-                                GhosttyColorRgb.sizeof());
-                    }
-
-                    if (GhosttyStyle.inverse(style)) {
-                        MemorySegment.copy(background, 0, swappedColor, 0, GhosttyColorRgb.sizeof());
-                        MemorySegment.copy(foreground, 0, background, 0, GhosttyColorRgb.sizeof());
-                        MemorySegment.copy(swappedColor, 0, foreground, 0, GhosttyColorRgb.sizeof());
-                        hasBackground = true;
-                    }
-
-                    if (!splitCellRendering || backgroundOnly) {
-                        if (selected || hasBackground) {
-                            graphics.setFill(selected ? theme.selectionColor() : toFxColor(background));
-                            graphics.fillRect(x, y, metrics.cellWidthPx(), metrics.cellHeightPx());
-                        }
-                        if (!selected && searchHighlighted) {
-                            drawSearchHighlightBackground(
-                                    graphics,
-                                    x,
-                                    y,
-                                    metrics,
-                                    theme,
-                                    currentSearchMatch);
-                        }
-                        if (backgroundOnly) {
-                            x += metrics.cellWidthPx();
-                            viewportX++;
-                            continue;
-                        }
-                    }
-
-                    var faint = GhosttyStyle.faint(style);
-                    var textBlinking = !GhosttyStyle.invisible(style) && GhosttyStyle.blink(style);
-                    hasTextBlink |= textBlinking;
-                    var textBlinkHidden = textBlinking && !textBlinkVisible && faint;
-                    var faintFactor = faint || (textBlinking && !textBlinkVisible) ? theme.faintOpacity() : 1.0;
-
-                    if (!GhosttyStyle.invisible(style) && !textBlinkHidden) {
-                        var renderedText = new String(
-                                GhosttyBuffer.ptr(graphemeBuffer)
-                                        .reinterpret(graphemeByteLength)
-                                        .toArray(ValueLayout.JAVA_BYTE),
-                                StandardCharsets.UTF_8);
-                        if (renderedText.codePointAt(0) == 0x10EEEE) {
-                            x += metrics.cellWidthPx();
-                            viewportX++;
-                            continue;
-                        }
-                        if (cursor != null && viewportX == cursor.x() && viewportY == cursor.y()) {
-                            cursorText = renderedText;
-                            cursorBold = GhosttyStyle.bold(style);
-                            cursorItalic = GhosttyStyle.italic(style);
-                        }
-                        var baseline = y + metrics.baselineOffsetPx();
-                        if (!preeditCell) {
-                            var baseTextColor = selected ? theme.selectionText() : toFxColor(foreground);
-                            var textColor = applyOpacity(baseTextColor, faintFactor);
-                            graphics.setFill(textColor);
-                            var codePoint = renderedText.codePointAt(0);
-                            if (Character.charCount(codePoint) == renderedText.length() && codePoint >= 0x2580 && codePoint <= 0x259F) {
-                                drawBlockElement(graphics, codePoint, x, y, metrics, textColor);
-                            } else {
-                                graphics.setFont(metrics.forStyle(GhosttyStyle.bold(style), GhosttyStyle.italic(style)));
-                                graphics.fillText(renderedText, x, baseline);
+                            if (backgroundOnly) {
+                                x += metrics.cellWidthPx();
+                                viewportX++;
+                                continue;
                             }
-                            drawTextDecorations(graphics, x, y, metrics, style, selected, baseTextColor, textColor, theme, faintFactor);
-                            if (GhosttyStyle.underline(style) == ghostty_vt_h.GHOSTTY_SGR_UNDERLINE_NONE()
-                                    && !GhosttyStyle.strikethrough(style)
-                                    && !GhosttyStyle.overline(style)) {
-                                var osc8Link = false;
-                                if (rowMayHaveHyperlink) {
-                                    requireGhosttySuccess(
-                                            ghostty_vt_h.ghostty_render_state_row_cells_get(
-                                                    rowCells,
-                                                    ghostty_vt_h.GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_RAW(),
-                                                    rawCell),
-                                            "ghostty_render_state_row_cells_get(raw)");
-                                    requireGhosttySuccess(
-                                            ghostty_vt_h.ghostty_cell_get(
-                                                    rawCell.get(ValueLayout.JAVA_LONG, 0),
-                                                    ghostty_vt_h.GHOSTTY_CELL_DATA_HAS_HYPERLINK(),
-                                                    cellHasHyperlink),
-                                            "ghostty_cell_get(has_hyperlink)");
-                                    osc8Link = cellHasHyperlink.get(ValueLayout.JAVA_BOOLEAN, 0);
+                        }
+
+                        var faint = GhosttyStyle.faint(style);
+                        var textBlinking = !GhosttyStyle.invisible(style) && GhosttyStyle.blink(style);
+                        hasTextBlink |= textBlinking;
+                        var textBlinkHidden = textBlinking && !textBlinkVisible && faint;
+                        var faintFactor = faint || (textBlinking && !textBlinkVisible) ? theme.faintOpacity() : 1.0;
+
+                        if (!GhosttyStyle.invisible(style) && !textBlinkHidden) {
+                            var renderedText = new String(
+                                    GhosttyBuffer.ptr(graphemeBuffer)
+                                            .reinterpret(graphemeByteLength)
+                                            .toArray(ValueLayout.JAVA_BYTE),
+                                    StandardCharsets.UTF_8);
+                            if (renderedText.codePointAt(0) == 0x10EEEE) {
+                                x += metrics.cellWidthPx();
+                                viewportX++;
+                                continue;
+                            }
+                            if (cursor != null && viewportX == cursor.x() && viewportY == cursor.y()) {
+                                cursorText = renderedText;
+                                cursorBold = GhosttyStyle.bold(style);
+                                cursorItalic = GhosttyStyle.italic(style);
+                            }
+                            var baseline = y + metrics.baselineOffsetPx();
+                            if (!preeditCell) {
+                                var baseTextColor = selected ? theme.selectionText() : toFxColor(foreground);
+                                var textColor = applyOpacity(baseTextColor, faintFactor);
+                                graphics.setFill(textColor);
+                                var codePoint = renderedText.codePointAt(0);
+                                if (Character.charCount(codePoint) == renderedText.length() && codePoint >= 0x2580 && codePoint <= 0x259F) {
+                                    drawBlockElement(graphics, codePoint, x, y, metrics, textColor);
+                                } else {
+                                    graphics.setFont(metrics.forStyle(GhosttyStyle.bold(style), GhosttyStyle.italic(style)));
+                                    graphics.fillText(renderedText, x, baseline);
                                 }
-                                if (matchedLink || osc8Link) {
-                                    var linkUnderlineOpacity = hovered
-                                            ? theme.hoveredLinkUnderlineOpacity()
-                                            : (osc8Link ? theme.osc8LinkUnderlineOpacity() : theme.matchedLinkUnderlineOpacity());
-                                    if (linkUnderlineOpacity > 0.0) {
-                                        graphics.setStroke(applyOpacity(baseTextColor, faintFactor * linkUnderlineOpacity));
-                                        drawUnderline(graphics, x, y + metrics.cellHeightPx() - 2.5, metrics.cellWidthPx(), ghostty_vt_h.GHOSTTY_SGR_UNDERLINE_DOTTED());
+                                drawTextDecorations(graphics, x, y, metrics, style, selected, baseTextColor, textColor, theme, faintFactor);
+                                if (GhosttyStyle.underline(style) == ghostty_vt_h.GHOSTTY_SGR_UNDERLINE_NONE()
+                                        && !GhosttyStyle.strikethrough(style)
+                                        && !GhosttyStyle.overline(style)) {
+                                    var osc8Link = false;
+                                    if (rowMayHaveHyperlink) {
+                                        requireGhosttySuccess(
+                                                ghostty_vt_h.ghostty_render_state_row_cells_get(
+                                                        rowCells,
+                                                        ghostty_vt_h.GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_RAW(),
+                                                        rawCell),
+                                                "ghostty_render_state_row_cells_get(raw)");
+                                        requireGhosttySuccess(
+                                                ghostty_vt_h.ghostty_cell_get(
+                                                        rawCell.get(ValueLayout.JAVA_LONG, 0),
+                                                        ghostty_vt_h.GHOSTTY_CELL_DATA_HAS_HYPERLINK(),
+                                                        cellHasHyperlink),
+                                                "ghostty_cell_get(has_hyperlink)");
+                                        osc8Link = cellHasHyperlink.get(ValueLayout.JAVA_BOOLEAN, 0);
+                                    }
+                                    if (matchedLink || osc8Link) {
+                                        var linkUnderlineOpacity = hovered
+                                                ? theme.hoveredLinkUnderlineOpacity()
+                                                : (osc8Link ? theme.osc8LinkUnderlineOpacity() : theme.matchedLinkUnderlineOpacity());
+                                        if (linkUnderlineOpacity > 0.0) {
+                                            graphics.setStroke(applyOpacity(baseTextColor, faintFactor * linkUnderlineOpacity));
+                                            drawUnderline(graphics, x, y + metrics.cellHeightPx() - 2.5, metrics.cellWidthPx(), ghostty_vt_h.GHOSTTY_SGR_UNDERLINE_DOTTED());
+                                        }
                                     }
                                 }
                             }
                         }
+                        x += metrics.cellWidthPx();
+                        viewportX++;
                     }
-                    x += metrics.cellWidthPx();
-                    viewportX++;
-                }
 
-                if (!backgroundOnly) {
-                    drawSearchHighlightBorders(
-                            graphics,
-                            y,
-                            metrics,
-                            theme,
-                            searchResult,
-                            selectedSearchMatch,
-                            viewportTop + viewportY);
+                    if (!backgroundOnly) {
+                        drawSearchHighlightBorders(
+                                graphics,
+                                y,
+                                metrics,
+                                theme,
+                                searchResult,
+                                selectedSearchMatch,
+                                viewportTop + viewportY);
+                    }
+                    y += metrics.cellHeightPx();
+                    viewportY++;
                 }
-                y += metrics.cellHeightPx();
-                viewportY++;
-            }
             }
 
             renderCursor(graphics, metrics, colors, focused, theme, cursorBlinkVisible, cursor, cursorText, cursorBold, cursorItalic);
@@ -2876,39 +2881,72 @@ final class TerminalSession implements AutoCloseable {
             TerminalView.FontMetrics metrics,
             Color color) {
         switch (codePoint) {
-            case 0x2580 -> drawUpperBlock(graphics, x, y, metrics, 0.5);
-            case 0x2581 -> drawLowerBlock(graphics, x, y, metrics, 0.125);
-            case 0x2582 -> drawLowerBlock(graphics, x, y, metrics, 0.25);
-            case 0x2583 -> drawLowerBlock(graphics, x, y, metrics, 0.375);
-            case 0x2584 -> drawLowerBlock(graphics, x, y, metrics, 0.5);
-            case 0x2585 -> drawLowerBlock(graphics, x, y, metrics, 0.625);
-            case 0x2586 -> drawLowerBlock(graphics, x, y, metrics, 0.75);
-            case 0x2587 -> drawLowerBlock(graphics, x, y, metrics, 0.875);
-            case 0x2588 -> drawFullBlock(graphics, x, y, metrics);
-            case 0x2589 -> drawLeftBlock(graphics, x, y, metrics, 0.875);
-            case 0x258A -> drawLeftBlock(graphics, x, y, metrics, 0.75);
-            case 0x258B -> drawLeftBlock(graphics, x, y, metrics, 0.625);
-            case 0x258C -> drawLeftBlock(graphics, x, y, metrics, 0.5);
-            case 0x258D -> drawLeftBlock(graphics, x, y, metrics, 0.375);
-            case 0x258E -> drawLeftBlock(graphics, x, y, metrics, 0.25);
-            case 0x258F -> drawLeftBlock(graphics, x, y, metrics, 0.125);
-            case 0x2590 -> drawRightBlock(graphics, x, y, metrics, 0.5);
-            case 0x2591 -> drawShadeBlock(graphics, x, y, metrics, color, 0.25);
-            case 0x2592 -> drawShadeBlock(graphics, x, y, metrics, color, 0.5);
-            case 0x2593 -> drawShadeBlock(graphics, x, y, metrics, color, 0.75);
-            case 0x2594 -> drawUpperBlock(graphics, x, y, metrics, 0.125);
-            case 0x2595 -> drawRightBlock(graphics, x, y, metrics, 0.125);
-            case 0x2596 -> drawQuadrants(graphics, x, y, metrics, true, false, false, false);
-            case 0x2597 -> drawQuadrants(graphics, x, y, metrics, false, true, false, false);
-            case 0x2598 -> drawQuadrants(graphics, x, y, metrics, false, false, true, false);
-            case 0x2599 -> drawQuadrants(graphics, x, y, metrics, true, true, true, false);
-            case 0x259A -> drawQuadrants(graphics, x, y, metrics, false, true, true, false);
-            case 0x259B -> drawQuadrants(graphics, x, y, metrics, true, false, true, true);
-            case 0x259C -> drawQuadrants(graphics, x, y, metrics, false, true, true, true);
-            case 0x259D -> drawQuadrants(graphics, x, y, metrics, false, false, false, true);
-            case 0x259E -> drawQuadrants(graphics, x, y, metrics, true, false, false, true);
-            case 0x259F -> drawQuadrants(graphics, x, y, metrics, true, true, false, true);
-            default -> throw new IllegalArgumentException("Expected block element codepoint: " + codePoint);
+            case 0x2580 ->
+                drawUpperBlock(graphics, x, y, metrics, 0.5);
+            case 0x2581 ->
+                drawLowerBlock(graphics, x, y, metrics, 0.125);
+            case 0x2582 ->
+                drawLowerBlock(graphics, x, y, metrics, 0.25);
+            case 0x2583 ->
+                drawLowerBlock(graphics, x, y, metrics, 0.375);
+            case 0x2584 ->
+                drawLowerBlock(graphics, x, y, metrics, 0.5);
+            case 0x2585 ->
+                drawLowerBlock(graphics, x, y, metrics, 0.625);
+            case 0x2586 ->
+                drawLowerBlock(graphics, x, y, metrics, 0.75);
+            case 0x2587 ->
+                drawLowerBlock(graphics, x, y, metrics, 0.875);
+            case 0x2588 ->
+                drawFullBlock(graphics, x, y, metrics);
+            case 0x2589 ->
+                drawLeftBlock(graphics, x, y, metrics, 0.875);
+            case 0x258A ->
+                drawLeftBlock(graphics, x, y, metrics, 0.75);
+            case 0x258B ->
+                drawLeftBlock(graphics, x, y, metrics, 0.625);
+            case 0x258C ->
+                drawLeftBlock(graphics, x, y, metrics, 0.5);
+            case 0x258D ->
+                drawLeftBlock(graphics, x, y, metrics, 0.375);
+            case 0x258E ->
+                drawLeftBlock(graphics, x, y, metrics, 0.25);
+            case 0x258F ->
+                drawLeftBlock(graphics, x, y, metrics, 0.125);
+            case 0x2590 ->
+                drawRightBlock(graphics, x, y, metrics, 0.5);
+            case 0x2591 ->
+                drawShadeBlock(graphics, x, y, metrics, color, 0.25);
+            case 0x2592 ->
+                drawShadeBlock(graphics, x, y, metrics, color, 0.5);
+            case 0x2593 ->
+                drawShadeBlock(graphics, x, y, metrics, color, 0.75);
+            case 0x2594 ->
+                drawUpperBlock(graphics, x, y, metrics, 0.125);
+            case 0x2595 ->
+                drawRightBlock(graphics, x, y, metrics, 0.125);
+            case 0x2596 ->
+                drawQuadrants(graphics, x, y, metrics, true, false, false, false);
+            case 0x2597 ->
+                drawQuadrants(graphics, x, y, metrics, false, true, false, false);
+            case 0x2598 ->
+                drawQuadrants(graphics, x, y, metrics, false, false, true, false);
+            case 0x2599 ->
+                drawQuadrants(graphics, x, y, metrics, true, true, true, false);
+            case 0x259A ->
+                drawQuadrants(graphics, x, y, metrics, false, true, true, false);
+            case 0x259B ->
+                drawQuadrants(graphics, x, y, metrics, true, false, true, true);
+            case 0x259C ->
+                drawQuadrants(graphics, x, y, metrics, false, true, true, true);
+            case 0x259D ->
+                drawQuadrants(graphics, x, y, metrics, false, false, false, true);
+            case 0x259E ->
+                drawQuadrants(graphics, x, y, metrics, true, false, false, true);
+            case 0x259F ->
+                drawQuadrants(graphics, x, y, metrics, true, true, false, true);
+            default ->
+                throw new IllegalArgumentException("Expected block element codepoint: " + codePoint);
         }
     }
 
@@ -3064,6 +3102,7 @@ final class TerminalSession implements AutoCloseable {
     }
 
     static final class SearchDocumentBuilder {
+
         private final int columns;
         private final int rows;
         private final StringBuilder text = new StringBuilder();
@@ -3104,9 +3143,11 @@ final class TerminalSession implements AutoCloseable {
     }
 
     record MatchedLinkMatcher(int index, TerminalLinkMatcher link, MatchResult match, Selection selection) {
+
     }
 
     record LogicalLine(String text, List<Selection.ScreenPoint> points) {
+
         private static final LogicalLine EMPTY = new LogicalLine("", List.of());
 
         static LogicalLine empty() {
@@ -3414,6 +3455,7 @@ final class TerminalSession implements AutoCloseable {
     }
 
     private static final class SelectionGestureClock {
+
         private SelectionGestureClock() {
         }
 
@@ -3425,6 +3467,7 @@ final class TerminalSession implements AutoCloseable {
     }
 
     private static final class WindowsPerformanceCounter {
+
         private static final MethodHandle QUERY_PERFORMANCE_COUNTER = Linker.nativeLinker().downcallHandle(
                 SymbolLookup.libraryLookup("kernel32", Arena.global()).findOrThrow("QueryPerformanceCounter"),
                 FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.ADDRESS));
