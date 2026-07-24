@@ -1101,6 +1101,26 @@ final class TerminalViewTest {
     }
 
     @Test
+    void familyEmojiOccupiesOneWideGrapheme() throws Exception {
+        var marker = "\uD83D\uDC68\u200D\uD83D\uDC69\u200D\uD83D\uDC67\u200D\uD83D\uDC66a";
+
+        try (var view = createView(marker)) {
+            await("terminal family emoji output to become selectable", START_TIMEOUT, () -> runOnFxThread(() -> {
+                fireTerminalShortcut(view, selectAllTerminalShortcut());
+                var text = view.getInputMethodRequests().getSelectedText();
+                return marker.equals(text) ? Optional.of(Boolean.TRUE) : Optional.empty();
+            }));
+
+            runOnFxThread(() -> {
+                attachToScene(view);
+                dragSelection(view, 0, 2);
+                assertEquals(marker, view.getInputMethodRequests().getSelectedText());
+                return null;
+            });
+        }
+    }
+
+    @Test
     void searchFieldShowsLayoutAndBoundProperties() throws Exception {
         var tempDirectory = Files.createTempDirectory("ghosttyfx-search-field-test-");
         var pidFile = tempDirectory.resolve("shell.pid");

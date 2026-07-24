@@ -67,6 +67,7 @@ final class TerminalSession implements AutoCloseable {
 
     private static final int GHOSTTY_SUCCESS = 0;
     private static final int MAX_GRAPHEME_CODEPOINTS = 16;
+    private static final short GRAPHEME_CLUSTER_MODE = 2027;
     private static final int KEY_BUFFER_SIZE = 256;
     private static final int CURSOR_STYLE_BAR = 0;
     private static final int CURSOR_STYLE_UNDERLINE = 2;
@@ -199,6 +200,9 @@ final class TerminalSession implements AutoCloseable {
                     ghostty_vt_h.ghostty_terminal_new(MemorySegment.NULL, terminalPointer, options),
                     "ghostty_terminal_new");
             terminal = terminalPointer.get(ValueLayout.ADDRESS, 0);
+            requireGhosttySuccess(
+                    ghostty_vt_h.ghostty_terminal_mode_set(terminal, GRAPHEME_CLUSTER_MODE, true),
+                    "ghostty_terminal_mode_set(grapheme_cluster)");
 
             renderState = newAddress(arena, "ghostty_render_state_new", RENDER_STATE_ALLOCATOR);
             rowIterator = newAddress(arena, "ghostty_render_state_row_iterator_new", RENDER_STATE_ROW_ITERATOR_ALLOCATOR);
