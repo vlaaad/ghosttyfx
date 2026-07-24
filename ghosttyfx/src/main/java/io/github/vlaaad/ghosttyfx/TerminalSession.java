@@ -1970,6 +1970,10 @@ final class TerminalSession implements AutoCloseable {
             var graphemeBuffer = GhosttyBuffer.allocate(arena);
             var graphemeBytesCapacity = MAX_GRAPHEME_CODEPOINTS * 4;
             var graphemeBytes = arena.allocate(graphemeBytesCapacity);
+            var rawRow = arena.allocate(ValueLayout.JAVA_LONG);
+            var rowHasHyperlink = arena.allocate(ValueLayout.JAVA_BOOLEAN);
+            var rawCell = arena.allocate(ValueLayout.JAVA_LONG);
+            var cellHasHyperlink = arena.allocate(ValueLayout.JAVA_BOOLEAN);
             var scrollbar = GhosttyTerminalScrollbar.allocate(arena);
             var viewportTop = ghostty_vt_h.ghostty_terminal_get(terminal, ghostty_vt_h.GHOSTTY_TERMINAL_DATA_SCROLLBAR(), scrollbar) == GHOSTTY_SUCCESS
                     ? Math.toIntExact(GhosttyTerminalScrollbar.offset(scrollbar))
@@ -2011,6 +2015,19 @@ final class TerminalSession implements AutoCloseable {
                 var y = 0.0;
                 var viewportY = 0;
                 while (ghostty_vt_h.ghostty_render_state_row_iterator_next(rowIterator)) {
+                requireGhosttySuccess(
+                        ghostty_vt_h.ghostty_render_state_row_get(
+                                rowIterator,
+                                ghostty_vt_h.GHOSTTY_RENDER_STATE_ROW_DATA_RAW(),
+                                rawRow),
+                        "ghostty_render_state_row_get(raw)");
+                requireGhosttySuccess(
+                        ghostty_vt_h.ghostty_row_get(
+                                rawRow.get(ValueLayout.JAVA_LONG, 0),
+                                ghostty_vt_h.GHOSTTY_ROW_DATA_HYPERLINK(),
+                                rowHasHyperlink),
+                        "ghostty_row_get(hyperlink)");
+                var rowMayHaveHyperlink = rowHasHyperlink.get(ValueLayout.JAVA_BOOLEAN, 0);
                 if ((!splitCellRendering || backgroundOnly) && viewportY == highlightedViewportRow) {
                     graphics.setFill(applyOpacity(theme.foreground(), 0.16));
                     graphics.fillRect(0, y, Math.max(0.0, width - scrollbarReservedWidthPx), metrics.cellHeightPx());
@@ -2192,8 +2209,22 @@ final class TerminalSession implements AutoCloseable {
                             if (GhosttyStyle.underline(style) == ghostty_vt_h.GHOSTTY_SGR_UNDERLINE_NONE()
                                     && !GhosttyStyle.strikethrough(style)
                                     && !GhosttyStyle.overline(style)) {
-                                var hyperlinkUri = cellHyperlink(screenPoint, arena);
-                                var osc8Link = hyperlinkUri != null && !hyperlinkUri.isEmpty();
+                                var osc8Link = false;
+                                if (rowMayHaveHyperlink) {
+                                    requireGhosttySuccess(
+                                            ghostty_vt_h.ghostty_render_state_row_cells_get(
+                                                    rowCells,
+                                                    ghostty_vt_h.GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_RAW(),
+                                                    rawCell),
+                                            "ghostty_render_state_row_cells_get(raw)");
+                                    requireGhosttySuccess(
+                                            ghostty_vt_h.ghostty_cell_get(
+                                                    rawCell.get(ValueLayout.JAVA_LONG, 0),
+                                                    ghostty_vt_h.GHOSTTY_CELL_DATA_HAS_HYPERLINK(),
+                                                    cellHasHyperlink),
+                                            "ghostty_cell_get(has_hyperlink)");
+                                    osc8Link = cellHasHyperlink.get(ValueLayout.JAVA_BOOLEAN, 0);
+                                }
                                 if (matchedLink || osc8Link) {
                                     var linkUnderlineOpacity = hovered
                                             ? theme.hoveredLinkUnderlineOpacity()

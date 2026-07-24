@@ -401,6 +401,39 @@ final class TerminalViewTest {
     }
 
     @Test
+    void rendersOnlyOsc8CellsWithOsc8Underline() throws Exception {
+        var output = "\u001B]8;;https://example.test\u001B\\abc\u001B]8;;\u001B\\\r\nplain";
+        try (var view = createView(output)) {
+            awaitText(view, "plain");
+            runOnFxThread(() -> {
+                var theme = view.getTheme();
+                view.setTheme(new TerminalTheme(
+                        theme.background(),
+                        Color.RED,
+                        theme.palette(),
+                        theme.cursorColor(),
+                        theme.cursorText(),
+                        theme.selectionColor(),
+                        theme.selectionText(),
+                        theme.faintOpacity(),
+                        theme.scrollbarColor(),
+                        theme.scrollbarActiveColor(),
+                        theme.searchMatchColor(),
+                        theme.searchMatchBorderColor(),
+                        theme.searchCurrentMatchColor(),
+                        theme.searchCurrentMatchBorderColor(),
+                        0.0,
+                        1.0,
+                        theme.hoveredLinkUnderlineOpacity()));
+                view.getLinkMatchers().clear();
+                assertTrue(cellHasRedUnderline(view, 1, 0));
+                assertFalse(cellHasRedUnderline(view, 1, 1));
+                return null;
+            });
+        }
+    }
+
+    @Test
     void customLinkMatchersUseUserOrder() throws Exception {
         var clicks = new AtomicReference<String>();
         try (var view = createView("abc")) {
