@@ -145,6 +145,8 @@ final class TerminalSession implements AutoCloseable {
     private final MemorySegment renderState;
     private final MemorySegment rowIterator;
     private final MemorySegment rowCells;
+    private final MemorySegment linkRowIterator;
+    private final MemorySegment linkRowCells;
     private final MemorySegment kittyPlacementIterator;
     private final MemorySegment keyEncoder;
     private final MemorySegment keyEvent;
@@ -201,6 +203,8 @@ final class TerminalSession implements AutoCloseable {
             renderState = newAddress(arena, "ghostty_render_state_new", RENDER_STATE_ALLOCATOR);
             rowIterator = newAddress(arena, "ghostty_render_state_row_iterator_new", RENDER_STATE_ROW_ITERATOR_ALLOCATOR);
             rowCells = newAddress(arena, "ghostty_render_state_row_cells_new", RENDER_STATE_ROW_CELLS_ALLOCATOR);
+            linkRowIterator = newAddress(arena, "ghostty_render_state_row_iterator_new", RENDER_STATE_ROW_ITERATOR_ALLOCATOR);
+            linkRowCells = newAddress(arena, "ghostty_render_state_row_cells_new", RENDER_STATE_ROW_CELLS_ALLOCATOR);
             kittyPlacementIterator = newAddress(arena, "ghostty_kitty_graphics_placement_iterator_new", KITTY_PLACEMENT_ITERATOR_ALLOCATOR);
             keyEncoder = newAddress(arena, "ghostty_key_encoder_new", KEY_ENCODER_ALLOCATOR);
             keyEvent = newAddress(arena, "ghostty_key_event_new", KEY_EVENT_ALLOCATOR);
@@ -498,6 +502,8 @@ final class TerminalSession implements AutoCloseable {
             ghostty_vt_h.ghostty_mouse_encoder_free(mouseEncoder);
             ghostty_vt_h.ghostty_key_event_free(keyEvent);
             ghostty_vt_h.ghostty_key_encoder_free(keyEncoder);
+            ghostty_vt_h.ghostty_render_state_row_cells_free(linkRowCells);
+            ghostty_vt_h.ghostty_render_state_row_iterator_free(linkRowIterator);
             ghostty_vt_h.ghostty_render_state_row_cells_free(rowCells);
             ghostty_vt_h.ghostty_render_state_row_iterator_free(rowIterator);
             ghostty_vt_h.ghostty_kitty_graphics_placement_iterator_free(kittyPlacementIterator);
@@ -1140,7 +1146,11 @@ final class TerminalSession implements AutoCloseable {
         return null;
     }
 
-    List<Selection> linkMatcherSelections(List<TerminalLinkMatcher> linkMatchers, int startRow, int endRow) {
+    private List<Selection> linkMatcherSelections(
+            List<TerminalLinkMatcher> linkMatchers,
+            int startRow,
+            int endRow,
+            Arena arena) {
         if (linkMatchers.isEmpty()) {
             return List.of();
         }
@@ -1152,21 +1162,9 @@ final class TerminalSession implements AutoCloseable {
 
         startRow = Math.clamp(startRow, 0, rows - 1);
         endRow = Math.clamp(endRow, startRow, rows - 1);
-        try (var arena = Arena.ofConfined()) {
-            while (startRow > 0 && rowWrapContinuation(new Selection.ScreenPoint(0, startRow), arena)) {
-                startRow--;
-            }
-        }
 
         var selections = new ArrayList<Selection>();
-        for (var row = startRow; row <= endRow; row++) {
-            try (var arena = Arena.ofConfined()) {
-                if (row > 0 && rowWrapContinuation(new Selection.ScreenPoint(0, row), arena)) {
-                    continue;
-                }
-            }
-
-            var line = logicalLine(new Selection.ScreenPoint(0, row));
+        for (var line : renderStateLogicalLines(startRow, endRow, arena)) {
             if (line.text().isEmpty()) {
                 continue;
             }
@@ -1184,6 +1182,153 @@ final class TerminalSession implements AutoCloseable {
         return selections;
     }
 
+    private List<LogicalLine> renderStateLogicalLines(int viewportTop, int endRow, Arena arena) {
+        var rowCellsPointer = arena.allocate(ValueLayout.ADDRESS);
+        rowCellsPointer.set(ValueLayout.ADDRESS, 0, linkRowCells);
+        var rawRow = arena.allocate(ValueLayout.JAVA_LONG);
+        var wrap = arena.allocate(ValueLayout.JAVA_BOOLEAN);
+        var wrapContinuation = arena.allocate(ValueLayout.JAVA_BOOLEAN);
+        var rawCell = arena.allocate(ValueLayout.JAVA_LONG);
+        var wide = arena.allocate(ValueLayout.JAVA_INT);
+        var graphemeBuffer = GhosttyBuffer.allocate(arena);
+        var graphemeBytesCapacity = MAX_GRAPHEME_CODEPOINTS * 4;
+        var graphemeBytes = arena.allocate(graphemeBytesCapacity);
+        var pendingEmptyColumns = new int[Math.max(0, columnCount())];
+        var lines = new ArrayList<LogicalLine>();
+        var text = new StringBuilder();
+        var points = new ArrayList<Selection.ScreenPoint>();
+        var lineStartRow = viewportTop;
+        var lineStartsOutsideViewport = false;
+        var lineOpen = false;
+        var viewportRow = 0;
+
+        while (viewportTop + viewportRow <= endRow
+                && ghostty_vt_h.ghostty_render_state_row_iterator_next(linkRowIterator)) {
+            requireGhosttySuccess(
+                    ghostty_vt_h.ghostty_render_state_row_get(
+                            linkRowIterator,
+                            ghostty_vt_h.GHOSTTY_RENDER_STATE_ROW_DATA_RAW(),
+                            rawRow),
+                    "ghostty_render_state_row_get(raw)");
+            requireGhosttySuccess(
+                    ghostty_vt_h.ghostty_row_get(
+                            rawRow.get(ValueLayout.JAVA_LONG, 0),
+                            ghostty_vt_h.GHOSTTY_ROW_DATA_WRAP(),
+                            wrap),
+                    "ghostty_row_get(wrap)");
+            requireGhosttySuccess(
+                    ghostty_vt_h.ghostty_row_get(
+                            rawRow.get(ValueLayout.JAVA_LONG, 0),
+                            ghostty_vt_h.GHOSTTY_ROW_DATA_WRAP_CONTINUATION(),
+                            wrapContinuation),
+                    "ghostty_row_get(wrap_continuation)");
+
+            if (!lineOpen) {
+                lineStartRow = viewportTop + viewportRow;
+                lineStartsOutsideViewport = viewportRow == 0
+                        && wrapContinuation.get(ValueLayout.JAVA_BOOLEAN, 0);
+                lineOpen = true;
+            }
+            if (!lineStartsOutsideViewport) {
+                requireGhosttySuccess(
+                        ghostty_vt_h.ghostty_render_state_row_get(
+                            linkRowIterator,
+                            ghostty_vt_h.GHOSTTY_RENDER_STATE_ROW_DATA_CELLS(),
+                            rowCellsPointer),
+                        "ghostty_render_state_row_get(cells)");
+                var pendingEmptyCount = 0;
+                var column = 0;
+                while (ghostty_vt_h.ghostty_render_state_row_cells_next(linkRowCells)) {
+                    GhosttyBuffer.ptr(graphemeBuffer, graphemeBytes);
+                    GhosttyBuffer.cap(graphemeBuffer, graphemeBytesCapacity);
+                    GhosttyBuffer.len(graphemeBuffer, 0);
+                    var graphemeResult = ghostty_vt_h.ghostty_render_state_row_cells_get(
+                            linkRowCells,
+                            ghostty_vt_h.GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_GRAPHEMES_UTF8(),
+                            graphemeBuffer);
+                    if (graphemeResult == ghostty_vt_h.GHOSTTY_OUT_OF_SPACE()) {
+                        graphemeBytesCapacity = Math.toIntExact(GhosttyBuffer.len(graphemeBuffer));
+                        graphemeBytes = arena.allocate(graphemeBytesCapacity);
+                        GhosttyBuffer.ptr(graphemeBuffer, graphemeBytes);
+                        GhosttyBuffer.cap(graphemeBuffer, graphemeBytesCapacity);
+                        GhosttyBuffer.len(graphemeBuffer, 0);
+                        requireGhosttySuccess(
+                                ghostty_vt_h.ghostty_render_state_row_cells_get(
+                                        linkRowCells,
+                                        ghostty_vt_h.GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_GRAPHEMES_UTF8(),
+                                        graphemeBuffer),
+                                "ghostty_render_state_row_cells_get(graphemes_utf8)");
+                    } else {
+                        requireGhosttySuccess(graphemeResult, "ghostty_render_state_row_cells_get(graphemes_utf8)");
+                    }
+
+                    var graphemeByteLength = Math.toIntExact(GhosttyBuffer.len(graphemeBuffer));
+                    if (graphemeByteLength == 0) {
+                        requireGhosttySuccess(
+                                ghostty_vt_h.ghostty_render_state_row_cells_get(
+                                        linkRowCells,
+                                        ghostty_vt_h.GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_RAW(),
+                                        rawCell),
+                                "ghostty_render_state_row_cells_get(raw)");
+                        requireGhosttySuccess(
+                                ghostty_vt_h.ghostty_cell_get(
+                                        rawCell.get(ValueLayout.JAVA_LONG, 0),
+                                        ghostty_vt_h.GHOSTTY_CELL_DATA_WIDE(),
+                                        wide),
+                                "ghostty_cell_get(wide)");
+                        if (wide.get(ValueLayout.JAVA_INT, 0) != ghostty_vt_h.GHOSTTY_CELL_WIDE_SPACER_TAIL()) {
+                            pendingEmptyColumns[pendingEmptyCount++] = column;
+                        }
+                    } else {
+                        var row = viewportTop + viewportRow;
+                        for (var i = 0; i < pendingEmptyCount; i++) {
+                            text.append(' ');
+                            points.add(new Selection.ScreenPoint(pendingEmptyColumns[i], row));
+                        }
+                        pendingEmptyCount = 0;
+                        var point = new Selection.ScreenPoint(column, row);
+                        for (var offset = 0; offset < graphemeByteLength;) {
+                            var firstByte = Byte.toUnsignedInt(graphemeBytes.get(ValueLayout.JAVA_BYTE, offset));
+                            var byteCount = firstByte < 0x80 ? 1 : firstByte < 0xE0 ? 2 : firstByte < 0xF0 ? 3 : 4;
+                            var codePoint = switch (byteCount) {
+                                case 1 -> firstByte;
+                                case 2 -> firstByte & 0x1F;
+                                case 3 -> firstByte & 0x0F;
+                                case 4 -> firstByte & 0x07;
+                                default -> throw new AssertionError();
+                            };
+                            for (var i = 1; i < byteCount; i++) {
+                                codePoint = codePoint << 6
+                                        | Byte.toUnsignedInt(graphemeBytes.get(ValueLayout.JAVA_BYTE, offset + i)) & 0x3F;
+                            }
+                            var start = text.length();
+                            text.appendCodePoint(Character.isValidCodePoint(codePoint) ? codePoint : 0xFFFD);
+                            for (var i = start; i < text.length(); i++) {
+                                points.add(point);
+                            }
+                            offset += byteCount;
+                        }
+                    }
+                    column++;
+                }
+            }
+
+            viewportRow++;
+            if (!wrap.get(ValueLayout.JAVA_BOOLEAN, 0)) {
+                lines.add(lineStartsOutsideViewport
+                        ? logicalLine(new Selection.ScreenPoint(0, lineStartRow))
+                        : new LogicalLine(text.toString(), List.copyOf(points)));
+                text = new StringBuilder();
+                points = new ArrayList<>();
+                lineOpen = false;
+            }
+        }
+        if (lineOpen) {
+            lines.add(logicalLine(new Selection.ScreenPoint(0, lineStartRow)));
+        }
+        return lines;
+    }
+
     private SearchResult linkMatcherResult(
             List<TerminalLinkMatcher> linkMatchers,
             int viewportTop,
@@ -1194,12 +1339,30 @@ final class TerminalSession implements AutoCloseable {
         }
 
         var result = cachedLinks;
-        if (result == null
-                || result.viewportTop() != viewportTop
-                || result.viewportBottom() != viewportBottom) {
-            var columns = columnCount();
-            var visibleSelections = new ArrayList<Selection>();
-            for (var selection : linkMatcherSelections(linkMatchers, viewportTop, viewportBottom)) {
+        if (result != null
+                && result.viewportTop() == viewportTop
+                && result.viewportBottom() == viewportBottom) {
+            return result.result();
+        }
+        return rebuildLinkMatcherResult(linkMatchers, viewportTop, viewportBottom);
+    }
+
+    private SearchResult rebuildLinkMatcherResult(
+            List<TerminalLinkMatcher> linkMatchers,
+            int viewportTop,
+            int viewportBottom) {
+        var columns = columnCount();
+        var visibleSelections = new ArrayList<Selection>();
+        try (var arena = Arena.ofConfined()) {
+            var rowIteratorPointer = arena.allocate(ValueLayout.ADDRESS);
+            rowIteratorPointer.set(ValueLayout.ADDRESS, 0, linkRowIterator);
+            requireGhosttySuccess(
+                    ghostty_vt_h.ghostty_render_state_get(
+                            renderState,
+                            ghostty_vt_h.GHOSTTY_RENDER_STATE_DATA_ROW_ITERATOR(),
+                            rowIteratorPointer),
+                    "ghostty_render_state_get(row_iterator)");
+            for (var selection : linkMatcherSelections(linkMatchers, viewportTop, viewportBottom, arena)) {
                 var normalized = selection.normalized();
                 if (normalized.to().y() < viewportTop || normalized.from().y() > viewportBottom) {
                     continue;
@@ -1214,15 +1377,15 @@ final class TerminalSession implements AutoCloseable {
                                 toRow == normalized.to().y() ? normalized.to().x() : Math.max(0, columns - 1),
                                 toRow)));
             }
-            result = new CachedLinks(
-                    viewportTop,
-                    viewportBottom,
-                    SearchResult.append(
-                            SearchResult.empty(),
-                            visibleSelections,
-                            columns));
-            cachedLinks = result;
         }
+        var result = new CachedLinks(
+                viewportTop,
+                viewportBottom,
+                SearchResult.append(
+                        SearchResult.empty(),
+                        visibleSelections,
+                        columns));
+        cachedLinks = result;
         return result.result();
     }
 

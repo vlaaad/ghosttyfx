@@ -471,6 +471,37 @@ final class TerminalViewTest {
     }
 
     @Test
+    void rendersLinkUnderlineAcrossCombiningAndWideGraphemes() throws Exception {
+        try (var view = createView("e\u0301界X")) {
+            awaitText(view, "e\u0301界X");
+            runOnFxThread(() -> {
+                var theme = view.getTheme();
+                view.setTheme(new TerminalTheme(
+                        theme.background(),
+                        Color.RED,
+                        theme.palette(),
+                        theme.cursorColor(),
+                        theme.cursorText(),
+                        theme.selectionColor(),
+                        theme.selectionText(),
+                        theme.faintOpacity(),
+                        theme.scrollbarColor(),
+                        theme.scrollbarActiveColor(),
+                        theme.searchMatchColor(),
+                        theme.searchMatchBorderColor(),
+                        theme.searchCurrentMatchColor(),
+                        theme.searchCurrentMatchBorderColor(),
+                        1.0,
+                        theme.osc8LinkUnderlineOpacity(),
+                        theme.hoveredLinkUnderlineOpacity()));
+                view.getLinkMatchers().setAll(new TerminalLinkMatcher(Pattern.compile("e\u0301界X"), _ -> {}));
+                assertTrue(cellHasRedUnderline(view, 3, 0));
+                return null;
+            });
+        }
+    }
+
+    @Test
     void invalidatesVisibleLinksAfterReentrantTitleCallbackRedraw() throws Exception {
         var terminal = new ControlledTerminal();
         try (var view = new TerminalView((_, _) -> terminal)) {

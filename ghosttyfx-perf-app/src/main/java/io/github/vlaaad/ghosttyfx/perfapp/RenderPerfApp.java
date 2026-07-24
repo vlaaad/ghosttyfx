@@ -21,6 +21,8 @@ import java.text.DecimalFormat;
 import java.text.DecimalFormatSymbols;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Base64;
@@ -35,6 +37,7 @@ import javafx.stage.Stage;
 
 public final class RenderPerfApp {
     private static final DecimalFormat DECIMAL = new DecimalFormat("0.000", DecimalFormatSymbols.getInstance(Locale.ROOT));
+    private static final DateTimeFormatter RUN_TIMESTAMP = DateTimeFormatter.ofPattern("yyyy-MM-dd-HHmmss-nnnnnnnnn");
     private static final long FRAME_16_NS = 16_666_667L;
     private static final long FRAME_33_NS = 33_333_333L;
     private static final long FRAME_50_NS = 50_000_000L;
@@ -185,6 +188,10 @@ public final class RenderPerfApp {
         return ("\u001B[H" + "text-update-".repeat(12)).getBytes(StandardCharsets.UTF_8);
     }
 
+    private static byte[] linkRefresh() {
+        return "\u001B[H".getBytes(StandardCharsets.UTF_8);
+    }
+
     private static byte[] rgb() {
         var data = new byte[64 * 64 * 3];
         for (var y = 0; y < 64; y++) {
@@ -271,6 +278,7 @@ public final class RenderPerfApp {
         EMPTY_REDRAW,
         DENSE_REDRAW,
         LINK_REDRAW,
+        LINK_REFRESH,
         TEXT_UPDATE,
         KITTY_ABOVE,
         KITTY_MIDDLE,
@@ -282,7 +290,7 @@ public final class RenderPerfApp {
             return switch (this) {
                 case EMPTY_REDRAW -> emptyScreen();
                 case DENSE_REDRAW, TEXT_UPDATE -> denseScreen();
-                case LINK_REDRAW -> linkScreen();
+                case LINK_REDRAW, LINK_REFRESH -> linkScreen();
                 case KITTY_ABOVE -> withImage(0);
                 case KITTY_MIDDLE, RGB_RETRANSMIT, RGBA_RETRANSMIT, PNG_RETRANSMIT -> withImage(-1);
             };
@@ -291,6 +299,7 @@ public final class RenderPerfApp {
         Operation operation(Access access) {
             return switch (this) {
                 case EMPTY_REDRAW, DENSE_REDRAW, LINK_REDRAW, KITTY_ABOVE, KITTY_MIDDLE -> access::redraw;
+                case LINK_REFRESH -> updateOperation(access, linkRefresh());
                 case TEXT_UPDATE -> updateOperation(access, textUpdate());
                 case RGB_RETRANSMIT -> updateOperation(access, kittyTransmission(false, 24, rgb(), 0));
                 case RGBA_RETRANSMIT -> updateOperation(access, kittyTransmission(false, 32, rgba(), 0));
@@ -543,6 +552,11 @@ public final class RenderPerfApp {
             double scaleX,
             double scaleY) throws IOException {
         Files.createDirectories(config.outputDirectory());
+        var runDirectory = config.outputDirectory().resolve(
+                config.scenario().name().toLowerCase(Locale.ROOT).replace('_', '-')
+                        + "-"
+                        + RUN_TIMESTAMP.format(LocalDateTime.now()));
+        Files.createDirectory(runDirectory);
         var duration = summarize(durations);
         var allocation = summarize(Arrays.stream(allocations).filter(value -> value >= 0).toArray());
         var pulseValues = pulses.stream().mapToLong(Long::longValue).toArray();
@@ -592,24 +606,25 @@ public final class RenderPerfApp {
                 "- >16.7 ms: " + over16,
                 "- >33.3 ms: " + over33,
                 "- >50 ms: " + over50);
-        Files.writeString(config.outputDirectory().resolve("summary.md"), String.join(System.lineSeparator(), report));
+        Files.writeString(runDirectory.resolve("summary.md"), String.join(System.lineSeparator(), report));
 
         var operationCsv = new ArrayList<String>(durations.length + 1);
         operationCsv.add("duration_ns,allocated_bytes");
         for (var i = 0; i < durations.length; i++) {
             operationCsv.add(durations[i] + "," + allocations[i]);
         }
-        Files.write(config.outputDirectory().resolve("operation-samples.csv"), operationCsv);
+        Files.write(runDirectory.resolve("operation-samples.csv"), operationCsv);
 
         var pulseCsv = new ArrayList<String>(pulses.size() + 1);
         pulseCsv.add("interval_ns");
         pulses.forEach(value -> pulseCsv.add(Long.toString(value)));
-        Files.write(config.outputDirectory().resolve("pulse-samples.csv"), pulseCsv);
+        Files.write(runDirectory.resolve("pulse-samples.csv"), pulseCsv);
 
         System.out.println(config.version() + " " + config.scenario()
                 + " p50=" + millis(duration.p50()) + "ms"
                 + " p95=" + millis(duration.p95()) + "ms"
-                + " alloc=" + DECIMAL.format(allocation.average()) + "B/op");
+                + " alloc=" + DECIMAL.format(allocation.average()) + "B/op"
+                + " report=" + runDirectory);
     }
 
     private static Stats summarize(long[] values) {
