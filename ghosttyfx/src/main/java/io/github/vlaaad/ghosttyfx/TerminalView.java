@@ -704,28 +704,61 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
             event.consume();
             return;
         }
-        if (handleTerminalShortcut(event) || applyTransition(KeyInput.onKeyPressed(
-                keyInputState,
-                HostPlatform.CURRENT,
-                isMacOptionAsAlt(),
-                snapshot(event)))) {
-            event.consume();
+        var jfrEvent = JfrEvents.keyInput();
+        if (jfrEvent != null) {
+            jfrEvent.action = "pressed";
+            jfrEvent.begin();
+        }
+        try {
+            if (handleTerminalShortcut(event) || applyTransition(KeyInput.onKeyPressed(
+                    keyInputState,
+                    HostPlatform.CURRENT,
+                    isMacOptionAsAlt(),
+                    snapshot(event)))) {
+                event.consume();
+            }
+        } finally {
+            if (jfrEvent != null) {
+                jfrEvent.commit();
+            }
         }
     }
 
     private void handleKeyReleased(KeyEvent event) {
-        if (applyTransition(KeyInput.onKeyReleased(keyInputState, snapshot(event)))) {
-            event.consume();
+        var jfrEvent = JfrEvents.keyInput();
+        if (jfrEvent != null) {
+            jfrEvent.action = "released";
+            jfrEvent.begin();
+        }
+        try {
+            if (applyTransition(KeyInput.onKeyReleased(keyInputState, snapshot(event)))) {
+                event.consume();
+            }
+        } finally {
+            if (jfrEvent != null) {
+                jfrEvent.commit();
+            }
         }
     }
 
     private void handleKeyTyped(KeyEvent event) {
-        if (applyTransition(KeyInput.onKeyTyped(
-                keyInputState,
-                HostPlatform.CURRENT,
-                event.isMetaDown(),
-                event.getCharacter()))) {
-            event.consume();
+        var jfrEvent = JfrEvents.keyInput();
+        if (jfrEvent != null) {
+            jfrEvent.action = "typed";
+            jfrEvent.begin();
+        }
+        try {
+            if (applyTransition(KeyInput.onKeyTyped(
+                    keyInputState,
+                    HostPlatform.CURRENT,
+                    event.isMetaDown(),
+                    event.getCharacter()))) {
+                event.consume();
+            }
+        } finally {
+            if (jfrEvent != null) {
+                jfrEvent.commit();
+            }
         }
     }
 
@@ -1840,14 +1873,21 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
     }
 
     private void redraw() {
+        var event = JfrEvents.redraw();
         var width = getWidth();
         var height = getHeight();
-        if (width <= 0 || height <= 0) {
-            return;
+        if (event != null) {
+            event.width = (int) Math.round(width);
+            event.height = (int) Math.round(height);
+            event.begin();
         }
-        canvas.resize(width, height);
+        try {
+            if (width <= 0 || height <= 0) {
+                return;
+            }
+            canvas.resize(width, height);
 
-        blinkState = terminalSession.render(
+            blinkState = terminalSession.render(
                 canvas.getGraphicsContext2D(),
                 width,
                 height,
@@ -1862,9 +1902,14 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
                 cursorBlinkVisible,
                 textBlinkVisible,
                 mouseInputState.scrollbarHovered() || mouseInputState.scrollbarDragging(),
-                scrollbarReservedWidthPx(),
-                MIN_SCROLLBAR_HEIGHT_PX,
-                promptNavigationHighlightRow);
+                    scrollbarReservedWidthPx(),
+                    MIN_SCROLLBAR_HEIGHT_PX,
+                    promptNavigationHighlightRow);
+        } finally {
+            if (event != null) {
+                event.commit();
+            }
+        }
     }
 
     private void resetCursorBlink() {
@@ -1981,6 +2026,12 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
             }
 
             if (totalBytes != 0) {
+                var event = JfrEvents.ptyDrain();
+                if (event != null) {
+                    event.bytes = totalBytes;
+                    event.chunks = outputs.size();
+                    event.begin();
+                }
                 var bytes = new byte[totalBytes];
                 var offset = 0;
                 for (var output : outputs) {
@@ -1993,6 +2044,9 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
                 terminal.resetPromptNavigation();
                 terminal.terminalSession.writeToTerminal(bytes);
                 redrawPending = true;
+                if (event != null) {
+                    event.commit();
+                }
             }
 
             if (outputs.getLast() instanceof PtySession.Closed(var state)) {
