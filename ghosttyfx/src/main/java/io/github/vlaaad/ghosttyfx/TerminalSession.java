@@ -44,7 +44,6 @@ import io.github.vlaaad.ghostty.bindings.GhosttySurfacePosition;
 import io.github.vlaaad.ghostty.bindings.GhosttyTerminalBellFn;
 import io.github.vlaaad.ghostty.bindings.GhosttyTerminalColorSchemeFn;
 import io.github.vlaaad.ghostty.bindings.GhosttyTerminalDeviceAttributesFn;
-import io.github.vlaaad.ghostty.bindings.GhosttyTerminalOptions;
 import io.github.vlaaad.ghostty.bindings.GhosttyTerminalPwdChangedFn;
 import io.github.vlaaad.ghostty.bindings.GhosttyTerminalScrollViewport;
 import io.github.vlaaad.ghostty.bindings.GhosttyTerminalScrollViewportValue;
@@ -192,14 +191,22 @@ final class TerminalSession implements AutoCloseable {
 
         try (var arena = Arena.ofConfined()) {
             var terminalPointer = arena.allocate(ValueLayout.ADDRESS);
-            var options = GhosttyTerminalOptions.allocate(arena);
-            GhosttyTerminalOptions.cols(options, (short) initialColumns);
-            GhosttyTerminalOptions.rows(options, (short) initialRows);
-            GhosttyTerminalOptions.max_scrollback(options, INITIAL_MAX_SCROLLBACK);
             requireGhosttySuccess(
-                    ghostty_vt_h.ghostty_terminal_new(MemorySegment.NULL, terminalPointer, options),
+                    ghostty_vt_h.ghostty_terminal_new(
+                            MemorySegment.NULL,
+                            terminalPointer,
+                            (short) initialColumns,
+                            (short) initialRows),
                     "ghostty_terminal_new");
             terminal = terminalPointer.get(ValueLayout.ADDRESS, 0);
+            var scrollbackLimit = arena.allocate(ValueLayout.JAVA_LONG);
+            scrollbackLimit.set(ValueLayout.JAVA_LONG, 0, INITIAL_MAX_SCROLLBACK);
+            requireGhosttySuccess(
+                    ghostty_vt_h.ghostty_terminal_set(
+                            terminal,
+                            ghostty_vt_h.GHOSTTY_TERMINAL_OPT_SCROLLBACK_MAX_BYTES(),
+                            scrollbackLimit),
+                    "ghostty_terminal_set(scrollback_max_bytes)");
             requireGhosttySuccess(
                     ghostty_vt_h.ghostty_terminal_mode_set(terminal, GRAPHEME_CLUSTER_MODE, true),
                     "ghostty_terminal_mode_set(grapheme_cluster)");
