@@ -11,6 +11,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Consumer;
 import java.util.function.DoubleSupplier;
 import java.util.regex.Pattern;
 
@@ -108,6 +109,8 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
     private final ReadOnlyStringWrapper title;
     private final ReadOnlyStringWrapper currentDirectory;
     private final ObjectProperty<Runnable> onBell = new SimpleObjectProperty<>(this, "onBell");
+    private final ObjectProperty<Consumer<Notification>> onNotification =
+            new SimpleObjectProperty<>(this, "onNotification");
     private final ObjectProperty<TerminalTheme> theme = new SimpleObjectProperty<>(this, "theme", TerminalTheme.defaults()) {
         @Override
         public void set(TerminalTheme value) {
@@ -231,33 +234,26 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
         textBlinkTimeline.setCycleCount(Animation.INDEFINITE);
         promptNavigationHighlightTimeline = new Timeline(new KeyFrame(PROMPT_NAVIGATION_HIGHLIGHT_DURATION, _ -> clearPromptNavigationHighlight()));
         var initialFontMetrics = fontMetrics.get();
-        var thisRef = new WeakReference<>(this);
+        var withView = withView(new WeakReference<>(this));
         terminalSession = new TerminalSession(
                 INITIAL_COLUMNS,
                 INITIAL_ROWS,
                 initialFontMetrics,
                 bytes -> writeBytes(bytes),
-                (newTitle) -> {
-                    var view = thisRef.get();
-                    if (view != null) {
-                        view.title.set(newTitle);
+                newTitle -> withView.accept(view -> view.title.set(newTitle)),
+                newCurrentDirectory -> withView.accept(view -> view.currentDirectory.set(newCurrentDirectory)),
+                notification -> withView.accept(view -> {
+                    var handler = view.onNotification.get();
+                    if (handler != null) {
+                        handler.accept(notification);
                     }
-                },
-                (newCurrentDirectory) -> {
-                    var view = thisRef.get();
-                    if (view != null) {
-                        view.currentDirectory.set(newCurrentDirectory);
+                }),
+                () -> withView.accept(view -> {
+                    var handler = view.onBell.get();
+                    if (handler != null) {
+                        handler.run();
                     }
-                },
-                () -> {
-                    var view = thisRef.get();
-                    if (view != null) {
-                        var handler = view.onBell.get();
-                        if (handler != null) {
-                            handler.run();
-                        }
-                    }
-                });
+                }));
         terminalShortcuts.addAll(defaultTerminalShortcuts());
         linkMatchers.addAll(defaultLinkMatchers());
 
@@ -592,6 +588,30 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
     /// @return the bell handler property
     public ObjectProperty<Runnable> onBellProperty() {
         return onBell;
+    }
+
+    /// Returns the handler invoked when the terminal application requests a notification.
+    ///
+    /// @return the notification handler, or `null`
+    public Consumer<Notification> getOnNotification() {
+        return onNotification.get();
+    }
+
+    /// Sets the handler invoked when the terminal application requests a notification.
+    ///
+    /// The handler runs on the JavaFX application thread. GhosttyFX does not
+    /// prescribe how the notification is presented.
+    ///
+    /// @param value the notification handler, or `null`
+    public void setOnNotification(Consumer<Notification> value) {
+        onNotification.set(value);
+    }
+
+    /// The handler invoked when the terminal application requests a notification.
+    ///
+    /// @return the notification handler property
+    public ObjectProperty<Consumer<Notification>> onNotificationProperty() {
+        return onNotification;
     }
 
     /// Returns the terminal backend state.
@@ -2187,6 +2207,21 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
         }
         writeCommand(new PtySession.WriteInput(bytes));
         return true;
+    }
+
+    private static Consumer<Consumer<TerminalView>> withView(WeakReference<TerminalView> viewRef) {
+        return action -> {
+            try {
+                Platform.runLater(() -> {
+                    var view = viewRef.get();
+                    if (view != null) {
+                        action.accept(view);
+                    }
+                });
+            } catch (Throwable _) {
+                // Exceptions must not escape an FFM upcall.
+            }
+        };
     }
 
 }

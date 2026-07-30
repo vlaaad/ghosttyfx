@@ -186,6 +186,7 @@ used. Useful view APIs include:
 - `terminalStateProperty()`: running, closed, or failed backend state
 - `terminalSizeProperty()`: current terminal grid size in character cells
 - `isMouseTrackingEnabled()`: whether the running program has enabled mouse tracking
+- `onNotificationProperty()`: notifications from the running program
 - `copySelection()`, `pasteClipboard()`, `selectAll()`: common terminal actions
 - `sendText(...)`, `sendEsc(...)`: send text or escape-prefixed input
 
@@ -263,6 +264,16 @@ capture groups.
 
 Use `setOnBell(...)` or `onBellProperty()` to run code when the terminal rings
 the bell. The value may be `null` to disable custom bell handling.
+
+### Notifications
+
+Use `setOnNotification(...)` or `onNotificationProperty()` to handle
+notifications from programs running in the terminal:
+
+```java
+view.setOnNotification(notification ->
+        showNotification(notification.title(), notification.body()));
+```
 
 ## Development
 

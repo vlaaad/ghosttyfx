@@ -754,6 +754,77 @@ final class TerminalViewTest {
     }
 
     @Test
+    void exposesNotificationRequestsFromTerminalOutput() throws Exception {
+        var observed = new AtomicReference<Notification>();
+        var terminal = new ControlledTerminal();
+        try (var view = new TerminalView((_, _) -> terminal)) {
+            runOnFxThread(() -> {
+                view.setOnNotification(observed::set);
+                assertSame(view.getOnNotification(), view.onNotificationProperty().get());
+                return null;
+            });
+
+            terminal.emit("\u001B]9;Build complete\u001B\\");
+            await("OSC 9 notification", START_TIMEOUT, () -> runOnFxThread(() ->
+                    new Notification("", "Build complete").equals(observed.get())
+                            ? Optional.of(Boolean.TRUE)
+                            : Optional.empty()));
+
+            terminal.emit("\u001B]777;notify;Codex;Needs attention\u001B\\");
+            await("OSC 777 notification", START_TIMEOUT, () -> runOnFxThread(() ->
+                    new Notification("Codex", "Needs attention").equals(observed.get())
+                            ? Optional.of(Boolean.TRUE)
+                            : Optional.empty()));
+        }
+    }
+
+    @Test
+    void notificationRejectsNullFields() {
+        assertThrows(NullPointerException.class, () -> new Notification(null, ""));
+        assertThrows(NullPointerException.class, () -> new Notification("", null));
+    }
+
+    @Test
+    void reportsTerminalEffectHandlerExceptions() throws Exception {
+        var uncaughtExceptions = new AtomicInteger();
+        var previousUncaughtExceptionHandler = new AtomicReference<Thread.UncaughtExceptionHandler>();
+        var terminal = new ControlledTerminal();
+        try (var view = new TerminalView((_, _) -> terminal)) {
+            runOnFxThread(() -> {
+                var thread = Thread.currentThread();
+                previousUncaughtExceptionHandler.set(thread.getUncaughtExceptionHandler());
+                thread.setUncaughtExceptionHandler((_, _) -> uncaughtExceptions.incrementAndGet());
+                view.setOnNotification(_ -> {
+                    throw new RuntimeException("notification handler failed");
+                });
+                view.setOnBell(() -> {
+                    throw new RuntimeException("bell handler failed");
+                });
+                return null;
+            });
+
+            try {
+                terminal.emit("\u001B]9;notification\u001B\\\u001B]2;after notification\u001B\\");
+                await("notification exception reporting", START_TIMEOUT, () -> runOnFxThread(() ->
+                        uncaughtExceptions.get() == 1 && "after notification".equals(view.getTitle())
+                                ? Optional.of(Boolean.TRUE)
+                                : Optional.empty()));
+
+                terminal.emit("\u0007\u001B]2;after bell\u001B\\");
+                await("bell exception reporting", START_TIMEOUT, () -> runOnFxThread(() ->
+                        uncaughtExceptions.get() == 2 && "after bell".equals(view.getTitle())
+                                ? Optional.of(Boolean.TRUE)
+                                : Optional.empty()));
+            } finally {
+                runOnFxThread(() -> {
+                    Thread.currentThread().setUncaughtExceptionHandler(previousUncaughtExceptionHandler.get());
+                    return null;
+                });
+            }
+        }
+    }
+
+    @Test
     void terminalQueriesAreNotPacedByRenderingPulses() throws Exception {
         var terminal = new QueryTerminal(180);
         try (var view = new TerminalView((_, _) -> terminal)) {
