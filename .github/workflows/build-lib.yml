@@ -28,11 +28,11 @@ jobs:
         run: xvfb-run -a mvn -B "-Dghosttyfx.native.mode=build" clean test
 
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
-        if: github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/update-ghostty'
+        if: github.event_name == 'workflow_dispatch' || github.event_name == 'push'
         with:
           name: ghosttyfx-linux-x86_64
           path: ghosttyfx-linux-x86_64/target/ghosttyfx-artifact/
-          retention-days: 60
+          retention-days: ${{ (github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch') && 60 || 1 }}
           compression-level: 0
 
   linux-aarch64:
@@ -57,11 +57,11 @@ jobs:
         run: xvfb-run -a mvn -B "-Dghosttyfx.native.mode=build" clean test
 
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
-        if: github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/update-ghostty'
+        if: github.event_name == 'workflow_dispatch' || github.event_name == 'push'
         with:
           name: ghosttyfx-linux-aarch64
           path: ghosttyfx-linux-aarch64/target/ghosttyfx-artifact/
-          retention-days: 60
+          retention-days: ${{ (github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch') && 60 || 1 }}
           compression-level: 0
 
   macos-aarch64:
@@ -86,11 +86,11 @@ jobs:
         run: mvn -B "-Dghosttyfx.native.mode=build" clean test
 
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
-        if: github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/update-ghostty'
+        if: github.event_name == 'workflow_dispatch' || github.event_name == 'push'
         with:
           name: ghosttyfx-macos-aarch64
           path: ghosttyfx-macos-aarch64/target/ghosttyfx-artifact/
-          retention-days: 60
+          retention-days: ${{ (github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch') && 60 || 1 }}
           compression-level: 0
 
   macos-x86_64:
@@ -115,11 +115,11 @@ jobs:
         run: mvn -B "-Dghosttyfx.native.mode=build" -Dprism.order=sw clean test
 
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
-        if: github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/update-ghostty'
+        if: github.event_name == 'workflow_dispatch' || github.event_name == 'push'
         with:
           name: ghosttyfx-macos-x86_64
           path: ghosttyfx-macos-x86_64/target/ghosttyfx-artifact/
-          retention-days: 60
+          retention-days: ${{ (github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch') && 60 || 1 }}
           compression-level: 0
 
   windows-x86_64:
@@ -144,11 +144,11 @@ jobs:
         run: mvn -B "-Dghosttyfx.native.mode=build" clean test
 
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
-        if: github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/update-ghostty'
+        if: github.event_name == 'workflow_dispatch' || github.event_name == 'push'
         with:
           name: ghosttyfx-windows-x86_64
           path: ghosttyfx-windows-x86_64/target/ghosttyfx-artifact/
-          retention-days: 60
+          retention-days: ${{ (github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch') && 60 || 1 }}
           compression-level: 0
 
   publish:
