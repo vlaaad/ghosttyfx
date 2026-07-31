@@ -34,13 +34,12 @@ Begin after the user answers yes. Approval authorizes the actions below.
 5. Run native builds and tests only in GitHub Actions.
 6. Commit the changes. Push `update-ghostty`.
 7. Wait for all required CI jobs on the exact commit. Fix failures minimally and repeat.
-8. Find a successful `build-lib.yml` dispatch run for that commit. Dispatch it if necessary.
-9. Download and validate all available artifacts:
+8. Download and validate all artifacts from that successful CI run:
    ```sh
    mvn -N -Pdownload-cross-platform-artifacts exec:exec@download-cross-platform-artifacts
    ```
-10. Verify the artifacts in `dist/<ghostty-commit>/`.
-11. Report the branch, commits, CI links, artifact path, and new features with their user value.
+9. Verify the artifacts in `dist/<ghostty-commit>/`.
+10. Report the branch, commits, CI links, artifact path, and new features with their user value.
 
 End before merge or pull-request creation. Keep `main` unchanged after branch creation.
 
