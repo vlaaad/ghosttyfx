@@ -185,6 +185,7 @@ used. Useful view APIs include:
 - `currentDirectoryProperty()`: raw current directory reported by OSC 7/9/1337
 - `terminalStateProperty()`: running, closed, or failed backend state
 - `terminalSizeProperty()`: current terminal grid size in character cells
+- `progressProperty()`: current (nullable) progress indication
 - `isMouseTrackingEnabled()`: whether the running program has enabled mouse tracking
 - `onNotificationProperty()`: notifications from the running program
 - `copySelection()`, `pasteClipboard()`, `selectAll()`: common terminal actions
@@ -274,6 +275,13 @@ notifications from programs running in the terminal:
 view.setOnNotification(notification ->
         showNotification(notification.title(), notification.body()));
 ```
+
+### Progress
+
+Use `getProgress()` or `progressProperty()` to observe progress from programs
+running in the terminal. A progress indication is determinate or indeterminate
+and may be active, paused, or failed. The value is `null` when no progress is
+active.
 
 ## Development
 

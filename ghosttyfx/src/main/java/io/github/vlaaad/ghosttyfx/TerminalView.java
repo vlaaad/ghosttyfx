@@ -108,9 +108,9 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
     private final SearchUi searchUi;
     private final ReadOnlyStringWrapper title;
     private final ReadOnlyStringWrapper currentDirectory;
+    private final ReadOnlyObjectWrapper<Progress> progress = new ReadOnlyObjectWrapper<>(this, "progress");
     private final ObjectProperty<Runnable> onBell = new SimpleObjectProperty<>(this, "onBell");
-    private final ObjectProperty<Consumer<Notification>> onNotification =
-            new SimpleObjectProperty<>(this, "onNotification");
+    private final ObjectProperty<Consumer<Notification>> onNotification = new SimpleObjectProperty<>(this, "onNotification");
     private final ObjectProperty<TerminalTheme> theme = new SimpleObjectProperty<>(this, "theme", TerminalTheme.defaults()) {
         @Override
         public void set(TerminalTheme value) {
@@ -246,6 +246,11 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
                     var handler = view.onNotification.get();
                     if (handler != null) {
                         handler.accept(notification);
+                    }
+                }),
+                progress -> withView.accept(view -> {
+                    if (view.terminalState.get() instanceof TerminalState.Running) {
+                        view.progress.set(progress);
                     }
                 }),
                 () -> withView.accept(view -> {
@@ -612,6 +617,20 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
     /// @return the notification handler property
     public ObjectProperty<Consumer<Notification>> onNotificationProperty() {
         return onNotification;
+    }
+
+    /// Returns the current progress indication.
+    ///
+    /// @return the progress indication, or `null` when none is active
+    public Progress getProgress() {
+        return progress.get();
+    }
+
+    /// The current progress indication.
+    ///
+    /// @return the read-only progress property
+    public ReadOnlyObjectProperty<Progress> progressProperty() {
+        return progress.getReadOnlyProperty();
     }
 
     /// Returns the terminal backend state.
@@ -2016,6 +2035,7 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
             }
 
             if (outputs.getLast() instanceof PtySession.Closed(var state)) {
+                terminal.progress.set(null);
                 terminal.terminalState.set(state);
                 closed = true;
             }

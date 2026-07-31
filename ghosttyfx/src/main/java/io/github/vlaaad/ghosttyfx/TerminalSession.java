@@ -47,6 +47,8 @@ import io.github.vlaaad.ghostty.bindings.GhosttyTerminalDesktopNotification;
 import io.github.vlaaad.ghostty.bindings.GhosttyTerminalDesktopNotificationFn;
 import io.github.vlaaad.ghostty.bindings.GhosttyTerminalDeviceAttributesFn;
 import io.github.vlaaad.ghostty.bindings.GhosttyTerminalPwdChangedFn;
+import io.github.vlaaad.ghostty.bindings.GhosttyTerminalProgressReport;
+import io.github.vlaaad.ghostty.bindings.GhosttyTerminalProgressReportFn;
 import io.github.vlaaad.ghostty.bindings.GhosttyTerminalScrollViewport;
 import io.github.vlaaad.ghostty.bindings.GhosttyTerminalScrollViewportValue;
 import io.github.vlaaad.ghostty.bindings.GhosttyTerminalScrollbar;
@@ -162,12 +164,14 @@ final class TerminalSession implements AutoCloseable {
     private final Consumer<String> titleChanged;
     private final Consumer<String> pwdChanged;
     private final Consumer<Notification> notification;
+    private final Consumer<Progress> progress;
     private final Runnable bell;
     private Size size;
     private int physicalCellWidthPx;
     private int physicalCellHeightPx;
     private long kittyStorageGeneration;
     private CachedLinks cachedLinks;
+    private Progress currentProgress;
 
     TerminalSession(
             int initialColumns,
@@ -177,11 +181,13 @@ final class TerminalSession implements AutoCloseable {
             Consumer<String> titleChanged,
             Consumer<String> pwdChanged,
             Consumer<Notification> notification,
+            Consumer<Progress> progress,
             Runnable bell) {
         this.terminalInput = terminalInput;
         this.titleChanged = titleChanged;
         this.pwdChanged = pwdChanged;
         this.notification = notification;
+        this.progress = progress;
         this.bell = bell;
         size = new Size(
                 initialColumns,
@@ -297,6 +303,12 @@ final class TerminalSession implements AutoCloseable {
                         terminal,
                         ghostty_vt_h.GHOSTTY_TERMINAL_OPT_DESKTOP_NOTIFICATION(),
                         GhosttyTerminalDesktopNotificationFn.allocate(this::reportNotification, callbackArena)),
+                "ghostty_terminal_set");
+        requireGhosttySuccess(
+                ghostty_vt_h.ghostty_terminal_set(
+                        terminal,
+                        ghostty_vt_h.GHOSTTY_TERMINAL_OPT_PROGRESS_REPORT(),
+                        GhosttyTerminalProgressReportFn.allocate(this::reportProgress, callbackArena)),
                 "ghostty_terminal_set");
         requireGhosttySuccess(
                 ghostty_vt_h.ghostty_terminal_set(
@@ -505,6 +517,46 @@ final class TerminalSession implements AutoCloseable {
         this.notification.accept(new Notification(
                 toJavaString(GhosttyTerminalDesktopNotification.title(value)),
                 toJavaString(GhosttyTerminalDesktopNotification.body(value))));
+    }
+
+    private void reportProgress(MemorySegment terminal, MemorySegment userdata, MemorySegment report) {
+        try {
+            var value = report.reinterpret(GhosttyTerminalProgressReport.sizeof());
+            var nativeState = GhosttyTerminalProgressReport.state(value);
+            Progress progress;
+            if (nativeState == ghostty_vt_h.GHOSTTY_TERMINAL_PROGRESS_STATE_REMOVE()) {
+                progress = null;
+            } else {
+                Progress.State state;
+                if (nativeState == ghostty_vt_h.GHOSTTY_TERMINAL_PROGRESS_STATE_SET()
+                        || nativeState == ghostty_vt_h.GHOSTTY_TERMINAL_PROGRESS_STATE_INDETERMINATE()) {
+                    state = Progress.State.ACTIVE;
+                } else if (nativeState == ghostty_vt_h.GHOSTTY_TERMINAL_PROGRESS_STATE_PAUSE()) {
+                    state = Progress.State.PAUSED;
+                } else if (nativeState == ghostty_vt_h.GHOSTTY_TERMINAL_PROGRESS_STATE_ERROR()) {
+                    state = Progress.State.FAILED;
+                } else {
+                    return;
+                }
+                var percentage = GhosttyTerminalProgressReport.progress(value);
+                if (nativeState == ghostty_vt_h.GHOSTTY_TERMINAL_PROGRESS_STATE_PAUSE()
+                        && percentage == -1
+                        && currentProgress instanceof Progress.Determinate current) {
+                    progress = new Progress.Determinate(Progress.State.PAUSED, current.percentage());
+                } else if (nativeState == ghostty_vt_h.GHOSTTY_TERMINAL_PROGRESS_STATE_INDETERMINATE()
+                        || percentage == -1) {
+                    progress = new Progress.Indeterminate(state);
+                } else if (percentage >= 0 && percentage <= 100) {
+                    progress = new Progress.Determinate(state, percentage);
+                } else {
+                    return;
+                }
+            }
+            currentProgress = progress;
+            this.progress.accept(progress);
+        } catch (Throwable _) {
+            // Exceptions must not escape an FFM upcall.
+        }
     }
 
     private static String toJavaString(MemorySegment value) {

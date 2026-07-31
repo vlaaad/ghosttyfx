@@ -785,6 +785,79 @@ final class TerminalViewTest {
     }
 
     @Test
+    void exposesProgressFromTerminalOutput() throws Exception {
+        var terminal = new ControlledTerminal();
+        try (var view = new TerminalView((_, _) -> terminal)) {
+            assertSame(view.getProgress(), view.progressProperty().get());
+
+            assertProgress(
+                    terminal,
+                    view,
+                    "\u001B]9;4;1;42\u001B\\",
+                    new Progress.Determinate(Progress.State.ACTIVE, 42));
+            assertProgress(
+                    terminal,
+                    view,
+                    "\u001B]9;4;3\u001B\\",
+                    new Progress.Indeterminate(Progress.State.ACTIVE));
+            assertProgress(
+                    terminal,
+                    view,
+                    "\u001B]9;4;4;75\u001B\\",
+                    new Progress.Determinate(Progress.State.PAUSED, 75));
+            assertProgress(
+                    terminal,
+                    view,
+                    "\u001B]9;4;4\u001B\\",
+                    new Progress.Determinate(Progress.State.PAUSED, 75));
+            assertProgress(
+                    terminal,
+                    view,
+                    "\u001B]9;4;2;7\u001B\\",
+                    new Progress.Determinate(Progress.State.FAILED, 7));
+            assertProgress(
+                    terminal,
+                    view,
+                    "\u001B]9;4;2\u001B\\",
+                    new Progress.Indeterminate(Progress.State.FAILED));
+            assertProgress(terminal, view, "\u001B]9;4;0\u001B\\", null);
+        }
+    }
+
+    @Test
+    void progressRejectsInvalidValues() {
+        assertThrows(NullPointerException.class, () -> new Progress.Determinate(null, 0));
+        assertThrows(IllegalArgumentException.class, () -> new Progress.Determinate(Progress.State.ACTIVE, -1));
+        assertThrows(IllegalArgumentException.class, () -> new Progress.Determinate(Progress.State.ACTIVE, 101));
+        assertThrows(NullPointerException.class, () -> new Progress.Indeterminate(null));
+    }
+
+    @Test
+    void clearsProgressWhenBackendStops() throws Exception {
+        try (var view = createView("\u001B]9;4;1;42\u001B\\")) {
+            awaitTerminalClosed(view);
+            runOnFxThread(() -> {
+                assertEquals(null, view.getProgress());
+                assertEquals(null, view.progressProperty().get());
+                return null;
+            });
+        }
+
+        try (var view = new TerminalView((_, _) ->
+                new StaticTerminal("\u001B]9;4;1;42\u001B\\", new IOException("backend failed")))) {
+            await("terminal output to fail", START_TIMEOUT, () -> runOnFxThread(() ->
+                    view.getTerminalState() instanceof TerminalState.Failed
+                            ? Optional.of(Boolean.TRUE)
+                            : Optional.empty()));
+            runOnFxThread(() -> {
+                assertEquals(null, view.getProgress());
+                assertEquals(null, view.progressProperty().get());
+                return null;
+            });
+        }
+    }
+
+    @Test
     void reportsTerminalEffectHandlerExceptions() throws Exception {
         var uncaughtExceptions = new AtomicInteger();
         var previousUncaughtExceptionHandler = new AtomicReference<Thread.UncaughtExceptionHandler>();
@@ -1430,6 +1503,22 @@ final class TerminalViewTest {
         }
     }
 
+    private static void assertProgress(
+            ControlledTerminal terminal,
+            TerminalView view,
+            String output,
+            Progress expected) throws Exception {
+        var marker = "progress-" + Integer.toUnsignedString(output.hashCode());
+        terminal.emit(output + "\u001B]2;" + marker + "\u001B\\");
+        await("terminal progress " + expected, START_TIMEOUT, () -> runOnFxThread(() -> {
+            var actual = view.getProgress();
+            var matches = expected == null ? actual == null : expected.equals(actual);
+            return matches && actual == view.progressProperty().get() && marker.equals(view.getTitle())
+                    ? Optional.of(Boolean.TRUE)
+                    : Optional.empty();
+        }));
+    }
+
     private static <T> T runOnFxThread(CheckedSupplier<T> supplier) throws Exception {
         if (Platform.isFxApplicationThread()) {
             return supplier.get();
@@ -1972,9 +2061,15 @@ final class TerminalViewTest {
 
     private static final class StaticTerminal implements Terminal {
         private final InputStream output;
+        private final IOException closeFailure;
 
         private StaticTerminal(String output) {
+            this(output, null);
+        }
+
+        private StaticTerminal(String output, IOException closeFailure) {
             this.output = new ByteArrayInputStream(output.getBytes(StandardCharsets.UTF_8));
+            this.closeFailure = closeFailure;
         }
 
         @Override
@@ -1992,7 +2087,10 @@ final class TerminalViewTest {
         }
 
         @Override
-        public void close() {
+        public void close() throws IOException {
+            if (closeFailure != null) {
+                throw closeFailure;
+            }
         }
     }
 
