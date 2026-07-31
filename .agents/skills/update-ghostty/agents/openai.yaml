@@ -1,0 +1,6 @@
+interface:
+  display_name: "Update Ghostty"
+  short_description: "Examine and update the Ghostty submodule"
+  default_prompt: "Use $update-ghostty to examine upstream Ghostty changes. Ask me before you update the submodule."
+policy:
+  allow_implicit_invocation: false
