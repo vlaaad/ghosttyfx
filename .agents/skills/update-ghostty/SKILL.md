@@ -47,3 +47,12 @@ End before merge or pull-request creation. Keep `main` unchanged after branch cr
 ## Phase 3: Follow-up work
 
 Run Java/Maven tests locally as needed. Reserve commits and pushes for the user.
+
+## Phase 4: Integration
+
+Begin after the user says, "ready to integrate." Approval authorizes the actions below.
+
+1. Fast-forward local `main` to the update branch. Push `main`.
+2. Delete the merged update branch locally and remotely.
+3. Delete obsolete local and remote `update-ghostty` branches.
+4. Leave `main` checked out, synchronized with `origin`, and clean.
