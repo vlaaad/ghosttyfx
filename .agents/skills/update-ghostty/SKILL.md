@@ -1,6 +1,6 @@
 ---
 name: update-ghostty
-description: Review upstream Ghostty commits and recommend whether to update.
+description: Review upstream Ghostty commits and provide a concise, GhosttyFX-relevant update recommendation.
 ---
 # Update Ghostty
 
@@ -14,14 +14,15 @@ Investigate read-only, except for fetching upstream refs. Keep the worktree, bra
 4. Use related pull requests to understand the changes.
 5. Focus on changes that affect libghostty or GhosttyFX.
 6. Check the C API, ABI, shared terminal behavior, rendering, input, platform support, and native build requirements.
-7. Report:
-   - Current and upstream commits, range, count, and links
-   - Relevant changes and effects on GhosttyFX
-   - Required compatibility changes
-   - New features that GhosttyFX can implement and their user value
-   - Risks, unknown conditions, and an update recommendation
+7. Report concisely, preferably within 200 words:
+   - Start with current and upstream commits and a linked range with the commit count.
+   - List only changes with a concrete effect on libghostty or GhosttyFX under `Relevant changes`.
+   - Do not list upstream-only work merely because it was reviewed or touched the full Ghostty application API.
+   - Add `Compatibility`, `New features`, or `Risks` sections only when they contain material findings. Omit no-op sections instead of saying there are none.
+   - For new features, include only features GhosttyFX can implement through APIs available in the reviewed upstream commit, and state their user value.
+   - End with a direct update recommendation and its primary reason.
 
-Ask, "Do you want me to update Ghostty?" Then stop.
+If upstream is ahead, ask, "Do you want me to update Ghostty?" Then stop. If there is nothing to update, state that Ghostty is up to date and stop without asking.
 
 ## Phase 2: Update
 
