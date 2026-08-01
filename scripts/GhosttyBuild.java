@@ -13,6 +13,7 @@ import java.nio.file.attribute.BasicFileAttributes;
 import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.HexFormat;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -284,9 +285,10 @@ public final class GhosttyBuild {
         var distDir = distDir(repo, ghosttyCommit);
         var currentBranch = capture(repo, "git", "branch", "--show-current").trim();
         var headCommit = capture(repo, "git", "rev-parse", "HEAD").trim();
-        var runIds = new ArrayList<String>();
+        var runIds = new LinkedHashSet<String>();
         if (!currentBranch.isBlank()) {
             runIds.addAll(workflowRunIds(repo, currentBranch, "workflow_dispatch", headCommit));
+            runIds.addAll(workflowRunIds(repo, currentBranch, "push", headCommit));
         }
         runIds.addAll(workflowRunIds(repo, "main", "push", ""));
         var distRoot = repo.resolve("dist");
