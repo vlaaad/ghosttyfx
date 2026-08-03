@@ -1420,11 +1420,18 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
         return false;
     }
 
+    /// Returns whether the current selection can be copied.
+    ///
+    /// @return `true` if there is a selection to copy; otherwise `false`
+    public boolean canCopySelection() {
+        return terminalSession.hasSelection();
+    }
+
     /// Copies the current selection to the system clipboard.
     ///
     /// @return `true` if there was a selection to copy; otherwise `false`
     public boolean copySelection() {
-        if (!terminalSession.hasSelection()) {
+        if (!canCopySelection()) {
             return false;
         }
 
@@ -1436,18 +1443,30 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
         return true;
     }
 
+    /// Returns whether the system clipboard contains text that can be pasted.
+    ///
+    /// @return `true` if there is non-empty clipboard text; otherwise `false`
+    public boolean canPasteClipboard() {
+        return pasteableClipboardText() != null;
+    }
+
     /// Pastes the system clipboard text into the terminal.
     ///
     /// @return `true` if clipboard text was sent; otherwise `false`
     public boolean pasteClipboard() {
-        var text = Clipboard.getSystemClipboard().getString();
-        if (text == null || text.isEmpty()) {
+        var text = pasteableClipboardText();
+        if (text == null) {
             return false;
         }
 
         writeBytes(terminalSession.encodePaste(text, terminalSession.readMode(BRACKETED_PASTE_MODE)));
         clearSelection();
         return true;
+    }
+
+    private static String pasteableClipboardText() {
+        var text = Clipboard.getSystemClipboard().getString();
+        return text == null || text.isEmpty() ? null : text;
     }
 
     /// Sends an escape-prefixed text sequence to the terminal.
@@ -1484,6 +1503,13 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
         terminalSession.selectAll();
         redraw();
         return true;
+    }
+
+    /// Returns whether the current selection can be extended.
+    ///
+    /// @return `true` if there is a selection to extend; otherwise `false`
+    public boolean canExtendSelection() {
+        return terminalSession.hasSelection();
     }
 
     /// Extends the current selection one cell to the left.
@@ -1542,6 +1568,13 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
         return adjustSelection(ghostty_vt_h.GHOSTTY_SELECTION_ADJUST_END());
     }
 
+    /// Returns whether the viewport has scrollback that can be navigated.
+    ///
+    /// @return `true` if viewport scrolling is available; otherwise `false`
+    public boolean canScrollViewport() {
+        return canScrollViewport(scrollbarInfo());
+    }
+
     /// Scrolls the viewport one page up.
     ///
     /// @return `true` if scrolling was available; otherwise `false`
@@ -1561,7 +1594,7 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
     /// @return `true` if scrolling was available; otherwise `false`
     public boolean scrollViewportToTop() {
         var scrollbar = scrollbarInfo();
-        if (!viewportScrollAvailable(scrollbar)) {
+        if (!canScrollViewport(scrollbar)) {
             return false;
         }
         if (scrollbar.offset() == 0) {
@@ -1576,7 +1609,7 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
     /// @return `true` if scrolling was available; otherwise `false`
     public boolean scrollViewportToBottom() {
         var scrollbar = scrollbarInfo();
-        if (!viewportScrollAvailable(scrollbar)) {
+        if (!canScrollViewport(scrollbar)) {
             return false;
         }
         if (scrollbar.offset() == scrollbar.scrollableRows()) {
@@ -1586,11 +1619,29 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
         return true;
     }
 
+    /// Returns whether there is a previous shell prompt to navigate to.
+    ///
+    /// A visible prompt is a valid target even when the viewport has no scrollback.
+    ///
+    /// @return `true` if a previous prompt target exists; otherwise `false`
+    public boolean canNavigateToPreviousPrompt() {
+        return promptNavigationTarget(-1) >= 0;
+    }
+
     /// Scrolls the viewport to the previous shell prompt.
     ///
     /// @return `true` if a prompt target was found; otherwise `false`
     public boolean scrollViewportToPreviousPrompt() {
         return scrollViewportToPrompt(-1);
+    }
+
+    /// Returns whether there is a next shell prompt to navigate to.
+    ///
+    /// A visible prompt is a valid target even when the viewport has no scrollback.
+    ///
+    /// @return `true` if a next prompt target exists; otherwise `false`
+    public boolean canNavigateToNextPrompt() {
+        return promptNavigationTarget(1) >= 0;
     }
 
     /// Scrolls the viewport to the next shell prompt.
@@ -1656,7 +1707,7 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
 
     private boolean scrollViewportByRows(long deltaRows) {
         var scrollbar = scrollbarInfo();
-        if (!viewportScrollAvailable(scrollbar) || deltaRows == 0) {
+        if (!canScrollViewport(scrollbar) || deltaRows == 0) {
             return false;
         }
 
@@ -1671,30 +1722,40 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
 
     private boolean scrollViewportToPrompt(int direction) {
         var scrollbar = scrollbarInfo();
-        if (scrollbar != null && scrollbar.visible() > 0) {
-            var anchor = promptNavigationAnchor(direction, scrollbar);
-            if (anchor < 0 && direction < 0) {
-                return false;
-            }
-
-            var target = direction < 0
-                    ? terminalSession.promptRowBefore(anchor)
-                    : terminalSession.promptRowAfter(anchor);
-            if (target < 0) {
-                if (!terminalSession.isPromptRow(anchor)) {
-                    return false;
-                }
-                target = Math.toIntExact(anchor);
-            }
-
-            if (!rowDisplayed(target, scrollbar) && scrollbar.scrollable()) {
-                scrollViewportTo(target);
-            }
-            promptNavigationRow = target;
-            showPromptNavigationHighlight(target);
-            return true;
+        var target = promptNavigationTarget(direction, scrollbar);
+        if (target < 0) {
+            return false;
         }
-        return false;
+
+        if (!rowDisplayed(target, scrollbar) && scrollbar.scrollable()) {
+            scrollViewportTo(target);
+        }
+        promptNavigationRow = target;
+        showPromptNavigationHighlight(target);
+        return true;
+    }
+
+    private int promptNavigationTarget(int direction) {
+        return promptNavigationTarget(direction, scrollbarInfo());
+    }
+
+    private int promptNavigationTarget(int direction, TerminalSession.ScrollbarInfo scrollbar) {
+        if (scrollbar == null || scrollbar.visible() <= 0) {
+            return -1;
+        }
+
+        var anchor = promptNavigationAnchor(direction, scrollbar);
+        if (anchor < 0 && direction < 0) {
+            return -1;
+        }
+
+        var target = direction < 0
+                ? terminalSession.promptRowBefore(anchor)
+                : terminalSession.promptRowAfter(anchor);
+        if (target >= 0) {
+            return target;
+        }
+        return terminalSession.isPromptRow(anchor) ? Math.toIntExact(anchor) : -1;
     }
 
     private long promptNavigationAnchor(int direction, TerminalSession.ScrollbarInfo scrollbar) {
@@ -1779,15 +1840,16 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
         }
     }
 
-    private boolean viewportScrollAvailable(TerminalSession.ScrollbarInfo scrollbar) {
+    private static boolean canScrollViewport(TerminalSession.ScrollbarInfo scrollbar) {
         return scrollbar != null && scrollbar.scrollable();
     }
 
     private boolean adjustSelection(int adjustment) {
-        if (!terminalSession.adjustSelection(adjustment)) {
+        if (!canExtendSelection()) {
             return false;
         }
 
+        terminalSession.adjustSelection(adjustment);
         clearHover(false);
         scrollSelectionFocusIntoView();
         redraw();

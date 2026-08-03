@@ -986,6 +986,43 @@ final class TerminalViewTest {
     }
 
     @Test
+    void selectionAndClipboardCapabilityGuardsDoNotPerformActions() throws Exception {
+        var marker = "ghosttyfx-capability-guards";
+        var clipboardContents = runOnFxThread(TerminalViewTest::snapshotClipboardContents);
+        try {
+            try (var view = createView(marker)) {
+                awaitText(view, marker);
+                runOnFxThread(() -> {
+                    var clipboard = Clipboard.getSystemClipboard();
+                    clipboard.clear();
+                    assertFalse(view.canCopySelection());
+                    assertFalse(view.canExtendSelection());
+                    assertFalse(view.canPasteClipboard());
+
+                    view.selectAll();
+                    var selectedText = view.getInputMethodRequests().getSelectedText();
+                    assertTrue(view.canCopySelection());
+                    assertTrue(view.canExtendSelection());
+                    assertEquals(selectedText, view.getInputMethodRequests().getSelectedText());
+
+                    var content = new javafx.scene.input.ClipboardContent();
+                    content.putString("clipboard text");
+                    clipboard.setContent(content);
+                    assertTrue(view.canPasteClipboard());
+                    assertEquals("clipboard text", clipboard.getString());
+                    assertEquals(selectedText, view.getInputMethodRequests().getSelectedText());
+                    return null;
+                });
+            }
+        } finally {
+            runOnFxThread(() -> {
+                restoreClipboardContents(clipboardContents);
+                return null;
+            });
+        }
+    }
+
+    @Test
     void viewportScrollTerminalShortcutsReportUnavailableWithoutScrollableViewport() throws Exception {
         var tempDirectory = Files.createTempDirectory("ghosttyfx-viewport-scroll-terminalShortcuts-test-");
         var pidFile = tempDirectory.resolve("shell.pid");
@@ -993,6 +1030,7 @@ final class TerminalViewTest {
 
         try (var view = createView(shell, tempDirectory)) {
             runOnFxThread(() -> {
+                assertFalse(view.canScrollViewport());
                 assertFalse(view.scrollViewportPageUp());
                 assertFalse(view.scrollViewportPageDown());
                 assertFalse(view.scrollViewportToTop());
@@ -1013,6 +1051,7 @@ final class TerminalViewTest {
                     view.scrollViewportToTop() ? Optional.of(Boolean.TRUE) : Optional.empty()));
 
             runOnFxThread(() -> {
+                assertTrue(view.canScrollViewport());
                 assertTrue(view.scrollViewportPageUp());
                 assertTrue(view.scrollViewportToTop());
                 assertTrue(view.scrollViewportToBottom());
@@ -1060,6 +1099,9 @@ final class TerminalViewTest {
                     view.scrollViewportToTop() ? Optional.of(Boolean.TRUE) : Optional.empty()));
 
             runOnFxThread(() -> {
+                assertTrue(view.canScrollViewport());
+                assertFalse(view.canNavigateToPreviousPrompt());
+                assertFalse(view.canNavigateToNextPrompt());
                 assertFalse(view.scrollViewportToPreviousPrompt());
                 assertFalse(view.scrollViewportToNextPrompt());
                 return null;
@@ -1110,9 +1152,12 @@ final class TerminalViewTest {
     void promptNavigationHighlightsVisiblePromptsWithoutScrollbarAndDoesNotWrap() throws Exception {
         try (var view = createView(promptOutput(3))) {
             await("terminal prompt output", START_TIMEOUT, () -> runOnFxThread(() ->
-                    view.scrollViewportToPreviousPrompt() ? Optional.of(Boolean.TRUE) : Optional.empty()));
+                    view.canNavigateToPreviousPrompt() ? Optional.of(Boolean.TRUE) : Optional.empty()));
 
             runOnFxThread(() -> {
+                assertFalse(view.canScrollViewport());
+                assertTrue(view.canNavigateToPreviousPrompt());
+                assertTrue(view.canNavigateToNextPrompt());
                 assertTrue(view.scrollViewportToPreviousPrompt());
                 assertTrue(view.scrollViewportToPreviousPrompt());
                 assertTrue(view.scrollViewportToPreviousPrompt());
