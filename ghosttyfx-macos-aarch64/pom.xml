@@ -13,15 +13,20 @@
     <artifactId>ghosttyfx-macos-aarch64</artifactId>
 
     <name>GhosttyFX macOS AArch64</name>
-    <description>Generated GhosttyFX bindings for macOS AArch64</description>
+    <description>GhosttyFX platform artifact for macOS AArch64</description>
 
     <properties>
         <ghosttyfx.platform.id>macos-aarch64</ghosttyfx.platform.id>
-        <ghosttyfx.generated.sources.dir>${project.build.directory}/generated-sources/jextract</ghosttyfx.generated.sources.dir>
-        <ghosttyfx.generated.resources.dir>${project.build.directory}/generated-resources/ghosttyfx</ghosttyfx.generated.resources.dir>
-        <ghosttyfx.artifact.dir>${project.build.directory}/ghosttyfx-artifact</ghosttyfx.artifact.dir>
         <ghosttyfx.script>${project.parent.basedir}/scripts/GhosttyBuild.java</ghosttyfx.script>
     </properties>
+
+    <dependencies>
+        <dependency>
+            <groupId>io.github.vlaaad</groupId>
+            <artifactId>ghosttyfx-core</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+    </dependencies>
 
     <build>
         <plugins>

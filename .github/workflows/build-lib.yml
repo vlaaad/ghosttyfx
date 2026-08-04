@@ -153,6 +153,13 @@ jobs:
 
   publish:
     if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
+    env:
+      GHOSTTYFX_PLATFORM_IDS: >-
+        linux-x86_64
+        linux-aarch64
+        macos-aarch64
+        macos-x86_64
+        windows-x86_64
     needs:
       - linux-x86_64
       - linux-aarch64
@@ -180,13 +187,10 @@ jobs:
           dist_dir="dist/${ghostty_commit}"
           mkdir -p "${dist_dir}"
 
-          for artifact_id in \
-            ghosttyfx-linux-x86_64 \
-            ghosttyfx-linux-aarch64 \
-            ghosttyfx-macos-aarch64 \
-            ghosttyfx-macos-x86_64 \
-            ghosttyfx-windows-x86_64
+          read -ra platform_ids <<< "${GHOSTTYFX_PLATFORM_IDS}"
+          for platform_id in "${platform_ids[@]}"
           do
+            artifact_id="ghosttyfx-${platform_id}"
             source_dir="release-artifacts/${artifact_id}"
             target_dir="${dist_dir}/${artifact_id}"
             test -d "${source_dir}"
@@ -199,7 +203,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          release_projects=":ghosttyfx-parent,:ghosttyfx-core,:ghosttyfx"
+          read -ra platform_ids <<< "${GHOSTTYFX_PLATFORM_IDS}"
+          for platform_id in "${platform_ids[@]}"
+          do
+            release_projects="${release_projects},:ghosttyfx-${platform_id}"
+          done
           echo "GHOSTTYFX_VERSION=0.1.$(git rev-list --count HEAD)" >> "${GITHUB_ENV}"
+          echo "GHOSTTYFX_RELEASE_PROJECTS=${release_projects}" >> "${GITHUB_ENV}"
 
       - uses: actions/setup-java@be666c2fcd27ec809703dec50e508c2fdc7f6654 # v5.2.0
         with:
@@ -221,26 +232,51 @@ jobs:
         run: |
           set -euo pipefail
           xvfb-run -a mvn -B -Prelease -DskipTests \
-            -pl :ghosttyfx-parent,:ghosttyfx,:ghosttyfx-linux-x86_64,:ghosttyfx-linux-aarch64,:ghosttyfx-macos-aarch64,:ghosttyfx-macos-x86_64,:ghosttyfx-windows-x86_64 \
+            -pl "${GHOSTTYFX_RELEASE_PROJECTS}" \
             "-Drevision=${GHOSTTYFX_VERSION}" \
             package
 
           mkdir -p target/ci
+
+          core_jar="ghosttyfx-core/target/ghosttyfx-core-${GHOSTTYFX_VERSION}.jar"
+          jar tf "${core_jar}" > target/ci/ghosttyfx-core.entries
+          grep -q '^io/github/vlaaad/ghosttyfx/TerminalView.class$' target/ci/ghosttyfx-core.entries
+          if grep -Eq '^(io/github/vlaaad/ghostty/bindings/|native/)' target/ci/ghosttyfx-core.entries
+          then
+            echo "::error::ghosttyfx-core must not contain generated bindings or native libraries"
+            exit 1
+          fi
+
+          read -ra platform_ids <<< "${GHOSTTYFX_PLATFORM_IDS}"
+          for platform_id in "${platform_ids[@]}"
+          do
+            platform_jar="ghosttyfx-${platform_id}/target/ghosttyfx-${platform_id}-${GHOSTTYFX_VERSION}.jar"
+            platform_entries="target/ci/ghosttyfx-${platform_id}.entries"
+            jar tf "${platform_jar}" > "${platform_entries}"
+            grep -q '^io/github/vlaaad/ghostty/bindings/ghostty_vt_h.class$' "${platform_entries}"
+            grep -q "^native/${platform_id}.zip$" "${platform_entries}"
+            if grep -q '^io/github/vlaaad/ghosttyfx/TerminalView.class$' "${platform_entries}"
+            then
+              echo "::error::ghosttyfx-${platform_id} must obtain shared classes from ghosttyfx-core"
+              exit 1
+            fi
+          done
+
           javap \
-            -classpath "ghosttyfx/target/classes:ghosttyfx-linux-x86_64/target/classes" \
+            -classpath "ghosttyfx-core/target/classes:ghosttyfx-linux-x86_64/target/classes" \
             -v io.github.vlaaad.ghosttyfx.TerminalSession \
             > target/ci/TerminalSession.javap
 
           if grep -E 'REF_invokeStatic io/github/vlaaad/ghostty/bindings/ghostty_vt_h\.ghostty_' target/ci/TerminalSession.javap
           then
-            echo "::error file=ghosttyfx/src/main/java/io/github/vlaaad/ghosttyfx/TerminalSession.java::Shared ghosttyfx bytecode must not capture generated binding methods in lambda bootstrap targets. Use explicit wrapper methods or anonymous classes around jextract calls."
+            echo "::error file=ghosttyfx-core/src/main/java/io/github/vlaaad/ghosttyfx/TerminalSession.java::Shared ghosttyfx bytecode must not capture generated binding methods in lambda bootstrap targets. Use explicit wrapper methods or anonymous classes around jextract calls."
             exit 1
           fi
 
       - name: Publish to Central Portal
         run: >
           xvfb-run -a mvn -B -Prelease
-          -pl :ghosttyfx-parent,:ghosttyfx,:ghosttyfx-linux-x86_64,:ghosttyfx-linux-aarch64,:ghosttyfx-macos-aarch64,:ghosttyfx-macos-x86_64,:ghosttyfx-windows-x86_64
+          -pl "${GHOSTTYFX_RELEASE_PROJECTS}"
           "-Drevision=${GHOSTTYFX_VERSION}"
           deploy
         env:

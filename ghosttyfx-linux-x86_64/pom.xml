@@ -13,15 +13,20 @@
     <artifactId>ghosttyfx-linux-x86_64</artifactId>
 
     <name>GhosttyFX Linux x86_64</name>
-    <description>Generated GhosttyFX bindings for Linux x86_64</description>
+    <description>GhosttyFX platform artifact for Linux x86_64</description>
 
     <properties>
         <ghosttyfx.platform.id>linux-x86_64</ghosttyfx.platform.id>
-        <ghosttyfx.generated.sources.dir>${project.build.directory}/generated-sources/jextract</ghosttyfx.generated.sources.dir>
-        <ghosttyfx.generated.resources.dir>${project.build.directory}/generated-resources/ghosttyfx</ghosttyfx.generated.resources.dir>
-        <ghosttyfx.artifact.dir>${project.build.directory}/ghosttyfx-artifact</ghosttyfx.artifact.dir>
         <ghosttyfx.script>${project.parent.basedir}/scripts/GhosttyBuild.java</ghosttyfx.script>
     </properties>
+
+    <dependencies>
+        <dependency>
+            <groupId>io.github.vlaaad</groupId>
+            <artifactId>ghosttyfx-core</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+    </dependencies>
 
     <build>
         <plugins>

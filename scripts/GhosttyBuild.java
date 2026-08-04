@@ -187,6 +187,12 @@ public final class GhosttyBuild {
         var repo = Path.of("").toAbsolutePath().normalize();
         var platform = platform(args[1]);
         var artifactId = args[2];
+        var expectedArtifactId = "ghosttyfx-" + platform.id;
+        if (!expectedArtifactId.equals(artifactId)) {
+            throw new IllegalArgumentException(
+                "artifact ID " + artifactId + " does not match platform " + platform.id + ": expected " + expectedArtifactId
+            );
+        }
         var buildDir = Path.of(args[3]).toAbsolutePath().normalize();
         var mode = NativeMode.parse(args[4]);
 

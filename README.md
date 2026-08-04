@@ -19,7 +19,7 @@ behavior work moving.
 
 ## Installation
 
-GhosttyFX is published to Maven Central. Add the shared JavaFX control artifact:
+GhosttyFX is published to Maven Central. Add the current-platform artifact:
 
 ```xml
 <dependency>
@@ -32,9 +32,9 @@ GhosttyFX is published to Maven Central. Add the shared JavaFX control artifact:
 Use the [Maven Central artifact page](https://central.sonatype.com/artifact/io.github.vlaaad/ghosttyfx)
 to find the latest version.
 
-The `ghosttyfx` artifact depends on the native binding artifact for the current
-platform. Supported platforms are Linux x86_64/aarch64, macOS x86_64/aarch64,
-and Windows x86_64.
+The `ghosttyfx` artifact depends on JavaFX and the native binding artifact for
+the current platform. Supported platforms are Linux x86_64/aarch64, macOS
+x86_64/aarch64, and Windows x86_64.
 
 GhosttyFX requires Java 25 and JavaFX 25.
 

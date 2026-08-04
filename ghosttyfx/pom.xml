@@ -13,12 +13,17 @@
     <artifactId>ghosttyfx</artifactId>
 
     <name>GhosttyFX</name>
-    <description>Shared GhosttyFX Java layer</description>
+    <description>Current-platform GhosttyFX dependency facade</description>
+
+    <properties>
+        <maven.source.skip>true</maven.source.skip>
+        <maven.javadoc.skip>true</maven.javadoc.skip>
+    </properties>
 
     <dependencies>
         <dependency>
             <groupId>io.github.vlaaad</groupId>
-            <artifactId>${ghosttyfx.bindings.artifactId}</artifactId>
+            <artifactId>ghosttyfx-${ghosttyfx.platform.id}</artifactId>
             <version>${project.version}</version>
         </dependency>
         <dependency>
@@ -31,65 +36,37 @@
             <artifactId>javafx-controls</artifactId>
             <version>${javafx.version}</version>
         </dependency>
-        <dependency>
-            <groupId>org.junit.jupiter</groupId>
-            <artifactId>junit-jupiter</artifactId>
-            <scope>test</scope>
-        </dependency>
-        <dependency>
-            <groupId>org.jetbrains.pty4j</groupId>
-            <artifactId>pty4j</artifactId>
-            <version>${pty4j.version}</version>
-            <scope>test</scope>
-        </dependency>
     </dependencies>
 
     <build>
-        <resources>
-            <resource>
-                <directory>src/main/resources</directory>
-                <excludes>
-                    <exclude>shell/**</exclude>
-                </excludes>
-            </resource>
-        </resources>
         <plugins>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-compiler-plugin</artifactId>
-            </plugin>
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-antrun-plugin</artifactId>
+                <artifactId>maven-jar-plugin</artifactId>
                 <executions>
                     <execution>
-                        <id>zip-shell-resources</id>
-                        <phase>process-resources</phase>
+                        <id>attach-empty-sources</id>
+                        <phase>package</phase>
                         <goals>
-                            <goal>run</goal>
+                            <goal>jar</goal>
                         </goals>
                         <configuration>
-                            <target>
-                                <mkdir dir="${project.build.outputDirectory}/shell"/>
-                                <zip destfile="${project.build.outputDirectory}/shell/bash.zip"
-                                     basedir="${project.basedir}/src/main/resources/shell/bash"/>
-                                <zip destfile="${project.build.outputDirectory}/shell/fish.zip"
-                                     basedir="${project.basedir}/src/main/resources/shell/fish"/>
-                                <zip destfile="${project.build.outputDirectory}/shell/pwsh.zip"
-                                     basedir="${project.basedir}/src/main/resources/shell/pwsh"/>
-                                <zip destfile="${project.build.outputDirectory}/shell/zsh.zip"
-                                     basedir="${project.basedir}/src/main/resources/shell/zsh"/>
-                            </target>
+                            <classesDirectory>${project.build.directory}/empty</classesDirectory>
+                            <classifier>sources</classifier>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <id>attach-empty-javadocs</id>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>jar</goal>
+                        </goals>
+                        <configuration>
+                            <classesDirectory>${project.build.directory}/empty</classesDirectory>
+                            <classifier>javadoc</classifier>
                         </configuration>
                     </execution>
                 </executions>
-            </plugin>
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-surefire-plugin</artifactId>
-                <configuration>
-                    <argLine>--enable-native-access=ALL-UNNAMED</argLine>
-                </configuration>
             </plugin>
         </plugins>
     </build>

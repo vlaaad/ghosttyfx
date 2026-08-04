@@ -4,7 +4,8 @@ Generated per-platform `jextract` bindings for `libghostty-vt`.
 
 ## Layout
 
-- `ghosttyfx`: shared Java module
+- `ghosttyfx-core`: shared Java implementation
+- `ghosttyfx`: dependency-only current-platform convenience artifact
 - `ghosttyfx-manual-app`: JavaFX launcher for manual testing
 - `ghosttyfx-linux-x86_64`
 - `ghosttyfx-linux-aarch64`
@@ -16,7 +17,7 @@ Generated per-platform `jextract` bindings for `libghostty-vt`.
 
 ## Licenses
 
-GhosttyFX bundles shell integration scripts under `ghosttyfx/src/main/resources/shell`.
+GhosttyFX bundles shell integration scripts under `ghosttyfx-core/src/main/resources/shell`.
 The Bash and Zsh integration scripts are copied from Ghostty's shell integration
 and retain their GPLv3 license notices because they are derived from kitty's
 GPLv3 shell integration. Other GhosttyFX code and scripts keep their original

@@ -10,7 +10,7 @@
     <packaging>pom</packaging>
 
     <name>GhosttyFX Parent</name>
-    <description>Parent POM for GhosttyFX generated bindings</description>
+    <description>Parent POM for GhosttyFX</description>
     <url>https://github.com/vlaaad/ghosttyfx</url>
 
     <licenses>
@@ -45,9 +45,12 @@
         <pty4j.version>0.13.12</pty4j.version>
         <ghosttyfx.script>${project.basedir}/scripts/GhosttyBuild.java</ghosttyfx.script>
         <ghosttyfx.native.mode>auto</ghosttyfx.native.mode>
+        <ghosttyfx.generated.sources.dir>${project.build.directory}/generated-sources/jextract</ghosttyfx.generated.sources.dir>
+        <ghosttyfx.generated.resources.dir>${project.build.directory}/generated-resources/ghosttyfx</ghosttyfx.generated.resources.dir>
     </properties>
 
     <modules>
+        <module>ghosttyfx-core</module>
         <module>ghosttyfx</module>
         <module>ghosttyfx-manual-app</module>
         <module>ghosttyfx-nord-app</module>
@@ -79,7 +82,7 @@
                 <module>ghosttyfx-linux-x86_64</module>
             </modules>
             <properties>
-                <ghosttyfx.bindings.artifactId>ghosttyfx-linux-x86_64</ghosttyfx.bindings.artifactId>
+                <ghosttyfx.platform.id>linux-x86_64</ghosttyfx.platform.id>
             </properties>
         </profile>
         <profile>
@@ -95,7 +98,7 @@
                 <module>ghosttyfx-linux-x86_64</module>
             </modules>
             <properties>
-                <ghosttyfx.bindings.artifactId>ghosttyfx-linux-x86_64</ghosttyfx.bindings.artifactId>
+                <ghosttyfx.platform.id>linux-x86_64</ghosttyfx.platform.id>
             </properties>
         </profile>
         <profile>
@@ -111,7 +114,7 @@
                 <module>ghosttyfx-linux-aarch64</module>
             </modules>
             <properties>
-                <ghosttyfx.bindings.artifactId>ghosttyfx-linux-aarch64</ghosttyfx.bindings.artifactId>
+                <ghosttyfx.platform.id>linux-aarch64</ghosttyfx.platform.id>
             </properties>
         </profile>
         <profile>
@@ -127,7 +130,7 @@
                 <module>ghosttyfx-linux-aarch64</module>
             </modules>
             <properties>
-                <ghosttyfx.bindings.artifactId>ghosttyfx-linux-aarch64</ghosttyfx.bindings.artifactId>
+                <ghosttyfx.platform.id>linux-aarch64</ghosttyfx.platform.id>
             </properties>
         </profile>
         <profile>
@@ -143,7 +146,7 @@
                 <module>ghosttyfx-macos-aarch64</module>
             </modules>
             <properties>
-                <ghosttyfx.bindings.artifactId>ghosttyfx-macos-aarch64</ghosttyfx.bindings.artifactId>
+                <ghosttyfx.platform.id>macos-aarch64</ghosttyfx.platform.id>
             </properties>
         </profile>
         <profile>
@@ -159,7 +162,7 @@
                 <module>ghosttyfx-macos-aarch64</module>
             </modules>
             <properties>
-                <ghosttyfx.bindings.artifactId>ghosttyfx-macos-aarch64</ghosttyfx.bindings.artifactId>
+                <ghosttyfx.platform.id>macos-aarch64</ghosttyfx.platform.id>
             </properties>
         </profile>
         <profile>
@@ -175,7 +178,7 @@
                 <module>ghosttyfx-macos-x86_64</module>
             </modules>
             <properties>
-                <ghosttyfx.bindings.artifactId>ghosttyfx-macos-x86_64</ghosttyfx.bindings.artifactId>
+                <ghosttyfx.platform.id>macos-x86_64</ghosttyfx.platform.id>
             </properties>
         </profile>
         <profile>
@@ -191,7 +194,7 @@
                 <module>ghosttyfx-macos-x86_64</module>
             </modules>
             <properties>
-                <ghosttyfx.bindings.artifactId>ghosttyfx-macos-x86_64</ghosttyfx.bindings.artifactId>
+                <ghosttyfx.platform.id>macos-x86_64</ghosttyfx.platform.id>
             </properties>
         </profile>
         <profile>
@@ -206,7 +209,7 @@
                 <module>ghosttyfx-windows-x86_64</module>
             </modules>
             <properties>
-                <ghosttyfx.bindings.artifactId>ghosttyfx-windows-x86_64</ghosttyfx.bindings.artifactId>
+                <ghosttyfx.platform.id>windows-x86_64</ghosttyfx.platform.id>
             </properties>
         </profile>
         <profile>
@@ -221,7 +224,7 @@
                 <module>ghosttyfx-windows-x86_64</module>
             </modules>
             <properties>
-                <ghosttyfx.bindings.artifactId>ghosttyfx-windows-x86_64</ghosttyfx.bindings.artifactId>
+                <ghosttyfx.platform.id>windows-x86_64</ghosttyfx.platform.id>
             </properties>
         </profile>
         <profile>
@@ -379,6 +382,11 @@
                     <groupId>org.apache.maven.plugins</groupId>
                     <artifactId>maven-surefire-plugin</artifactId>
                     <version>3.5.4</version>
+                </plugin>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-jar-plugin</artifactId>
+                    <version>3.5.0</version>
                 </plugin>
                 <plugin>
                     <groupId>org.apache.maven.plugins</groupId>
