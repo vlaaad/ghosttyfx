@@ -8,18 +8,21 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 
-/// Utilities for applying Ghostty shell integration to a shell launch command.
+/// Utilities for preparing a shell launch command for GhosttyFX.
 ///
-/// Shell integration augments supported interactive shells so the terminal can
-/// observe shell lifecycle events such as prompts and command boundaries.
+/// The launch environment identifies GhosttyFX's terminal capabilities. Shell
+/// integration additionally augments supported interactive shells so the
+/// terminal can observe lifecycle events such as prompts and command boundaries.
 public final class Shell {
     private Shell() {}
 
-    /// Applies shell integration to a launch command when the shell is supported.
+    /// Prepares the terminal environment and applies shell integration when the
+    /// shell is supported.
     ///
-    /// The returned launcher may contain a modified command, modified
-    /// environment, or both. If the command is not recognized as a supported
-    /// shell, the original command and environment are returned unchanged.
+    /// The returned environment declares `xterm-256color` capabilities and true
+    /// color support, and removes an inherited `VTE_VERSION` because GhosttyFX is
+    /// not a VTE terminal. If the command is not recognized as a supported shell,
+    /// the original command is returned with only these environment changes.
     ///
     /// Supported shells are Bash, Cmd, Fish, PowerShell, and Zsh.
     ///
@@ -35,26 +38,31 @@ public final class Shell {
             throw new IllegalArgumentException("command must not be empty");
         }
 
+        var terminalEnvironment = new LinkedHashMap<>(environment);
+        terminalEnvironment.put("TERM", "xterm-256color");
+        terminalEnvironment.put("COLORTERM", "truecolor");
+        terminalEnvironment.remove("VTE_VERSION");
+
         var executable = command.getFirst();
         var separator = Math.max(executable.lastIndexOf('/'), executable.lastIndexOf('\\'));
         var name = executable.substring(separator + 1).toLowerCase(Locale.ROOT);
         if (name.equals("bash")) {
-            return integrateBash(command, environment);
+            return integrateBash(command, terminalEnvironment);
         }
         if (name.equals("cmd") || name.equals("cmd.exe")) {
-            return integrateCmd(command, environment);
+            return integrateCmd(command, terminalEnvironment);
         }
         if (name.equals("fish")) {
-            return integrateFish(command, environment);
+            return integrateFish(command, terminalEnvironment);
         }
         if (name.equals("pwsh") || name.equals("pwsh.exe") || name.equals("powershell") || name.equals("powershell.exe")) {
-            return integratePowershell(command, environment);
+            return integratePowershell(command, terminalEnvironment);
         }
         if (name.equals("zsh")) {
-            return integrateZsh(command, environment);
+            return integrateZsh(command, terminalEnvironment);
         }
 
-        return new Launcher(command, environment);
+        return new Launcher(command, terminalEnvironment);
     }
 
     private static Launcher integrateBash(List<String> command, Map<String, String> environment) {
@@ -88,36 +96,33 @@ public final class Shell {
         }
 
         var script = ResourceCache.extractZip(Shell.class, "/shell/bash.zip").resolve("ghostty.bash");
-        var integratedEnvironment = new LinkedHashMap<>(environment);
-        var env = integratedEnvironment.get("ENV");
+        var env = environment.get("ENV");
         if (env != null) {
-            integratedEnvironment.put("GHOSTTY_BASH_ENV", env);
+            environment.put("GHOSTTY_BASH_ENV", env);
         }
-        integratedEnvironment.put("ENV", script.toString());
-        integratedEnvironment.put("GHOSTTY_BASH_INJECT", inject.toString());
+        environment.put("ENV", script.toString());
+        environment.put("GHOSTTY_BASH_INJECT", inject.toString());
         if (rcfile != null) {
-            integratedEnvironment.put("GHOSTTY_BASH_RCFILE", rcfile);
+            environment.put("GHOSTTY_BASH_RCFILE", rcfile);
         }
-        if (!integratedEnvironment.containsKey("HISTFILE")) {
-            integratedEnvironment.put("HISTFILE", System.getProperty("user.home") + "/.bash_history");
-            integratedEnvironment.put("GHOSTTY_BASH_UNEXPORT_HISTFILE", "1");
+        if (!environment.containsKey("HISTFILE")) {
+            environment.put("HISTFILE", System.getProperty("user.home") + "/.bash_history");
+            environment.put("GHOSTTY_BASH_UNEXPORT_HISTFILE", "1");
         }
-        return new Launcher(integratedCommand, integratedEnvironment);
+        return new Launcher(integratedCommand, environment);
     }
 
     private static Launcher integrateCmd(List<String> command, Map<String, String> environment) {
-        var integratedEnvironment = new LinkedHashMap<>(environment);
-        var prompt = integratedEnvironment.getOrDefault("PROMPT", "$P$G");
-        integratedEnvironment.put("PROMPT", "$e]133;D$e\\$e]133;A;redraw=last;cl=line$e\\$e]9;9;$P$e\\" + prompt + "$e]133;B$e\\");
-        return new Launcher(command, integratedEnvironment);
+        var prompt = environment.getOrDefault("PROMPT", "$P$G");
+        environment.put("PROMPT", "$e]133;D$e\\$e]133;A;redraw=last;cl=line$e\\$e]9;9;$P$e\\" + prompt + "$e]133;B$e\\");
+        return new Launcher(command, environment);
     }
 
     private static Launcher integrateFish(List<String> command, Map<String, String> environment) {
         var resources = ResourceCache.extractZip(Shell.class, "/shell/fish.zip");
-        var integratedEnvironment = new LinkedHashMap<>(environment);
-        integratedEnvironment.put("GHOSTTY_SHELL_INTEGRATION_XDG_DIR", resources.toString());
-        integratedEnvironment.put("XDG_DATA_DIRS", resources + File.pathSeparator + integratedEnvironment.getOrDefault("XDG_DATA_DIRS", "/usr/local/share:/usr/share"));
-        return new Launcher(command, integratedEnvironment);
+        environment.put("GHOSTTY_SHELL_INTEGRATION_XDG_DIR", resources.toString());
+        environment.put("XDG_DATA_DIRS", resources + File.pathSeparator + environment.getOrDefault("XDG_DATA_DIRS", "/usr/local/share:/usr/share"));
+        return new Launcher(command, environment);
     }
 
     private static Launcher integratePowershell(List<String> command, Map<String, String> environment) {
@@ -127,20 +132,18 @@ public final class Shell {
         integratedCommand.add("-Command");
         integratedCommand.add(". $env:GHOSTTYFX_PWSH_INTEGRATION");
 
-        var integratedEnvironment = new LinkedHashMap<>(environment);
-        integratedEnvironment.put("GHOSTTYFX_PWSH_INTEGRATION", script.toString());
-        return new Launcher(integratedCommand, integratedEnvironment);
+        environment.put("GHOSTTYFX_PWSH_INTEGRATION", script.toString());
+        return new Launcher(integratedCommand, environment);
     }
 
     private static Launcher integrateZsh(List<String> command, Map<String, String> environment) {
         var zdotdir = ResourceCache.extractZip(Shell.class, "/shell/zsh.zip");
-        var integratedEnvironment = new LinkedHashMap<>(environment);
-        var existing = integratedEnvironment.get("ZDOTDIR");
+        var existing = environment.get("ZDOTDIR");
         if (existing != null) {
-            integratedEnvironment.put("GHOSTTY_ZSH_ZDOTDIR", existing);
+            environment.put("GHOSTTY_ZSH_ZDOTDIR", existing);
         }
-        integratedEnvironment.put("ZDOTDIR", zdotdir.toString());
-        return new Launcher(command, integratedEnvironment);
+        environment.put("ZDOTDIR", zdotdir.toString());
+        return new Launcher(command, environment);
     }
 
     /// A shell launch command and environment.

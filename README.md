@@ -166,11 +166,13 @@ or failed.
 
 ### Shell integration
 
-`Shell.integrate(command, environment)` applies Ghostty shell integration before
-the shell starts. Integration lets the terminal observe shell lifecycle events,
-including prompts and command boundaries, which enables prompt navigation and
-better redraw behavior. Supported shells are Bash, Cmd, Fish, PowerShell, and
-Zsh. Unknown commands are returned unchanged.
+`Shell.integrate(command, environment)` prepares supported shells to work well
+with GhosttyFX. It enables conveniences such as jumping between prompts and
+improves prompt behavior when the terminal is resized.
+
+Using it is optional. Applications that need full control can launch the shell
+without it or adjust the returned environment before starting the process.
+Supported shells are Bash, Cmd, Fish, PowerShell, and Zsh.
 
 ### Kitty graphics
 

@@ -19,14 +19,24 @@ final class ShellTest {
     }
 
     @Test
-    void unknownShellReturnsInputsUnchanged() {
+    void preparesTerminalEnvironmentForUnknownShell() {
         var command = List.of("nu");
-        var environment = Map.of("A", "B");
+        var environment = Map.of(
+                "A", "B",
+                "TERM", "dumb",
+                "COLORTERM", "false",
+                "VTE_VERSION", "12345");
 
         var launcher = Shell.integrate(command, environment);
 
         assertSame(command, launcher.command());
-        assertSame(environment, launcher.environment());
+        assertEquals("B", launcher.environment().get("A"));
+        assertEquals("xterm-256color", launcher.environment().get("TERM"));
+        assertEquals("truecolor", launcher.environment().get("COLORTERM"));
+        assertFalse(launcher.environment().containsKey("VTE_VERSION"));
+        assertEquals("dumb", environment.get("TERM"));
+        assertEquals("false", environment.get("COLORTERM"));
+        assertEquals("12345", environment.get("VTE_VERSION"));
     }
 
     @Test
@@ -55,14 +65,16 @@ final class ShellTest {
     }
 
     @Test
-    void bashUnsupportedCommandModeReturnsInputsUnchanged() {
+    void bashUnsupportedCommandModeSkipsShellIntegration() {
         var command = List.of("bash", "-ic", "echo hi");
         var environment = Map.of("A", "B");
 
         var launcher = Shell.integrate(command, environment);
 
         assertSame(command, launcher.command());
-        assertSame(environment, launcher.environment());
+        assertEquals("B", launcher.environment().get("A"));
+        assertEquals("xterm-256color", launcher.environment().get("TERM"));
+        assertFalse(launcher.environment().containsKey("GHOSTTY_BASH_INJECT"));
     }
 
     @Test
