@@ -53,6 +53,12 @@
                     <exclude>shell/**</exclude>
                 </excludes>
             </resource>
+            <resource>
+                <directory>src/main/resources</directory>
+                <includes>
+                    <include>shell/pwsh/ghosttyfx.ps1</include>
+                </includes>
+            </resource>
         </resources>
         <plugins>
             <plugin>
@@ -145,8 +151,6 @@
                                      basedir="${project.basedir}/src/main/resources/shell/bash"/>
                                 <zip destfile="${project.build.outputDirectory}/shell/fish.zip"
                                      basedir="${project.basedir}/src/main/resources/shell/fish"/>
-                                <zip destfile="${project.build.outputDirectory}/shell/pwsh.zip"
-                                     basedir="${project.basedir}/src/main/resources/shell/pwsh"/>
                                 <zip destfile="${project.build.outputDirectory}/shell/zsh.zip"
                                      basedir="${project.basedir}/src/main/resources/shell/zsh"/>
                             </target>

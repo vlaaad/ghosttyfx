@@ -6,8 +6,10 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
@@ -98,16 +100,18 @@ final class ShellTest {
     }
 
     @Test
-    void integratesPwsh() {
+    void integratesPwsh() throws Exception {
         var environment = Map.of("A", "B");
 
         var launcher = Shell.integrate(List.of("pwsh"), environment);
 
-        assertEquals(List.of("pwsh", "-NoExit", "-Command", ". $env:GHOSTTYFX_PWSH_INTEGRATION"), launcher.command());
+        assertEquals(List.of("pwsh", "-NoExit", "-EncodedCommand"), launcher.command().subList(0, 3));
         assertEquals("B", launcher.environment().get("A"));
-        assertTrue(launcher.environment().containsKey("GHOSTTYFX_PWSH_INTEGRATION"));
-        var script = Path.of(launcher.environment().get("GHOSTTYFX_PWSH_INTEGRATION"));
-        assertTrue(Files.isRegularFile(script));
+        assertEquals("xterm-256color", launcher.environment().get("TERM"));
+        var script = new String(Base64.getDecoder().decode(launcher.command().getLast()), StandardCharsets.UTF_16LE);
+        try (var input = Shell.class.getResourceAsStream("/shell/pwsh/ghosttyfx.ps1")) {
+            assertEquals(new String(input.readAllBytes(), StandardCharsets.UTF_8), script);
+        }
     }
 
     @Test
@@ -120,8 +124,8 @@ final class ShellTest {
                 "C:\\Program Files\\PowerShell\\7\\pwsh.exe",
                 "-NoLogo",
                 "-NoExit",
-                "-Command",
-                ". $env:GHOSTTYFX_PWSH_INTEGRATION"), launcher.command());
+                "-EncodedCommand"), launcher.command().subList(0, 4));
+        assertEquals(5, launcher.command().size());
     }
 
     @Test
@@ -134,9 +138,9 @@ final class ShellTest {
                 "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
                 "-NoLogo",
                 "-NoExit",
-                "-Command",
-                ". $env:GHOSTTYFX_PWSH_INTEGRATION"), launcher.command());
-        assertTrue(launcher.environment().containsKey("GHOSTTYFX_PWSH_INTEGRATION"));
+                "-EncodedCommand"), launcher.command().subList(0, 4));
+        assertEquals(5, launcher.command().size());
+        assertFalse(launcher.environment().containsKey("GHOSTTYFX_PWSH_INTEGRATION"));
     }
 
     @Test
@@ -151,27 +155,25 @@ final class ShellTest {
     }
 
     @Test
-    void shipsShellZipsOnly() throws Exception {
+    void shipsOnlyExtractedShellIntegrationsAsZips() throws Exception {
         assertTrue(Shell.class.getResource("/shell/bash.zip") != null);
         assertTrue(Shell.class.getResource("/shell/fish.zip") != null);
-        assertTrue(Shell.class.getResource("/shell/pwsh.zip") != null);
+        assertTrue(Shell.class.getResource("/shell/pwsh.zip") == null);
         assertTrue(Shell.class.getResource("/shell/zsh.zip") != null);
         assertTrue(Shell.class.getResource("/shell/bash/ghostty.bash") == null);
         assertTrue(Shell.class.getResource("/shell/fish/fish/vendor_conf.d/ghostty-shell-integration.fish") == null);
-        assertTrue(Shell.class.getResource("/shell/pwsh/ghosttyfx.ps1") == null);
+        assertTrue(Shell.class.getResource("/shell/pwsh/ghosttyfx.ps1") != null);
         assertTrue(Shell.class.getResource("/shell/zsh/ghostty-integration") == null);
 
-        var extracted = ResourceCache.extractZip(Shell.class, "/shell/pwsh.zip");
-        var script = extracted.resolve("ghosttyfx.ps1");
-        assertTrue(Files.isRegularFile(script));
-        var text = Files.readString(script);
-        assertTrue(text.contains("[char]27"));
-        assertFalse(text.contains("`e]133"));
-        assertTrue(text.contains("133;A"));
-        assertTrue(text.contains("redraw=0"));
-        assertTrue(text.contains("133;B"));
-        assertTrue(text.contains("133;C"));
-        assertTrue(text.contains("133;D"));
-        assertFalse(Files.isDirectory(extracted.resolve("pwsh")));
+        try (var input = Shell.class.getResourceAsStream("/shell/pwsh/ghosttyfx.ps1")) {
+            var text = new String(input.readAllBytes(), StandardCharsets.UTF_8);
+            assertTrue(text.contains("[char]27"));
+            assertFalse(text.contains("`e]133"));
+            assertTrue(text.contains("133;A"));
+            assertTrue(text.contains("redraw=0"));
+            assertTrue(text.contains("133;B"));
+            assertTrue(text.contains("133;C"));
+            assertTrue(text.contains("133;D"));
+        }
     }
 }

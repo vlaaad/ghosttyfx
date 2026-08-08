@@ -1,7 +1,11 @@
 package io.github.vlaaad.ghosttyfx;
 
 import java.io.File;
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -126,14 +130,17 @@ public final class Shell {
     }
 
     private static Launcher integratePowershell(List<String> command, Map<String, String> environment) {
-        var script = ResourceCache.extractZip(Shell.class, "/shell/pwsh.zip").resolve("ghosttyfx.ps1");
-        var integratedCommand = new ArrayList<>(command);
-        integratedCommand.add("-NoExit");
-        integratedCommand.add("-Command");
-        integratedCommand.add(". $env:GHOSTTYFX_PWSH_INTEGRATION");
-
-        environment.put("GHOSTTYFX_PWSH_INTEGRATION", script.toString());
-        return new Launcher(integratedCommand, environment);
+        try (var input = Shell.class.getResourceAsStream("/shell/pwsh/ghosttyfx.ps1")) {
+            var script = new String(input.readAllBytes(), StandardCharsets.UTF_8);
+            var encodedScript = Base64.getEncoder().encodeToString(script.getBytes(StandardCharsets.UTF_16LE));
+            var integratedCommand = new ArrayList<>(command);
+            integratedCommand.add("-NoExit");
+            integratedCommand.add("-EncodedCommand");
+            integratedCommand.add(encodedScript);
+            return new Launcher(integratedCommand, environment);
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
     }
 
     private static Launcher integrateZsh(List<String> command, Map<String, String> environment) {
