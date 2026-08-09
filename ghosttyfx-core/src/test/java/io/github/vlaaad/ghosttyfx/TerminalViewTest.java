@@ -17,6 +17,7 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.io.PipedInputStream;
 import java.io.PipedOutputStream;
+import java.lang.ref.WeakReference;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -28,6 +29,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Pattern;
@@ -1515,6 +1517,65 @@ final class TerminalViewTest {
         }
     }
 
+    @Test
+    void closedViewAndResourcesAreCollected() throws Exception {
+        assertClosedViewAndResourcesAreCollected(new CollectibleTerminalFactory(), false);
+    }
+
+    @Test
+    void inputTaskContinuesAfterTerminalClose() throws Exception {
+        assertClosedViewAndResourcesAreCollected(new CollectibleTerminalFactory(), true);
+    }
+
+    private static void assertClosedViewAndResourcesAreCollected(CollectibleTerminalFactory factory, boolean sendInput) throws Exception {
+        var references = closeUnreferencedView(factory, sendInput);
+
+        await("closed terminal view to be collected", START_TIMEOUT, () -> {
+            System.gc();
+            return references.view().get() == null ? Optional.of(Boolean.TRUE) : Optional.empty();
+        });
+        assertTrue(factory.inputClosed.await(START_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS),
+                "Timed out waiting for terminal input to close");
+        await("closed PTY session to be collected", START_TIMEOUT, () -> {
+            System.gc();
+            return references.ptySession().get() == null ? Optional.of(Boolean.TRUE) : Optional.empty();
+        });
+        await("command queue to be collected", START_TIMEOUT, () -> {
+            System.gc();
+            return references.commands().get() == null ? Optional.of(Boolean.TRUE) : Optional.empty();
+        });
+        await("terminal resources to be collected", START_TIMEOUT, () -> {
+            System.gc();
+            return factory.terminalRef.get() == null ? Optional.of(Boolean.TRUE) : Optional.empty();
+        });
+    }
+
+    private static CollectedReferences closeUnreferencedView(CollectibleTerminalFactory factory, boolean sendInput) throws Exception {
+        var view = runOnFxThread(() -> new TerminalView(factory));
+        var ptySessionField = TerminalView.class.getDeclaredField("ptySession");
+        ptySessionField.setAccessible(true);
+        var ptySession = (PtySession) ptySessionField.get(view);
+        var commandsField = PtySession.class.getDeclaredField("commands");
+        commandsField.setAccessible(true);
+        var commands = (BlockingQueue<?>) commandsField.get(ptySession);
+        assertTrue(factory.opened.await(START_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS),
+                "Timed out waiting for terminal to open");
+        view.close();
+        awaitTerminalClosed(view);
+        if (sendInput) {
+            assertTrue(runOnFxThread(() -> view.sendText("x")));
+            assertTrue(factory.inputFailed.await(START_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS),
+                    "Timed out waiting for terminal input to fail");
+            assertTrue(runOnFxThread(() -> view.sendText("y")));
+            await("input task to continue consuming", START_TIMEOUT, () ->
+                    factory.inputAttempts.get() >= 2 ? Optional.of(Boolean.TRUE) : Optional.empty());
+        }
+        return new CollectedReferences(
+                new WeakReference<>(view),
+                new WeakReference<>(ptySession),
+                new WeakReference<>(commands));
+    }
+
     private static void awaitProcessStop(ProcessHandle handle) throws Exception {
         await("shell process to stop", STOP_TIMEOUT, () -> handle.isAlive() ? Optional.empty() : Optional.of(Boolean.TRUE));
     }
@@ -2020,6 +2081,11 @@ final class TerminalViewTest {
 
     private record ShellCommand(List<String> command) {}
 
+    private record CollectedReferences(
+            WeakReference<TerminalView> view,
+            WeakReference<PtySession> ptySession,
+            WeakReference<BlockingQueue<?>> commands) {}
+
     private static final class ProcessTerminal implements Terminal {
         private final Process process;
 
@@ -2136,6 +2202,61 @@ final class TerminalViewTest {
             if (closeFailure != null) {
                 throw closeFailure;
             }
+        }
+    }
+
+    private static final class CollectibleTerminalFactory implements TerminalFactory {
+        private final CountDownLatch opened = new CountDownLatch(1);
+        private final CountDownLatch terminalClosed = new CountDownLatch(1);
+        private final CountDownLatch inputClosed = new CountDownLatch(1);
+        private final CountDownLatch inputFailed = new CountDownLatch(1);
+        private final AtomicInteger inputAttempts = new AtomicInteger();
+        private volatile WeakReference<Terminal> terminalRef;
+
+        @Override
+        public Terminal open(int columns, int rows) throws IOException {
+            var output = new PipedInputStream();
+            var outputWriter = new PipedOutputStream(output);
+            var input = new OutputStream() {
+                @Override
+                public void write(int value) throws IOException {
+                    inputAttempts.incrementAndGet();
+                    if (terminalClosed.getCount() == 0) {
+                        inputFailed.countDown();
+                        throw new IOException("expected input failure");
+                    }
+                }
+
+                @Override
+                public void close() {
+                    inputClosed.countDown();
+                }
+            };
+            var terminal = new Terminal() {
+                @Override
+                public InputStream output() {
+                    return output;
+                }
+
+                @Override
+                public OutputStream input() {
+                    return input;
+                }
+
+                @Override
+                public void resize(int columns, int rows, int widthPx, int heightPx) {
+                }
+
+                @Override
+                public void close() throws IOException {
+                    terminalClosed.countDown();
+                    outputWriter.close();
+                    output.close();
+                }
+            };
+            terminalRef = new WeakReference<>(terminal);
+            opened.countDown();
+            return terminal;
         }
     }
 

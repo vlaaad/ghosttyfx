@@ -234,12 +234,18 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
         textBlinkTimeline.setCycleCount(Animation.INDEFINITE);
         promptNavigationHighlightTimeline = new Timeline(new KeyFrame(PROMPT_NAVIGATION_HIGHLIGHT_DURATION, _ -> clearPromptNavigationHighlight()));
         var initialFontMetrics = fontMetrics.get();
-        var withView = withView(new WeakReference<>(this));
+        var viewRef = new WeakReference<>(this);
+        var withView = withView(viewRef);
         terminalSession = new TerminalSession(
                 INITIAL_COLUMNS,
                 INITIAL_ROWS,
                 initialFontMetrics,
-                bytes -> writeBytes(bytes),
+                bytes -> {
+                    var view = viewRef.get();
+                    if (view != null) {
+                        view.writeBytes(bytes);
+                    }
+                },
                 newTitle -> withView.accept(view -> view.title.set(newTitle)),
                 newCurrentDirectory -> withView.accept(view -> view.currentDirectory.set(newCurrentDirectory)),
                 notification -> withView.accept(view -> {
@@ -2040,6 +2046,7 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
         @Override
         public void run() {
             try (terminalSession; ptySession) {
+                ptySession.stopInput();
             }
         }
     }

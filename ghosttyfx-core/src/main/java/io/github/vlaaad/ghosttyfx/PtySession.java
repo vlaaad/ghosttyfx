@@ -14,7 +14,6 @@ final class PtySession implements AutoCloseable {
 
     private static final ExecutorService IO = Executors.newThreadPerTaskExecutor(
             Thread.ofPlatform().daemon().name("ghosttyfx-pty-io-", 0).factory());
-    private static final ExecutorService COMMAND_DRAIN = Executors.newVirtualThreadPerTaskExecutor();
 
     private final BlockingQueue<Command> commands = new ArrayBlockingQueue<>(16_384);
     private final BlockingQueue<ProcessOutput> processOutputs = new ArrayBlockingQueue<>(256);
@@ -33,6 +32,11 @@ final class PtySession implements AutoCloseable {
 
     void putCommand(Command command) throws InterruptedException {
         commands.put(command);
+    }
+
+    void stopInput() {
+        commands.clear();
+        commands.add(new Stop());
     }
 
     List<ProcessOutput> pollProcessOutputs() {
@@ -67,18 +71,23 @@ final class PtySession implements AutoCloseable {
                     try (var output = terminal.input()) {
                         while (true) {
                             switch (commands.take()) {
-                                case WriteInput(var bytes) ->
-                                    output.write(bytes);
-                                case ResizePty(var columns, var rows, var widthPx, var heightPx) ->
-                                    terminal.resize(columns, rows, widthPx, heightPx);
+                                case WriteInput(var bytes) -> {
+                                    try {
+                                        output.write(bytes);
+                                    } catch (Exception _) {
+                                    }
+                                }
+                                case ResizePty(var columns, var rows, var widthPx, var heightPx) -> {
+                                    try {
+                                        terminal.resize(columns, rows, widthPx, heightPx);
+                                    } catch (Exception _) {
+                                    }
+                                }
+                                case Stop _ -> {
+                                    return null;
+                                }
                             }
                         }
-                    } catch (Exception _) {
-                        COMMAND_DRAIN.submit(() -> {
-                            while (true) {
-                                commands.take();
-                            }
-                        });
                     }
                 });
                 try {
@@ -99,13 +108,16 @@ final class PtySession implements AutoCloseable {
         processOutputAvailable.accept(this);
     }
 
-    sealed interface Command permits WriteInput, ResizePty {
+    sealed interface Command permits WriteInput, ResizePty, Stop {
     }
 
     record WriteInput(byte[] bytes) implements Command {
     }
 
     record ResizePty(int columns, int rows, int widthPx, int heightPx) implements Command {
+    }
+
+    private record Stop() implements Command {
     }
 
     sealed interface ProcessOutput permits Chunk, Closed {
