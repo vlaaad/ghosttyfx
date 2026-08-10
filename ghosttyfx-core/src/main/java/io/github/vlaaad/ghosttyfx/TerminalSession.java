@@ -46,6 +46,7 @@ import io.github.vlaaad.ghostty.bindings.GhosttyTerminalColorSchemeFn;
 import io.github.vlaaad.ghostty.bindings.GhosttyTerminalDesktopNotification;
 import io.github.vlaaad.ghostty.bindings.GhosttyTerminalDesktopNotificationFn;
 import io.github.vlaaad.ghostty.bindings.GhosttyTerminalDeviceAttributesFn;
+import io.github.vlaaad.ghostty.bindings.GhosttyTerminalModeConfig;
 import io.github.vlaaad.ghostty.bindings.GhosttyTerminalPwdChangedFn;
 import io.github.vlaaad.ghostty.bindings.GhosttyTerminalProgressReport;
 import io.github.vlaaad.ghostty.bindings.GhosttyTerminalProgressReportFn;
@@ -218,9 +219,15 @@ final class TerminalSession implements AutoCloseable {
                             ghostty_vt_h.GHOSTTY_TERMINAL_OPT_SCROLLBACK_MAX_BYTES(),
                             scrollbackLimit),
                     "ghostty_terminal_set(scrollback_max_bytes)");
+            var mode = GhosttyTerminalModeConfig.allocate(arena);
+            GhosttyTerminalModeConfig.mode(mode, GRAPHEME_CLUSTER_MODE);
+            GhosttyTerminalModeConfig.value(mode, true);
             requireGhosttySuccess(
-                    ghostty_vt_h.ghostty_terminal_mode_set(terminal, GRAPHEME_CLUSTER_MODE, true),
-                    "ghostty_terminal_mode_set(grapheme_cluster)");
+                    ghostty_vt_h.ghostty_terminal_set(
+                            terminal,
+                            ghostty_vt_h.GHOSTTY_TERMINAL_OPT_MODE(),
+                            mode),
+                    "ghostty_terminal_set(mode)");
 
             renderState = newAddress(arena, "ghostty_render_state_new", RENDER_STATE_ALLOCATOR);
             rowIterator = newAddress(arena, "ghostty_render_state_row_iterator_new", RENDER_STATE_ROW_ITERATOR_ALLOCATOR);
@@ -1649,9 +1656,13 @@ final class TerminalSession implements AutoCloseable {
 
     boolean readMode(short mode) {
         try (var arena = Arena.ofConfined()) {
-            var value = arena.allocate(ValueLayout.JAVA_BOOLEAN);
-            return ghostty_vt_h.ghostty_terminal_mode_get(terminal, mode, value) == GHOSTTY_SUCCESS
-                    && value.get(ValueLayout.JAVA_BOOLEAN, 0);
+            var config = GhosttyTerminalModeConfig.allocate(arena);
+            GhosttyTerminalModeConfig.mode(config, mode);
+            return ghostty_vt_h.ghostty_terminal_get(
+                            terminal,
+                            ghostty_vt_h.GHOSTTY_TERMINAL_DATA_MODE(),
+                            config) == GHOSTTY_SUCCESS
+                    && GhosttyTerminalModeConfig.value(config);
         }
     }
 
