@@ -255,7 +255,7 @@ final class TerminalViewTest {
     }
 
     @Test
-    void refreshesCachedImageOnSameIdRetransmission() throws Exception {
+    void clearsPlacementsAndRefreshesCachedImageOnSameIdRetransmission() throws Exception {
         var terminal = new ControlledTerminal();
         try (var view = new TerminalView((_, _) -> terminal)) {
             terminal.emit("\u001B[?25l"
@@ -263,6 +263,9 @@ final class TerminalViewTest {
             awaitCellColor(view, 0, 0, Color.RED);
 
             terminal.emit("\u001B_Ga=t,t=d,f=24,i=31,s=1,v=1,q=2;AAD/\u001B\\");
+            awaitCellColor(view, 0, 0, Color.BLACK);
+
+            terminal.emit("\u001B_Ga=p,i=31,p=31,c=1,r=1,C=1,q=2;\u001B\\");
             awaitCellColor(view, 0, 0, Color.BLUE);
         }
     }
