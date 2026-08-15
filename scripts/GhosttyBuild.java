@@ -34,6 +34,7 @@ public final class GhosttyBuild {
     private static final String WORKFLOW_REPO = "vlaaad/ghosttyfx";
     private static final String WORKFLOW_FILE = "build-lib.yml";
     private static final String GHOSTTY_OPTIMIZE = "ReleaseFast";
+    private static final String GHOSTTY_VT_FEATURES = "-snapshot,-color,-glyph-protocol";
     private static final String DOWNLOAD_ARTIFACTS_COMMAND =
         "mvn -N -Pdownload-cross-platform-artifacts exec:exec@download-cross-platform-artifacts";
     private static final HttpClient HTTP = HttpClient.newBuilder()
@@ -536,7 +537,8 @@ public final class GhosttyBuild {
             "-Dtarget=" + platform.zigTarget,
             "-Doptimize=" + GHOSTTY_OPTIMIZE,
             "-Dapp-runtime=none",
-            "-Demit-lib-vt=true"
+            "-Demit-lib-vt=true",
+            "-Dvt-features=" + GHOSTTY_VT_FEATURES
         );
 
         var builtLibrary = repo.resolve(platform.builtLibraryRelativePath);
@@ -799,6 +801,7 @@ public final class GhosttyBuild {
         metadata.setProperty("platform", platform.id);
         metadata.setProperty("ghostty.commit", ghosttyCommit);
         metadata.setProperty("ghostty.optimize", GHOSTTY_OPTIMIZE);
+        metadata.setProperty("ghostty.vtFeatures", GHOSTTY_VT_FEATURES);
         metadata.setProperty("jextract.package", JEXTRACT_TARGET_PACKAGE);
         metadata.setProperty("jextract.headerClass", JEXTRACT_HEADER_CLASS);
         metadata.setProperty("jextract.version", platform.jextract.rootDirName);
@@ -837,6 +840,7 @@ public final class GhosttyBuild {
             && platform.id.equals(metadata.getProperty("platform"))
             && ghosttyCommit.equals(metadata.getProperty("ghostty.commit"))
             && GHOSTTY_OPTIMIZE.equals(metadata.getProperty("ghostty.optimize"))
+            && GHOSTTY_VT_FEATURES.equals(metadata.getProperty("ghostty.vtFeatures"))
             && JEXTRACT_TARGET_PACKAGE.equals(metadata.getProperty("jextract.package"))
             && JEXTRACT_HEADER_CLASS.equals(metadata.getProperty("jextract.headerClass"))
             && platform.jextract.rootDirName.equals(metadata.getProperty("jextract.version"))
@@ -865,6 +869,7 @@ public final class GhosttyBuild {
             && platform.id.equals(metadata.getProperty("platform"))
             && ghosttyCommit.equals(metadata.getProperty("ghostty.commit"))
             && GHOSTTY_OPTIMIZE.equals(metadata.getProperty("ghostty.optimize"))
+            && GHOSTTY_VT_FEATURES.equals(metadata.getProperty("ghostty.vtFeatures"))
             && JEXTRACT_TARGET_PACKAGE.equals(metadata.getProperty("jextract.package"))
             && JEXTRACT_HEADER_CLASS.equals(metadata.getProperty("jextract.headerClass"))
             && platform.jextract.rootDirName.equals(metadata.getProperty("jextract.version"))
