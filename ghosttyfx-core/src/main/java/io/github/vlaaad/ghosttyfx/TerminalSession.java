@@ -33,6 +33,7 @@ import io.github.vlaaad.ghostty.bindings.GhosttyPoint;
 import io.github.vlaaad.ghostty.bindings.GhosttyPointCoordinate;
 import io.github.vlaaad.ghostty.bindings.GhosttyPointValue;
 import io.github.vlaaad.ghostty.bindings.GhosttyRenderStateColors;
+import io.github.vlaaad.ghostty.bindings.GhosttyRenderStateCursor;
 import io.github.vlaaad.ghostty.bindings.GhosttySelection;
 import io.github.vlaaad.ghostty.bindings.GhosttySelectionGestureGeometry;
 import io.github.vlaaad.ghostty.bindings.GhosttySizeReportSize;
@@ -2084,12 +2085,18 @@ final class TerminalSession implements AutoCloseable {
                     && promptNavigationHighlightRow < viewportTop + visibleRows
                             ? promptNavigationHighlightRow - viewportTop
                             : -1;
-            var cursor = cursorInfo(arena);
+            var cursor = renderStateCursor(arena);
+            var cursorX = cursor == null
+                    ? -1
+                    : Short.toUnsignedInt(GhosttyRenderStateCursor.viewport_x(cursor));
+            var cursorY = cursor == null
+                    ? -1
+                    : Short.toUnsignedInt(GhosttyRenderStateCursor.viewport_y(cursor));
             var preeditCellCount = preedit.text().codePointCount(0, preedit.text().length());
             var cursorText = "";
             var cursorBold = false;
             var cursorItalic = false;
-            var hasCursorBlink = focused && cursor != null && cursor.blinking();
+            var hasCursorBlink = focused && cursor != null && GhosttyRenderStateCursor.blinking(cursor);
             var hasTextBlink = false;
 
             var splitCellRendering = false;
@@ -2158,9 +2165,9 @@ final class TerminalSession implements AutoCloseable {
                         var currentSearchMatch = searchMatch == selectedSearchMatch;
                         var preeditCell = cursor != null
                                 && preeditCellCount > 0
-                                && viewportY == cursor.y()
-                                && viewportX >= cursor.x()
-                                && viewportX < cursor.x() + preeditCellCount;
+                                && viewportY == cursorY
+                                && viewportX >= cursorX
+                                && viewportX < cursorX + preeditCellCount;
                         GhosttyBuffer.ptr(graphemeBuffer, graphemeBytes);
                         GhosttyBuffer.cap(graphemeBuffer, graphemeBytesCapacity);
                         GhosttyBuffer.len(graphemeBuffer, 0);
@@ -2288,7 +2295,7 @@ final class TerminalSession implements AutoCloseable {
                                 viewportX++;
                                 continue;
                             }
-                            if (cursor != null && viewportX == cursor.x() && viewportY == cursor.y()) {
+                            if (cursor != null && viewportX == cursorX && viewportY == cursorY) {
                                 cursorText = renderedText;
                                 cursorBold = GhosttyStyle.bold(style);
                                 cursorItalic = GhosttyStyle.italic(style);
@@ -2378,39 +2385,19 @@ final class TerminalSession implements AutoCloseable {
 
     TerminalView.CursorLocation currentCursorLocation(TerminalView.FontMetrics metrics) {
         try (var arena = Arena.ofConfined()) {
-            var cursorVisible = arena.allocate(ValueLayout.JAVA_BOOLEAN);
+            var cursor = GhosttyRenderStateCursor.allocate(arena);
+            GhosttyRenderStateCursor.size(cursor, GhosttyRenderStateCursor.sizeof());
             if (ghostty_vt_h.ghostty_render_state_get(
                     renderState,
-                    ghostty_vt_h.GHOSTTY_RENDER_STATE_DATA_CURSOR_VISIBLE(),
-                    cursorVisible) != GHOSTTY_SUCCESS
-                    || !cursorVisible.get(ValueLayout.JAVA_BOOLEAN, 0)) {
+                    ghostty_vt_h.GHOSTTY_RENDER_STATE_DATA_CURSOR(),
+                    cursor) != GHOSTTY_SUCCESS
+                    || !GhosttyRenderStateCursor.visible(cursor)
+                    || !GhosttyRenderStateCursor.viewport_has_value(cursor)) {
                 return null;
             }
 
-            var cursorInViewport = arena.allocate(ValueLayout.JAVA_BOOLEAN);
-            if (ghostty_vt_h.ghostty_render_state_get(
-                    renderState,
-                    ghostty_vt_h.GHOSTTY_RENDER_STATE_DATA_CURSOR_VIEWPORT_HAS_VALUE(),
-                    cursorInViewport) != GHOSTTY_SUCCESS
-                    || !cursorInViewport.get(ValueLayout.JAVA_BOOLEAN, 0)) {
-                return null;
-            }
-
-            var cursorX = arena.allocate(ValueLayout.JAVA_SHORT);
-            var cursorY = arena.allocate(ValueLayout.JAVA_SHORT);
-            if (ghostty_vt_h.ghostty_render_state_get(
-                    renderState,
-                    ghostty_vt_h.GHOSTTY_RENDER_STATE_DATA_CURSOR_VIEWPORT_X(),
-                    cursorX) != GHOSTTY_SUCCESS
-                    || ghostty_vt_h.ghostty_render_state_get(
-                            renderState,
-                            ghostty_vt_h.GHOSTTY_RENDER_STATE_DATA_CURSOR_VIEWPORT_Y(),
-                            cursorY) != GHOSTTY_SUCCESS) {
-                return null;
-            }
-
-            var cellX = Short.toUnsignedInt(cursorX.get(ValueLayout.JAVA_SHORT, 0));
-            var cellY = Short.toUnsignedInt(cursorY.get(ValueLayout.JAVA_SHORT, 0));
+            var cellX = Short.toUnsignedInt(GhosttyRenderStateCursor.viewport_x(cursor));
+            var cellY = Short.toUnsignedInt(GhosttyRenderStateCursor.viewport_y(cursor));
             return new TerminalView.CursorLocation(
                     cellX,
                     cellY,
@@ -3353,15 +3340,15 @@ final class TerminalSession implements AutoCloseable {
             GraphicsContext graphics,
             TerminalView.FontMetrics metrics,
             KeyInput.Preedit preedit,
-            CursorInfo cursor,
+            MemorySegment cursor,
             TerminalTheme theme) {
         if (cursor == null || preedit.text().isEmpty()) {
             return;
         }
 
         var codePointCount = preedit.text().codePointCount(0, preedit.text().length());
-        var x = cursor.x() * (double) metrics.cellWidthPx();
-        var y = cursor.y() * (double) metrics.cellHeightPx();
+        var x = Short.toUnsignedInt(GhosttyRenderStateCursor.viewport_x(cursor)) * (double) metrics.cellWidthPx();
+        var y = Short.toUnsignedInt(GhosttyRenderStateCursor.viewport_y(cursor)) * (double) metrics.cellHeightPx();
         graphics.setFont(metrics.regular());
         graphics.setFill(theme.foreground());
         graphics.fillText(preedit.text(), x, y + metrics.baselineOffsetPx());
@@ -3386,25 +3373,27 @@ final class TerminalSession implements AutoCloseable {
             boolean focused,
             TerminalTheme theme,
             boolean blinkVisible,
-            CursorInfo cursor,
+            MemorySegment cursor,
             String cursorText,
             boolean cursorBold,
             boolean cursorItalic) {
         if (cursor == null) {
             return;
         }
-        if (focused && cursor.blinking() && !blinkVisible) {
+        if (focused && GhosttyRenderStateCursor.blinking(cursor) && !blinkVisible) {
             return;
         }
 
         var cursorColor = GhosttyRenderStateColors.cursor_has_value(colors)
                 ? toFxColor(GhosttyRenderStateColors.cursor(colors))
                 : theme.cursorColor();
-        var cursorPixelX = cursor.x() * (double) metrics.cellWidthPx();
-        var cursorPixelY = cursor.y() * (double) metrics.cellHeightPx();
+        var cursorPixelX = Short.toUnsignedInt(GhosttyRenderStateCursor.viewport_x(cursor)) * (double) metrics.cellWidthPx();
+        var cursorPixelY = Short.toUnsignedInt(GhosttyRenderStateCursor.viewport_y(cursor)) * (double) metrics.cellHeightPx();
         var cursorWidth = metrics.cellWidthPx();
         var cursorHeight = metrics.cellHeightPx();
-        var cursorStyle = focused ? cursor.style() : CURSOR_STYLE_BLOCK_HOLLOW;
+        var cursorStyle = focused
+                ? GhosttyRenderStateCursor.visual_style(cursor)
+                : CURSOR_STYLE_BLOCK_HOLLOW;
 
         switch (cursorStyle) {
             case CURSOR_STYLE_BAR -> {
@@ -3445,62 +3434,21 @@ final class TerminalSession implements AutoCloseable {
                 "ghostty_render_state_update");
     }
 
-    private CursorInfo cursorInfo(Arena arena) {
-        var cursorVisible = arena.allocate(ValueLayout.JAVA_BOOLEAN);
+    private MemorySegment renderStateCursor(Arena arena) {
+        var cursor = GhosttyRenderStateCursor.allocate(arena);
+        GhosttyRenderStateCursor.size(cursor, GhosttyRenderStateCursor.sizeof());
         requireGhosttySuccess(
                 ghostty_vt_h.ghostty_render_state_get(
                         renderState,
-                        ghostty_vt_h.GHOSTTY_RENDER_STATE_DATA_CURSOR_VISIBLE(),
-                        cursorVisible),
-                "ghostty_render_state_get(cursor_visible)");
-        if (!cursorVisible.get(ValueLayout.JAVA_BOOLEAN, 0)) {
+                        ghostty_vt_h.GHOSTTY_RENDER_STATE_DATA_CURSOR(),
+                        cursor),
+                "ghostty_render_state_get(cursor)");
+        if (!GhosttyRenderStateCursor.visible(cursor)
+                || !GhosttyRenderStateCursor.viewport_has_value(cursor)) {
             return null;
         }
 
-        var cursorInViewport = arena.allocate(ValueLayout.JAVA_BOOLEAN);
-        requireGhosttySuccess(
-                ghostty_vt_h.ghostty_render_state_get(
-                        renderState,
-                        ghostty_vt_h.GHOSTTY_RENDER_STATE_DATA_CURSOR_VIEWPORT_HAS_VALUE(),
-                        cursorInViewport),
-                "ghostty_render_state_get(cursor_viewport_has_value)");
-        if (!cursorInViewport.get(ValueLayout.JAVA_BOOLEAN, 0)) {
-            return null;
-        }
-
-        var cursorX = arena.allocate(ValueLayout.JAVA_SHORT);
-        var cursorY = arena.allocate(ValueLayout.JAVA_SHORT);
-        var cursorStyle = arena.allocate(ValueLayout.JAVA_INT);
-        var cursorBlinking = arena.allocate(ValueLayout.JAVA_BOOLEAN);
-        requireGhosttySuccess(
-                ghostty_vt_h.ghostty_render_state_get(
-                        renderState,
-                        ghostty_vt_h.GHOSTTY_RENDER_STATE_DATA_CURSOR_VIEWPORT_X(),
-                        cursorX),
-                "ghostty_render_state_get(cursor_viewport_x)");
-        requireGhosttySuccess(
-                ghostty_vt_h.ghostty_render_state_get(
-                        renderState,
-                        ghostty_vt_h.GHOSTTY_RENDER_STATE_DATA_CURSOR_VIEWPORT_Y(),
-                        cursorY),
-                "ghostty_render_state_get(cursor_viewport_y)");
-        requireGhosttySuccess(
-                ghostty_vt_h.ghostty_render_state_get(
-                        renderState,
-                        ghostty_vt_h.GHOSTTY_RENDER_STATE_DATA_CURSOR_VISUAL_STYLE(),
-                        cursorStyle),
-                "ghostty_render_state_get(cursor_visual_style)");
-        requireGhosttySuccess(
-                ghostty_vt_h.ghostty_render_state_get(
-                        renderState,
-                        ghostty_vt_h.GHOSTTY_RENDER_STATE_DATA_CURSOR_BLINKING(),
-                        cursorBlinking),
-                "ghostty_render_state_get(cursor_blinking)");
-        return new CursorInfo(
-                Short.toUnsignedInt(cursorX.get(ValueLayout.JAVA_SHORT, 0)),
-                Short.toUnsignedInt(cursorY.get(ValueLayout.JAVA_SHORT, 0)),
-                cursorStyle.get(ValueLayout.JAVA_INT, 0),
-                cursorBlinking.get(ValueLayout.JAVA_BOOLEAN, 0));
+        return cursor;
     }
 
     private static MemorySegment newAddress(Arena arena, String operation, Allocator allocator) {
@@ -3686,10 +3634,6 @@ final class TerminalSession implements AutoCloseable {
         static BlinkState none() {
             return new BlinkState(false, false);
         }
-
-    }
-
-    private record CursorInfo(int x, int y, int style, boolean blinking) {
 
     }
 
