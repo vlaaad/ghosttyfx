@@ -2037,8 +2037,11 @@ final class TerminalSession implements AutoCloseable {
             var colors = GhosttyRenderStateColors.allocate(arena);
             GhosttyRenderStateColors.size(colors, GhosttyRenderStateColors.sizeof());
             requireGhosttySuccess(
-                    ghostty_vt_h.ghostty_render_state_colors_get(renderState, colors),
-                    "ghostty_render_state_colors_get");
+                    ghostty_vt_h.ghostty_render_state_get(
+                            renderState,
+                            ghostty_vt_h.GHOSTTY_RENDER_STATE_DATA_COLORS(),
+                            colors),
+                    "ghostty_render_state_get(colors)");
 
             var defaultBackground = toFxColor(GhosttyRenderStateColors.background(colors));
             graphics.setFill(defaultBackground);
