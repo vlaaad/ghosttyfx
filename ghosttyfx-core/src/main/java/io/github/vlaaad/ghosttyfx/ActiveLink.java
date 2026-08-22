@@ -1,6 +1,6 @@
 package io.github.vlaaad.ghosttyfx;
 
-record ActiveLink(Target target, Selection selection, Runnable action) {
+record ActiveLink(Target target, Selection selection, Runnable action, TerminalLink terminalLink) {
     boolean sameTarget(ActiveLink other) {
         return other != null && target.equals(other.target) && selection.equals(other.selection);
     }

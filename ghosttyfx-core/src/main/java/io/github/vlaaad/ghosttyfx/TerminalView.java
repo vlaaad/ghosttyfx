@@ -100,6 +100,7 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
     private MouseInput.State mouseInputState = MouseInput.initialState();
     private SelectionDrag selectionDrag;
     private ActiveLink hoveredLink;
+    private final ReadOnlyObjectWrapper<TerminalLink> hoveredTerminalLink = new ReadOnlyObjectWrapper<>(this, "hoveredTerminalLink", null);
     private int promptNavigationRow = -1;
     private int promptNavigationHighlightRow = -1;
     private boolean cursorBlinkVisible = true;
@@ -133,6 +134,12 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
     };
     private final BooleanProperty macOptionAsAlt = new SimpleBooleanProperty(this, "macOptionAsAlt", false);
     private final ObservableList<TerminalShortcut> terminalShortcuts = FXCollections.observableArrayList();
+    private final ObjectProperty<Consumer<String>> osc8LinkAction = new SimpleObjectProperty<>(this, "osc8LinkAction", TerminalView::openHyperlink) {
+        @Override
+        public void set(Consumer<String> value) {
+            super.set(Objects.requireNonNull(value, "osc8LinkAction"));
+        }
+    };
     private final ObservableList<TerminalLinkMatcher> linkMatchers = FXCollections.observableArrayList();
     private final ReadOnlyObjectWrapper<TerminalState> terminalState =
             new ReadOnlyObjectWrapper<>(this, "terminalState", new TerminalState.Running());
@@ -537,6 +544,46 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
     /// @return the mutable terminal shortcut list
     public ObservableList<TerminalShortcut> getTerminalShortcuts() {
         return terminalShortcuts;
+    }
+
+    /// Returns the OSC 8 link action handler.
+    ///
+    /// This handler is invoked when the user activates an OSC 8 hyperlink.
+    /// The default handler opens the URI in the system browser.
+    ///
+    /// @return the OSC 8 link action handler
+    public Consumer<String> getOsc8LinkAction() {
+        return osc8LinkAction.get();
+    }
+
+    /// Sets the OSC 8 link action handler.
+    ///
+    /// @param action the handler that receives the hyperlink URI
+    /// @throws NullPointerException if {@code action} is {@code null}
+    public void setOsc8LinkAction(Consumer<String> action) {
+        osc8LinkAction.set(action);
+    }
+
+    /// The OSC 8 link action property.
+    ///
+    /// @return the OSC 8 link action property
+    public ObjectProperty<Consumer<String>> osc8LinkActionProperty() {
+        return osc8LinkAction;
+    }
+
+    /// Returns the currently hovered terminal link, or {@code null} if no link is hovered.
+    ///
+    /// @return the hovered terminal link, or {@code null}
+    public TerminalLink getHoveredTerminalLink() {
+        return hoveredTerminalLink.get();
+    }
+
+    /// The hovered terminal link property. Becomes non-null when the mouse hovers over a link
+    /// and returns to {@code null} when the mouse leaves.
+    ///
+    /// @return the read-only hovered terminal link property
+    public ReadOnlyObjectProperty<TerminalLink> hoveredTerminalLinkProperty() {
+        return hoveredTerminalLink.getReadOnlyProperty();
     }
 
     /// Returns the terminal link matchers.
@@ -1206,7 +1253,7 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
             if (selection.isEmpty()) {
                 return null;
             }
-            return new ActiveLink(new ActiveLink.Osc8(hit.hyperlinkUri()), selection, () -> openHyperlink(hit.hyperlinkUri()));
+            return new ActiveLink(new ActiveLink.Osc8(hit.hyperlinkUri()), selection, () -> getOsc8LinkAction().accept(hit.hyperlinkUri()), new TerminalLink.Osc8(hit.hyperlinkUri()));
         }
 
         var match = terminalSession.linkMatcherAt(hit.screenPoint(), getLinkMatchers());
@@ -1217,7 +1264,8 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
         return new ActiveLink(
                 new ActiveLink.Regex(match.index(), match.match().group()),
                 match.selection(),
-                () -> match.link().action().accept(match.match()));
+                () -> match.link().action().accept(match.match()),
+                new TerminalLink.Regex(match.link(), match.match()));
     }
 
     private void refreshHover(MouseEvent event) {
@@ -1250,6 +1298,7 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
 
         if (hoveredLink == null || !hoveredLink.sameTarget(nextHover)) {
             hoveredLink = nextHover;
+            hoveredTerminalLink.set(nextHover == null ? null : nextHover.terminalLink());
             redraw();
         }
         setCursor(Cursor.HAND);
@@ -1274,6 +1323,7 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
     private void clearHover(boolean redraw) {
         var changed = hoveredLink != null || getCursor() != Cursor.DEFAULT;
         hoveredLink = null;
+        hoveredTerminalLink.set(null);
         setCursor(Cursor.DEFAULT);
         if (changed && redraw) {
             redraw();
