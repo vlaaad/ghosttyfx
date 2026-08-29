@@ -99,7 +99,10 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
     private KeyInput.State keyInputState = KeyInput.initialState();
     private MouseInput.State mouseInputState = MouseInput.initialState();
     private SelectionDrag selectionDrag;
-    private ActiveLink hoveredLink;
+    private PointerPosition pointerPosition;
+    private ActiveLink hoveredActiveLink;
+    private ActiveLink renderedHoveredLink;
+    private final ReadOnlyObjectWrapper<TerminalLink> hoveredLink = new ReadOnlyObjectWrapper<>(this, "hoveredLink", null);
     private int promptNavigationRow = -1;
     private int promptNavigationHighlightRow = -1;
     private boolean cursorBlinkVisible = true;
@@ -133,6 +136,12 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
     };
     private final BooleanProperty macOptionAsAlt = new SimpleBooleanProperty(this, "macOptionAsAlt", false);
     private final ObservableList<TerminalShortcut> terminalShortcuts = FXCollections.observableArrayList();
+    private final ObjectProperty<Consumer<String>> osc8LinkAction = new SimpleObjectProperty<>(this, "osc8LinkAction", TerminalView::openHyperlink) {
+        @Override
+        public void set(Consumer<String> value) {
+            super.set(Objects.requireNonNull(value, "osc8LinkAction"));
+        }
+    };
     private final ObservableList<TerminalLinkMatcher> linkMatchers = FXCollections.observableArrayList();
     private final ReadOnlyObjectWrapper<TerminalState> terminalState =
             new ReadOnlyObjectWrapper<>(this, "terminalState", new TerminalState.Running());
@@ -302,6 +311,7 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
         });
         linkMatchers.addListener((ListChangeListener<TerminalLinkMatcher>) _ -> {
             terminalSession.clearLinkCache();
+            refreshHover(false);
             redraw();
         });
         cursorBlinking.addListener((_, _, value) -> {
@@ -539,6 +549,46 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
         return terminalShortcuts;
     }
 
+    /// Returns the OSC 8 link action handler.
+    ///
+    /// This handler is invoked when the user activates an OSC 8 hyperlink.
+    /// The default handler opens the URI in the system browser.
+    ///
+    /// @return the OSC 8 link action handler
+    public Consumer<String> getOsc8LinkAction() {
+        return osc8LinkAction.get();
+    }
+
+    /// Sets the OSC 8 link action handler.
+    ///
+    /// @param action the handler that receives the hyperlink URI
+    /// @throws NullPointerException if {@code action} is {@code null}
+    public void setOsc8LinkAction(Consumer<String> action) {
+        osc8LinkAction.set(action);
+    }
+
+    /// The OSC 8 link action property.
+    ///
+    /// @return the OSC 8 link action property
+    public ObjectProperty<Consumer<String>> osc8LinkActionProperty() {
+        return osc8LinkAction;
+    }
+
+    /// Returns the currently hovered terminal link, or {@code null} if no link is hovered.
+    ///
+    /// @return the hovered terminal link, or {@code null}
+    public TerminalLink getHoveredLink() {
+        return hoveredLink.get();
+    }
+
+    /// The hovered terminal link property. Becomes non-null when the mouse hovers over a link
+    /// and returns to {@code null} when the mouse leaves.
+    ///
+    /// @return the read-only hovered terminal link property
+    public ReadOnlyObjectProperty<TerminalLink> hoveredLinkProperty() {
+        return hoveredLink.getReadOnlyProperty();
+    }
+
     /// Returns the terminal link matchers.
     ///
     /// The list is mutable. Matchers are tried in list order. The default list
@@ -703,6 +753,7 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
                 outputScaleX.getValue().doubleValue(),
                 outputScaleY.getValue().doubleValue());
         if (size == null) {
+            refreshHover(true);
             return;
         }
 
@@ -715,6 +766,7 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
                 size.rows(),
                 size.widthPx(),
                 size.heightPx()));
+        refreshHover(false);
         if (searchUi.visible()) {
             searchUi.refresh(false);
             return;
@@ -726,6 +778,7 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
         if (!focused) {
             var nextKeyInputState = KeyInput.onFocusLost(keyInputState);
             var nextMouseInputState = MouseInput.onFocusLost(mouseInputState);
+            pointerPosition = null;
             clearHover(false);
             terminalSession.resetSelectionGesture();
             stopSelectionAutoscroll();
@@ -791,6 +844,8 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
     private void handleMousePressed(MouseEvent event) {
         requestFocus();
         event.consume();
+        pointerPosition = new PointerPosition(event.getX(), event.getY());
+        refreshHover(false);
         if (event.getButton() == MouseButton.PRIMARY && isInScrollbar(event.getX())) {
             handleScrollbarPress(event.getY());
             return;
@@ -824,7 +879,7 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
                 TerminalSession.MouseButton.LEFT,
                 hit.screenPoint(),
                 activeLink(hit)));
-        clearHover(false);
+        clearRenderedHover(false);
         selectionDrag = null;
         terminalSession.selectionGesturePress(hit, event.getX(), event.getY(), fontMetrics.get());
         updateSelectionAutoscroll();
@@ -833,6 +888,8 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
 
     private void handleMouseDragged(MouseEvent event) {
         event.consume();
+        pointerPosition = new PointerPosition(event.getX(), event.getY());
+        refreshHover(false);
         if (mouseInputState.scrollbarDragging()) {
             if (!event.isPrimaryButtonDown()) {
                 stopScrollbarDrag();
@@ -846,7 +903,6 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
 
         if (isMouseTrackingEnabled() && !isInScrollbar(event.getX())) {
             setScrollbarHovered(false);
-            clearHover(true);
             writeReportedMouseMotion(event);
             return;
         }
@@ -858,11 +914,11 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
 
         var hit = selectionHit(event);
         if (hit == null) {
-            clearHover(true);
+            clearRenderedHover(true);
             return;
         }
 
-        clearHover(false);
+        clearRenderedHover(false);
         var rectangle = isRectangleSelection(event);
         selectionDrag = new SelectionDrag(event.getX(), event.getY(), rectangle);
         terminalSession.selectionGestureDrag(hit, event.getX(), event.getY(), rectangle, fontMetrics.get(), getHeight());
@@ -872,18 +928,17 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
 
     private void handleMouseMoved(MouseEvent event) {
         event.consume();
+        refreshHover(event);
         if (isMouseTrackingEnabled() && !isInScrollbar(event.getX())) {
             setScrollbarHovered(false);
-            clearHover(true);
             writeReportedMouseMotion(event);
             return;
         }
-
-        refreshHover(event);
     }
 
     private void handleMouseReleased(MouseEvent event) {
         event.consume();
+        pointerPosition = new PointerPosition(event.getX(), event.getY());
         stopScrollbarDrag();
 
         if (isMouseTrackingEnabled() && !isInScrollbar(event.getX())) {
@@ -923,6 +978,7 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
 
     private void handleMouseExited(MouseEvent event) {
         event.consume();
+        pointerPosition = null;
         setScrollbarHovered(false);
         clearHover(true);
         if (isMouseTrackingEnabled() && anyMouseButtonDown(event)) {
@@ -946,6 +1002,8 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
 
     private void handleScroll(ScrollEvent event) {
         event.consume();
+        pointerPosition = new PointerPosition(event.getX(), event.getY());
+        refreshHover(false);
         var overContent = !isInScrollbar(event.getX());
         var discrete = isDiscreteWheelScroll(mouseInputState.scrollGestureActive(), event);
         if (discrete) {
@@ -1041,6 +1099,7 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
         if (wroteToPty) {
             clearSelection();
             terminalSession.scrollViewportToBottom();
+            refreshHover(false);
             redraw();
         }
         return wroteToPty;
@@ -1079,6 +1138,7 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
     private void scrollViewportTo(long row) {
         promptNavigationRow = -1;
         terminalSession.scrollViewportTo(row);
+        refreshHover(false);
         redraw();
     }
 
@@ -1089,6 +1149,7 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
 
         promptNavigationRow = -1;
         terminalSession.scrollViewportBy(deltaRows);
+        refreshHover(false);
         redraw();
     }
 
@@ -1181,9 +1242,13 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
     }
 
     private TerminalSession.CellHit contentHit(MouseEvent event) {
+        return contentHit(event.getX(), event.getY());
+    }
+
+    private TerminalSession.CellHit contentHit(double x, double y) {
         return terminalSession.hitTest(
-                event.getX(),
-                event.getY(),
+                x,
+                y,
                 getWidth(),
                 getHeight(),
                 fontMetrics.get(),
@@ -1206,7 +1271,10 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
             if (selection.isEmpty()) {
                 return null;
             }
-            return new ActiveLink(new ActiveLink.Osc8(hit.hyperlinkUri()), selection, () -> openHyperlink(hit.hyperlinkUri()));
+            return new ActiveLink(
+                    new TerminalLink.Osc8(hit.hyperlinkUri()),
+                    selection,
+                    () -> getOsc8LinkAction().accept(hit.hyperlinkUri()));
         }
 
         var match = terminalSession.linkMatcherAt(hit.screenPoint(), getLinkMatchers());
@@ -1215,44 +1283,54 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
         }
 
         return new ActiveLink(
-                new ActiveLink.Regex(match.index(), match.match().group()),
+                new TerminalLink.Regex(match.link(), match.match()),
                 match.selection(),
                 () -> match.link().action().accept(match.match()));
     }
 
     private void refreshHover(MouseEvent event) {
+        pointerPosition = new PointerPosition(event.getX(), event.getY());
+        refreshHover(true);
+    }
+
+    private void refreshHover(boolean redraw) {
+        var pointer = pointerPosition;
         var scrollbar = scrollbarInfo();
-        setScrollbarHovered(isInScrollbar(event.getX())
-                && event.getY() >= 0
-                && event.getY() <= getHeight()
+        setScrollbarHovered(pointer != null
+                && isInScrollbar(pointer.x())
+                && pointer.y() >= 0
+                && pointer.y() <= getHeight()
                 && scrollbar != null
                 && scrollbar.scrollable());
-        var pressGesture = mouseInputState.pressGesture();
-        if (pressGesture != null && pressGesture.button() == TerminalSession.MouseButton.LEFT) {
-            var hit = contentHit(event);
-            if (hit == null || !pressGesture.anchor().equals(hit.screenPoint())) {
-                clearHover(true);
-                return;
+
+        ActiveLink nextHover = null;
+        if (pointer != null && !(isMouseTrackingEnabled() && !isInScrollbar(pointer.x()))) {
+            var hit = contentHit(pointer.x(), pointer.y());
+            if (hit != null) {
+                nextHover = activeLink(hit);
             }
         }
 
-        var hit = contentHit(event);
-        if (hit == null) {
-            clearHover(true);
-            return;
+        if (!sameTarget(hoveredActiveLink, nextHover)) {
+            hoveredActiveLink = nextHover;
+            hoveredLink.set(nextHover == null ? null : nextHover.terminalLink());
         }
 
-        var nextHover = activeLink(hit);
-        if (nextHover == null) {
-            clearHover(true);
-            return;
-        }
-
-        if (hoveredLink == null || !hoveredLink.sameTarget(nextHover)) {
-            hoveredLink = nextHover;
+        var pressGesture = mouseInputState.pressGesture();
+        var suppressRendering = mouseInputState.scrollbarDragging()
+                || pressGesture != null && pressGesture.button() == TerminalSession.MouseButton.LEFT;
+        var nextRenderedHover = suppressRendering ? null : hoveredActiveLink;
+        var changed = !sameTarget(renderedHoveredLink, nextRenderedHover)
+                || getCursor() != (nextRenderedHover == null ? Cursor.DEFAULT : Cursor.HAND);
+        renderedHoveredLink = nextRenderedHover;
+        setCursor(nextRenderedHover == null ? Cursor.DEFAULT : Cursor.HAND);
+        if (changed && redraw) {
             redraw();
         }
-        setCursor(Cursor.HAND);
+    }
+
+    private static boolean sameTarget(ActiveLink link, ActiveLink other) {
+        return link == null ? other == null : link.sameTarget(other);
     }
 
     private void setScrollbarHovered(boolean scrollbarHovered) {
@@ -1272,8 +1350,19 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
     }
 
     private void clearHover(boolean redraw) {
-        var changed = hoveredLink != null || getCursor() != Cursor.DEFAULT;
-        hoveredLink = null;
+        var changed = hoveredActiveLink != null || renderedHoveredLink != null || getCursor() != Cursor.DEFAULT;
+        hoveredActiveLink = null;
+        hoveredLink.set(null);
+        renderedHoveredLink = null;
+        setCursor(Cursor.DEFAULT);
+        if (changed && redraw) {
+            redraw();
+        }
+    }
+
+    private void clearRenderedHover(boolean redraw) {
+        var changed = renderedHoveredLink != null || getCursor() != Cursor.DEFAULT;
+        renderedHoveredLink = null;
         setCursor(Cursor.DEFAULT);
         if (changed && redraw) {
             redraw();
@@ -1393,25 +1482,28 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
 
     private static void openHyperlink(String hyperlinkUri) {
         try {
-            if (Desktop.isDesktopSupported() && Desktop.getDesktop().isSupported(Desktop.Action.BROWSE)) {
-                Desktop.getDesktop().browse(URI.create(hyperlinkUri));
-            }
+            openHyperlink(URI.create(hyperlinkUri));
         } catch (Exception _) {
         }
     }
 
+    private static void openHyperlink(URI hyperlinkUri) {
+        Thread.ofPlatform().daemon().name("ghosttyfx-open-hyperlink").start(() -> {
+            try {
+                if (Desktop.isDesktopSupported() && Desktop.getDesktop().isSupported(Desktop.Action.BROWSE)) {
+                    Desktop.getDesktop().browse(hyperlinkUri);
+                }
+            } catch (Exception _) {
+            }
+        });
+    }
+
     private static void openBuiltInWebPageUrl(String text) {
         try {
-            if (!Desktop.isDesktopSupported()) {
-                return;
-            }
-
-            var desktop = Desktop.getDesktop();
             var uri = URI.create(text);
             var scheme = uri.getScheme();
-            if (("http".equalsIgnoreCase(scheme) || "https".equalsIgnoreCase(scheme))
-                    && desktop.isSupported(Desktop.Action.BROWSE)) {
-                desktop.browse(uri);
+            if ("http".equalsIgnoreCase(scheme) || "https".equalsIgnoreCase(scheme)) {
+                openHyperlink(uri);
             }
         } catch (Exception _) {
         }
@@ -1497,6 +1589,7 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
         }
         clearSelection();
         terminalSession.scrollViewportToBottom();
+        refreshHover(false);
         redraw();
         return true;
     }
@@ -1505,7 +1598,7 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
     ///
     /// @return `true`
     public boolean selectAll() {
-        clearHover(false);
+        clearRenderedHover(false);
         terminalSession.selectAll();
         redraw();
         return true;
@@ -1856,7 +1949,7 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
         }
 
         terminalSession.adjustSelection(adjustment);
-        clearHover(false);
+        clearRenderedHover(false);
         scrollSelectionFocusIntoView();
         redraw();
         return true;
@@ -1884,7 +1977,7 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
 
     private void clearSelection() {
         if (terminalSession.clearSelection()) {
-            clearHover(false);
+            clearRenderedHover(false);
             terminalSession.resetSelectionGesture();
             stopSelectionAutoscroll();
             redraw();
@@ -1926,6 +2019,7 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
         if (wroteToPty) {
             resetCursorBlink();
             terminalSession.scrollViewportToBottom();
+            refreshHover(false);
         }
 
         var redraw = transition.redraw()
@@ -1960,7 +2054,7 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
                 height,
                 fontMetrics.get(),
                 keyInputState.preedit(),
-                hoveredLink == null ? Selection.empty() : hoveredLink.selection(),
+                renderedHoveredLink == null ? Selection.empty() : renderedHoveredLink.selection(),
                 getLinkMatchers(),
                 searchUi.visible() ? searchUi.result() : TerminalSession.SearchResult.empty(),
                 searchUi.visible() ? searchUi.selectedMatch() : -1,
@@ -2100,6 +2194,7 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
                 terminal.resetCursorBlink();
                 terminal.resetPromptNavigation();
                 terminal.terminalSession.writeToTerminal(bytes);
+                terminal.refreshHover(false);
                 redrawPending = true;
             }
 
@@ -2234,6 +2329,10 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
     }
 
     private record SelectionDrag(double x, double y, boolean rectangle) {
+
+    }
+
+    private record PointerPosition(double x, double y) {
 
     }
 
