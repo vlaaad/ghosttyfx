@@ -60,6 +60,8 @@ import javafx.scene.text.FontPosture;
 import javafx.scene.text.FontWeight;
 import javafx.scene.text.Text;
 import javafx.scene.text.TextBoundsType;
+import javafx.scene.AccessibleAttribute;
+import javafx.scene.AccessibleRole;
 import javafx.stage.Window;
 import javafx.util.Duration;
 
@@ -278,6 +280,7 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
         linkMatchers.addAll(defaultLinkMatchers());
 
         setFocusTraversable(true);
+        setAccessibleRole(AccessibleRole.TEXT_AREA);
         searchUi = new SearchUi(
                 terminalSession,
                 font,
@@ -732,6 +735,19 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
         ptySession.close();
     }
 
+    @Override
+    public Object queryAccessibleAttribute(AccessibleAttribute attribute, Object... parameters) {
+        return switch (attribute) {
+            case SELECTED_TEXT -> terminalSession.hasSelection() ? selectedText() : "";
+            case TEXT -> terminalSession.hasSelection() ? selectedText() : "";
+            default -> super.queryAccessibleAttribute(attribute, parameters);
+        };
+    }
+
+    private void notifySelectionChanged() {
+        notifyAccessibleAttributeChanged(AccessibleAttribute.SELECTED_TEXT);
+    }
+
     private void scheduleOutputScaleResize() {
         if (outputScaleResizeScheduled) {
             return;
@@ -965,6 +981,7 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
 
         var hit = contentHit(event);
         terminalSession.selectionGestureRelease(hit);
+        notifySelectionChanged();
         if (terminalSession.selectionGestureClickCount() == 1
                 && !terminalSession.selectionGestureDragged()
                 && hit != null
@@ -2022,17 +2039,24 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
             refreshHover(false);
         }
 
+        var selectionChanged = hadSelection != terminalSession.hasSelection();
         var redraw = transition.redraw()
                 || wroteToPty
-                || hadSelection != terminalSession.hasSelection()
+                || selectionChanged
                 || !previousKeyInputState.preedit().equals(keyInputState.preedit());
         if (redraw) {
             redraw();
         }
-        return wroteToPty || redraw || !previousKeyInputState.equals(keyInputState) || hadSelection != terminalSession.hasSelection();
+        if (selectionChanged) {
+            notifySelectionChanged();
+        }
+        return wroteToPty || redraw || !previousKeyInputState.equals(keyInputState) || selectionChanged;
     }
 
-    private String selectedText() {
+    /// Returns the currently selected text, or an empty string if there is no selection.
+    ///
+    /// @return the selected text
+    public String selectedText() {
         return terminalSession.selectedText();
     }
 
