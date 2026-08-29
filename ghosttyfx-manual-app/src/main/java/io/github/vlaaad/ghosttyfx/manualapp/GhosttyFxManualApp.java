@@ -1,6 +1,7 @@
 package io.github.vlaaad.ghosttyfx.manualapp;
 
 import io.github.vlaaad.ghosttyfx.Shell;
+import io.github.vlaaad.ghosttyfx.TerminalLink;
 import io.github.vlaaad.ghosttyfx.TerminalState;
 import io.github.vlaaad.ghosttyfx.TerminalTheme;
 import io.github.vlaaad.ghosttyfx.TerminalView;
@@ -24,6 +25,7 @@ import javafx.scene.control.Alert;
 import javafx.scene.control.Button;
 import javafx.scene.control.CheckBox;
 import javafx.scene.control.ComboBox;
+import javafx.scene.control.Label;
 import javafx.scene.control.Tab;
 import javafx.scene.control.TabPane;
 import javafx.scene.control.TextField;
@@ -60,6 +62,12 @@ public final class GhosttyFxManualApp {
             var cursorBlinking = new CheckBox("Cursor blink");
             cursorBlinking.setSelected(true);
             var tabs = new TabPane();
+            var hoveredLink = new Label();
+            hoveredLink.textProperty().bind(tabs.getSelectionModel().selectedItemProperty()
+                    .flatMap(tab -> ((TerminalView) tab.getContent()).hoveredLinkProperty())
+                    .map(GhosttyFxManualApp::hoveredLinkText)
+                    .orElse(""));
+            hoveredLink.setPadding(new Insets(4, 8, 8, 8));
             var bellSound = new AudioClip(Objects.requireNonNull(
                     GhosttyFxManualApp.class.getResource("bell_ding1.wav"),
                     "bell_ding1.wav").toExternalForm());
@@ -173,6 +181,8 @@ public final class GhosttyFxManualApp {
             var root = new BorderPane();
             root.setTop(controls);
             root.setCenter(tabs);
+            root.setBottom(hoveredLink);
+            BorderPane.setAlignment(hoveredLink, Pos.CENTER_LEFT);
 
             var stage = new Stage();
             stage.setTitle("GhosttyFX Manual App");
@@ -185,6 +195,13 @@ public final class GhosttyFxManualApp {
                     .forEach(view -> Thread.ofVirtual().name("ghosttyfx-stage-close").start(view::close)));
             stage.show();
         });
+    }
+
+    private static String hoveredLinkText(TerminalLink link) {
+        return switch (link) {
+            case TerminalLink.Osc8(var target) -> target;
+            case TerminalLink.Regex(_, var match) -> match.group();
+        };
     }
 
     private static Font loadFont() {

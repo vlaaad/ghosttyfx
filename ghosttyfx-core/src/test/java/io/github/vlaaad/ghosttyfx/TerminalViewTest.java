@@ -6,6 +6,7 @@ import com.pty4j.WinSize;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.fail;
@@ -22,6 +23,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.Base64;
 import java.util.HashMap;
 import java.util.concurrent.CountDownLatch;
@@ -370,6 +372,138 @@ final class TerminalViewTest {
                 assertTrue(view.getLinkMatchers().contains(link));
                 assertThrows(NullPointerException.class, () -> new TerminalLinkMatcher(null, _ -> {}));
                 assertThrows(NullPointerException.class, () -> new TerminalLinkMatcher(Pattern.compile("x"), null));
+                return null;
+            });
+        }
+    }
+
+    @Test
+    void terminalLinksRejectNullComponents() {
+        var pattern = Pattern.compile("x");
+        var matcher = pattern.matcher("x");
+        assertTrue(matcher.find());
+        var match = matcher.toMatchResult();
+        var linkMatcher = new TerminalLinkMatcher(pattern, _ -> {});
+
+        assertThrows(NullPointerException.class, () -> new TerminalLink.Osc8(null));
+        assertThrows(NullPointerException.class, () -> new TerminalLink.Regex(null, match));
+        assertThrows(NullPointerException.class, () -> new TerminalLink.Regex(linkMatcher, null));
+    }
+
+    @Test
+    void exposesHoveredOsc8Link() throws Exception {
+        var target = "https://example.test";
+        var output = "\u001B]8;;" + target + "\u001B\\abc\u001B]8;;\u001B\\";
+        try (var view = createView(output)) {
+            awaitText(view, "abc");
+            runOnFxThread(() -> {
+                assertNull(view.getHoveredLink());
+                assertSame(view.getHoveredLink(), view.hoveredLinkProperty().get());
+
+                moveToCell(view, 1, 0);
+                assertEquals(new TerminalLink.Osc8(target), view.getHoveredLink());
+                assertSame(view.getHoveredLink(), view.hoveredLinkProperty().get());
+
+                Event.fireEvent(view, mouseEvent(MouseEvent.MOUSE_EXITED, 0, 0, false));
+                assertNull(view.getHoveredLink());
+                assertSame(view.getHoveredLink(), view.hoveredLinkProperty().get());
+                return null;
+            });
+        }
+    }
+
+    @Test
+    void keepsHoveredLinkWhileItIsClicked() throws Exception {
+        var target = "https://example.test";
+        var output = "\u001B]8;;" + target + "\u001B\\abc\u001B]8;;\u001B\\";
+        try (var view = createView(output)) {
+            awaitText(view, "abc");
+            runOnFxThread(() -> {
+                view.setOsc8LinkAction(_ -> {});
+                var nullTransitions = new AtomicInteger();
+                view.hoveredLinkProperty().addListener((_, oldLink, newLink) -> {
+                    if (oldLink != null && newLink == null) {
+                        nullTransitions.incrementAndGet();
+                    }
+                });
+                moveToCell(view, 1, 0);
+
+                clickCell(view, 1, 0);
+
+                assertEquals(new TerminalLink.Osc8(target), view.getHoveredLink());
+                assertEquals(0, nullTransitions.get());
+                return null;
+            });
+        }
+    }
+
+    @Test
+    void updatesHoveredLinkWhenTerminalOutputChangesUnderPointer() throws Exception {
+        var terminal = new ControlledTerminal();
+        var firstTarget = "https://first.test";
+        var secondTarget = "https://second.test";
+        try (var view = new TerminalView((_, _) -> terminal)) {
+            terminal.emit("\u001B]8;;" + firstTarget + "\u001B\\abc\u001B]8;;\u001B\\\u001B]2;first\u001B\\");
+            awaitTitle(view, "first");
+            runOnFxThread(() -> {
+                moveToCell(view, 1, 0);
+                assertEquals(new TerminalLink.Osc8(firstTarget), view.getHoveredLink());
+                return null;
+            });
+
+            terminal.emit("\r\u001B[2K\u001B]8;;" + secondTarget + "\u001B\\xyz\u001B]8;;\u001B\\\u001B]2;second\u001B\\");
+            awaitTitle(view, "second");
+            runOnFxThread(() -> {
+                assertEquals(new TerminalLink.Osc8(secondTarget), view.getHoveredLink());
+                return null;
+            });
+        }
+    }
+
+    @Test
+    void updatesHoveredLinkWhenViewportScrollsUnderPointer() throws Exception {
+        var firstTarget = "https://first.test";
+        var secondTarget = "https://second.test";
+        var lines = new ArrayList<String>();
+        lines.add("\u001B]8;;" + firstTarget + "\u001B\\aaa\u001B]8;;\u001B\\");
+        for (var i = 1; i < 6; i++) {
+            lines.add("line-" + i);
+        }
+        lines.add("\u001B]8;;" + secondTarget + "\u001B\\bbb\u001B]8;;\u001B\\");
+        for (var i = 7; i < 30; i++) {
+            lines.add("line-" + i);
+        }
+
+        try (var view = createView(String.join("\r\n", lines))) {
+            awaitText(view, "line-29");
+            runOnFxThread(() -> {
+                assertTrue(view.scrollViewportToTop());
+                moveToCell(view, 1, 0);
+                assertEquals(new TerminalLink.Osc8(firstTarget), view.getHoveredLink());
+
+                assertTrue(view.scrollViewportToBottom());
+                assertEquals(new TerminalLink.Osc8(secondTarget), view.getHoveredLink());
+                return null;
+            });
+        }
+    }
+
+    @Test
+    void updatesHoveredRegexLinkWhenMatcherChanges() throws Exception {
+        try (var view = createView("issue-123")) {
+            awaitText(view, "issue-123");
+            runOnFxThread(() -> {
+                var first = new TerminalLinkMatcher(Pattern.compile("issue-(\\d+)"), _ -> {});
+                view.getLinkMatchers().setAll(first);
+                moveToCell(view, 2, 0);
+                assertSame(first, ((TerminalLink.Regex) view.getHoveredLink()).matcher());
+
+                var second = new TerminalLinkMatcher(Pattern.compile("issue-(\\d+)"), _ -> {});
+                view.getLinkMatchers().set(0, second);
+                assertSame(second, ((TerminalLink.Regex) view.getHoveredLink()).matcher());
+
+                view.getLinkMatchers().clear();
+                assertNull(view.getHoveredLink());
                 return null;
             });
         }
