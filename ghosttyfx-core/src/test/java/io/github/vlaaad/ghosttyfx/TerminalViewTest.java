@@ -317,12 +317,13 @@ final class TerminalViewTest {
 
     @Test
     void rendersDirectRgbRgbaAndPngImages() throws Exception {
+        // Use 2x2 fixtures: JavaFX software filtering clips stretched one-pixel sources.
         var output = "\u001B[?25l"
-                + "\u001B[1;1H\u001B_Ga=T,t=d,f=24,i=1,p=1,s=1,v=1,c=1,r=1,C=1,q=2;/wAA\u001B\\"
+                + "\u001B[1;1H\u001B_Ga=T,t=d,f=24,i=1,p=1,s=2,v=2,c=1,r=1,C=1,q=2;/wAA/wAA/wAA/wAA\u001B\\"
                 + "\u001B[1;2H\u001B[48;2;0;0;255m \u001B[0m"
-                + "\u001B[1;2H\u001B_Ga=T,t=d,f=32,i=2,p=2,s=1,v=1,c=1,r=1,C=1,q=2;/wAAgA==\u001B\\"
+                + "\u001B[1;2H\u001B_Ga=T,t=d,f=32,i=2,p=2,s=2,v=2,c=1,r=1,C=1,q=2;/wAAgP8AAID/AACA/wAAgA==\u001B\\"
                 + "\u001B[1;3H\u001B_Ga=T,t=d,f=100,i=3,p=3,c=1,r=1,C=1,q=2;"
-                + "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==\u001B\\";
+                + "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAEUlEQVR4nGP4z8DwH4QZYAwAR8oH+WdZbrcAAAAASUVORK5CYII=\u001B\\";
         try (var view = createView(output)) {
             awaitTerminalClosed(view);
             var colors = runOnFxThread(() -> List.of(cellColor(view, 0, 0), cellColor(view, 1, 0), cellColor(view, 2, 0)));
@@ -373,11 +374,11 @@ final class TerminalViewTest {
     void synchronizedOutputKeepsKittyImagesFrozenUntilRelease() throws Exception {
         var terminal = new ControlledTerminal();
         try (var view = runOnFxThread(() -> new TerminalView((_, _) -> terminal))) {
-            terminal.emit("\u001B[?25l\u001B_Ga=T,t=d,f=24,i=1,p=1,s=1,v=1,c=1,r=1,C=1,q=2;/wAA\u001B\\");
+            terminal.emit("\u001B[?25l\u001B_Ga=T,t=d,f=24,i=1,p=1,s=2,v=2,c=1,r=1,C=1,q=2;/wAA/wAA/wAA/wAA\u001B\\");
             awaitCellColor(view, 0, 0, Color.RED);
 
             terminal.emit("\u001B[?2026h\u001B[1;1H"
-                    + "\u001B_Ga=T,t=d,f=24,i=1,p=1,s=1,v=1,c=1,r=1,C=1,q=2;AAD/\u001B\\"
+                    + "\u001B_Ga=T,t=d,f=24,i=1,p=1,s=2,v=2,c=1,r=1,C=1,q=2;AAD/AAD/AAD/AAD/\u001B\\"
                     + "\u001B]2;held-image\u001B\\");
             awaitTitle(view, "held-image");
             runOnFxThread(() -> {
@@ -572,9 +573,9 @@ final class TerminalViewTest {
                 return null;
             });
             terminal.emit("\u001B[?25l" + "line\r\n".repeat(23)
-                    + "\u001B_Ga=T,t=d,f=24,i=1,p=1,s=1,v=1,c=1,r=1,C=1,q=2;/wAA\u001B\\"
-                    + "\u001B_Ga=T,t=d,f=24,i=2,p=1,P=1,Q=1,H=1,V=1,s=1,v=1,c=1,r=1,q=2;AAD/\u001B\\"
-                    + "\r\n\r\n\u001B[4G\u001B_Ga=T,t=d,f=24,i=3,p=1,s=1,v=1,c=100,r=1,C=1,q=2;AP8A\u001B\\"
+                    + "\u001B_Ga=T,t=d,f=24,i=1,p=1,s=2,v=2,c=1,r=1,C=1,q=2;/wAA/wAA/wAA/wAA\u001B\\"
+                    + "\u001B_Ga=T,t=d,f=24,i=2,p=1,P=1,Q=1,H=1,V=1,s=2,v=2,c=1,r=1,q=2;AAD/AAD/AAD/AAD/\u001B\\"
+                    + "\r\n\r\n\u001B[4G\u001B_Ga=T,t=d,f=24,i=3,p=1,s=2,v=2,c=100,r=1,C=1,q=2;AP8AAP8AAP8AAP8A\u001B\\"
                     + "\r\n" + "line\r\n".repeat(5) + "\u001B]2;images-ready\u001B\\");
             awaitTitle(view, "images-ready");
             runOnFxThread(() -> {
@@ -813,7 +814,7 @@ final class TerminalViewTest {
     void rendersKittyImagesInAllZLayers() throws Exception {
         var output = "\u001B[?25l"
                 + "\u001B[38;2;0;255;0;48;2;0;0;255m ██\u001B[0m"
-                + "\u001B_Ga=t,t=d,f=24,i=20,s=1,v=1,q=2;/wAA\u001B\\"
+                + "\u001B_Ga=t,t=d,f=24,i=20,s=2,v=2,q=2;/wAA/wAA/wAA/wAA\u001B\\"
                 + "\u001B[1;1H\u001B_Ga=p,i=20,p=1,c=1,r=1,C=1,q=2,z=-1073741825;\u001B\\"
                 + "\u001B[1;2H\u001B_Ga=p,i=20,p=2,c=1,r=1,C=1,q=2,z=-1;\u001B\\"
                 + "\u001B[1;3H\u001B_Ga=p,i=20,p=3,c=1,r=1,C=1,q=2,z=0;\u001B\\";
@@ -831,12 +832,12 @@ final class TerminalViewTest {
         var terminal = new ControlledTerminal();
         try (var view = new TerminalView((_, _) -> terminal)) {
             terminal.emit("\u001B[?25l"
-                    + "\u001B_Ga=T,t=d,f=24,o=z,i=4,p=4,s=1,v=1,c=1,r=1,C=1,q=2,m=1;eAEBAwD8\u001B\\"
+                    + "\u001B_Ga=T,t=d,f=24,o=z,i=4,p=4,s=2,v=2,c=1,r=1,C=1,q=2,m=1;eJz7z8Dw\u001B\\"
                     + "\u001B]0;first-chunk\u001B\\");
             awaitTitle(view, "first-chunk");
             assertColor(Color.BLACK, runOnFxThread(() -> cellColor(view, 0, 0)));
 
-            terminal.emit("\u001B_Gm=0;//8AAAMAAQA=\u001B\\\u001B]0;final-chunk\u001B\\");
+            terminal.emit("\u001B_Gm=0;H4YAHe4D/Q==\u001B\\\u001B]0;final-chunk\u001B\\");
             awaitTitle(view, "final-chunk");
             awaitCellColor(view, 0, 0, Color.RED);
         }
@@ -847,10 +848,10 @@ final class TerminalViewTest {
         var terminal = new ControlledTerminal();
         try (var view = new TerminalView((_, _) -> terminal)) {
             terminal.emit("\u001B[?25l"
-                    + "\u001B_Ga=T,t=d,f=24,i=31,p=31,s=1,v=1,c=1,r=1,C=1,q=2;/wAA\u001B\\");
+                    + "\u001B_Ga=T,t=d,f=24,i=31,p=31,s=2,v=2,c=1,r=1,C=1,q=2;/wAA/wAA/wAA/wAA\u001B\\");
             awaitCellColor(view, 0, 0, Color.RED);
 
-            terminal.emit("\u001B_Ga=t,t=d,f=24,i=31,s=1,v=1,q=2;AAD/\u001B\\");
+            terminal.emit("\u001B_Ga=t,t=d,f=24,i=31,s=2,v=2,q=2;AAD/AAD/AAD/AAD/\u001B\\");
             awaitCellColor(view, 0, 0, Color.BLACK);
 
             terminal.emit("\u001B_Ga=p,i=31,p=31,c=1,r=1,C=1,q=2;\u001B\\");
