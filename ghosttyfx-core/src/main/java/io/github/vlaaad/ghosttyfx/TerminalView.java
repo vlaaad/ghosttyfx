@@ -84,6 +84,7 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
     private static final double SCROLL_TOTAL_DELTA_EPSILON = 1e-6;
     private static final Duration BLINK_INTERVAL = Duration.millis(600);
     private static final Duration PROMPT_NAVIGATION_HIGHLIGHT_DURATION = Duration.millis(700);
+    private static final Duration RENDER_HOLD_TIMEOUT = Duration.seconds(1);
     private static final Font DEFAULT_FONT = Font.font("Monospaced", 14);
     private static final TerminalLinkMatcher BUILT_IN_LINK_MATCHER = new TerminalLinkMatcher(
             Pattern.compile("(?i)\\bhttps?://(?:\\[[0-9a-f:]+(?:[:0-9a-f]*)+\\](?::[0-9]+)?|[\\w\\-.~:/?#@!$&*+,;=%]+(?:[\\(\\[]\\w*[\\)\\]])?)+(?<![,.])"),
@@ -96,6 +97,7 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
     private final Timeline cursorBlinkTimeline;
     private final Timeline textBlinkTimeline;
     private final Timeline promptNavigationHighlightTimeline;
+    private final Timeline renderHoldTimeout;
     private KeyInput.State keyInputState = KeyInput.initialState();
     private MouseInput.State mouseInputState = MouseInput.initialState();
     private SelectionDrag selectionDrag;
@@ -112,6 +114,7 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
     private final ReadOnlyStringWrapper title;
     private final ReadOnlyStringWrapper currentDirectory;
     private final ReadOnlyObjectWrapper<Progress> progress = new ReadOnlyObjectWrapper<>(this, "progress");
+    private final ReadOnlyObjectWrapper<ShellState> shellState = new ReadOnlyObjectWrapper<>(this, "shellState");
     private final ObjectProperty<Runnable> onBell = new SimpleObjectProperty<>(this, "onBell");
     private final ObjectProperty<Consumer<Notification>> onNotification = new SimpleObjectProperty<>(this, "onNotification");
     private final ObjectProperty<TerminalTheme> theme = new SimpleObjectProperty<>(this, "theme", TerminalTheme.defaults()) {
@@ -268,12 +271,20 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
                         view.progress.set(progress);
                     }
                 }),
+                state -> withView.accept(view -> view.shellState.set(state)),
                 () -> withView.accept(view -> {
                     var handler = view.onBell.get();
                     if (handler != null) {
                         handler.run();
                     }
-                }));
+                }),
+                held -> {
+                    var view = viewRef.get();
+                    if (view != null) {
+                        view.handleRenderHold(held);
+                    }
+                });
+        renderHoldTimeout = new Timeline(new KeyFrame(RENDER_HOLD_TIMEOUT, _ -> terminalSession.releaseRenderHold()));
         terminalShortcuts.addAll(defaultTerminalShortcuts());
         linkMatchers.addAll(defaultLinkMatchers());
 
@@ -283,10 +294,8 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
                 font,
                 searchPromptText,
                 widthProperty(),
-                () -> closeSearch(),
-                this::redraw,
-                this::searchMatchesAffectViewport,
-                this::scrollSearchMatchIntoView);
+                () -> refreshHover(false),
+                this::render);
         applySearchTheme();
         getChildren().add(canvas);
         AnchorPane.setTopAnchor(canvas, 0.0);
@@ -335,12 +344,17 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
         addEventHandler(ScrollEvent.SCROLL_STARTED, this::handleScrollStarted);
         addEventHandler(ScrollEvent.SCROLL_FINISHED, this::handleScrollFinished);
         setOnScroll(this::handleScroll);
+        addEventFilter(KeyEvent.KEY_PRESSED, event -> {
+            if (!event.isConsumed() && handleTerminalShortcut(event)) {
+                event.consume();
+            }
+        });
         setOnKeyPressed(this::handleKeyPressed);
         setOnKeyReleased(this::handleKeyReleased);
         setOnKeyTyped(this::handleKeyTyped);
         setOnInputMethodTextChanged(this::handleInputMethodTextChanged);
         setInputMethodRequests(new TerminalInputMethodRequests());
-        setCursor(Cursor.DEFAULT);
+        setCursor(terminalSession.mouseCursor());
         sceneProperty().addListener((_, _, _) -> {
             updateBlinkTimelines();
             updatePromptNavigationHighlightTimeline();
@@ -485,49 +499,61 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
     public List<TerminalShortcut> defaultTerminalShortcuts() {
         if (HostPlatform.CURRENT.os() == HostPlatform.OS.MACOS) {
             return List.of(
-                    new TerminalShortcut(new KeyCodeCombination(KeyCode.C, KeyCombination.META_DOWN), this::copySelection),
-                    new TerminalShortcut(new KeyCodeCombination(KeyCode.V, KeyCombination.META_DOWN), this::pasteClipboard),
-                    new TerminalShortcut(new KeyCodeCombination(KeyCode.A, KeyCombination.META_DOWN), this::selectAll),
-                    new TerminalShortcut(new KeyCodeCombination(KeyCode.F, KeyCombination.META_DOWN), this::toggleSearch),
-                    new TerminalShortcut(new KeyCodeCombination(KeyCode.LEFT, KeyCombination.SHIFT_DOWN), this::extendSelectionLeft),
-                    new TerminalShortcut(new KeyCodeCombination(KeyCode.RIGHT, KeyCombination.SHIFT_DOWN), this::extendSelectionRight),
-                    new TerminalShortcut(new KeyCodeCombination(KeyCode.UP, KeyCombination.SHIFT_DOWN), this::extendSelectionUp),
-                    new TerminalShortcut(new KeyCodeCombination(KeyCode.DOWN, KeyCombination.SHIFT_DOWN), this::extendSelectionDown),
-                    new TerminalShortcut(new KeyCodeCombination(KeyCode.PAGE_UP, KeyCombination.SHIFT_DOWN), this::extendSelectionPageUp),
-                    new TerminalShortcut(new KeyCodeCombination(KeyCode.PAGE_DOWN, KeyCombination.SHIFT_DOWN), this::extendSelectionPageDown),
-                    new TerminalShortcut(new KeyCodeCombination(KeyCode.HOME, KeyCombination.SHIFT_DOWN), this::extendSelectionHome),
-                    new TerminalShortcut(new KeyCodeCombination(KeyCode.END, KeyCombination.SHIFT_DOWN), this::extendSelectionEnd),
-                    new TerminalShortcut(new KeyCodeCombination(KeyCode.PAGE_UP, KeyCombination.META_DOWN), this::scrollViewportPageUp),
-                    new TerminalShortcut(new KeyCodeCombination(KeyCode.PAGE_DOWN, KeyCombination.META_DOWN), this::scrollViewportPageDown),
-                    new TerminalShortcut(new KeyCodeCombination(KeyCode.HOME, KeyCombination.META_DOWN), this::scrollViewportToTop),
-                    new TerminalShortcut(new KeyCodeCombination(KeyCode.END, KeyCombination.META_DOWN), this::scrollViewportToBottom),
-                    new TerminalShortcut(new KeyCodeCombination(KeyCode.UP, KeyCombination.META_DOWN), this::scrollViewportToPreviousPrompt),
-                    new TerminalShortcut(new KeyCodeCombination(KeyCode.DOWN, KeyCombination.META_DOWN), this::scrollViewportToNextPrompt),
-                    new TerminalShortcut(new KeyCodeCombination(KeyCode.LEFT, KeyCombination.ALT_DOWN), () -> sendEsc("b")),
-                    new TerminalShortcut(new KeyCodeCombination(KeyCode.RIGHT, KeyCombination.ALT_DOWN), () -> sendEsc("f")),
-                    new TerminalShortcut(new KeyCodeCombination(KeyCode.LEFT, KeyCombination.META_DOWN), () -> sendText("\u0001")),
-                    new TerminalShortcut(new KeyCodeCombination(KeyCode.RIGHT, KeyCombination.META_DOWN), () -> sendText("\u0005")),
-                    new TerminalShortcut(new KeyCodeCombination(KeyCode.BACK_SPACE, KeyCombination.META_DOWN), () -> sendText("\u0015")));
+                    new TerminalShortcut(new KeyCodeCombination(KeyCode.ENTER), this::searchNextInField),
+                    new TerminalShortcut(new KeyCodeCombination(KeyCode.ENTER, KeyCombination.SHIFT_DOWN), this::searchPreviousInField),
+                    new TerminalShortcut(new KeyCodeCombination(KeyCode.UP), this::searchNextInField),
+                    new TerminalShortcut(new KeyCodeCombination(KeyCode.DOWN), this::searchPreviousInField),
+                    new TerminalShortcut(new KeyCodeCombination(KeyCode.ESCAPE), this::closeSearch),
+                    new TerminalShortcut(new KeyCodeCombination(KeyCode.C, KeyCombination.META_DOWN), () -> isTerminalFocused() && copySelection()),
+                    new TerminalShortcut(new KeyCodeCombination(KeyCode.V, KeyCombination.META_DOWN), () -> isTerminalFocused() && pasteClipboard()),
+                    new TerminalShortcut(new KeyCodeCombination(KeyCode.A, KeyCombination.META_DOWN), () -> isTerminalFocused() && selectAll()),
+                    new TerminalShortcut(new KeyCodeCombination(KeyCode.F, KeyCombination.META_DOWN), this::openSearch),
+                    new TerminalShortcut(new KeyCodeCombination(KeyCode.G, KeyCombination.META_DOWN), this::searchNext),
+                    new TerminalShortcut(new KeyCodeCombination(KeyCode.G, KeyCombination.META_DOWN, KeyCombination.SHIFT_DOWN), this::searchPrevious),
+                    new TerminalShortcut(new KeyCodeCombination(KeyCode.LEFT, KeyCombination.SHIFT_DOWN), () -> isTerminalFocused() && extendSelectionLeft()),
+                    new TerminalShortcut(new KeyCodeCombination(KeyCode.RIGHT, KeyCombination.SHIFT_DOWN), () -> isTerminalFocused() && extendSelectionRight()),
+                    new TerminalShortcut(new KeyCodeCombination(KeyCode.UP, KeyCombination.SHIFT_DOWN), () -> isTerminalFocused() && extendSelectionUp()),
+                    new TerminalShortcut(new KeyCodeCombination(KeyCode.DOWN, KeyCombination.SHIFT_DOWN), () -> isTerminalFocused() && extendSelectionDown()),
+                    new TerminalShortcut(new KeyCodeCombination(KeyCode.PAGE_UP, KeyCombination.SHIFT_DOWN), () -> isTerminalFocused() && extendSelectionPageUp()),
+                    new TerminalShortcut(new KeyCodeCombination(KeyCode.PAGE_DOWN, KeyCombination.SHIFT_DOWN), () -> isTerminalFocused() && extendSelectionPageDown()),
+                    new TerminalShortcut(new KeyCodeCombination(KeyCode.HOME, KeyCombination.SHIFT_DOWN), () -> isTerminalFocused() && extendSelectionHome()),
+                    new TerminalShortcut(new KeyCodeCombination(KeyCode.END, KeyCombination.SHIFT_DOWN), () -> isTerminalFocused() && extendSelectionEnd()),
+                    new TerminalShortcut(new KeyCodeCombination(KeyCode.PAGE_UP, KeyCombination.META_DOWN), () -> isTerminalFocused() && scrollViewportPageUp()),
+                    new TerminalShortcut(new KeyCodeCombination(KeyCode.PAGE_DOWN, KeyCombination.META_DOWN), () -> isTerminalFocused() && scrollViewportPageDown()),
+                    new TerminalShortcut(new KeyCodeCombination(KeyCode.HOME, KeyCombination.META_DOWN), () -> isTerminalFocused() && scrollViewportToTop()),
+                    new TerminalShortcut(new KeyCodeCombination(KeyCode.END, KeyCombination.META_DOWN), () -> isTerminalFocused() && scrollViewportToBottom()),
+                    new TerminalShortcut(new KeyCodeCombination(KeyCode.UP, KeyCombination.META_DOWN), () -> isTerminalFocused() && scrollViewportToPreviousPrompt()),
+                    new TerminalShortcut(new KeyCodeCombination(KeyCode.DOWN, KeyCombination.META_DOWN), () -> isTerminalFocused() && scrollViewportToNextPrompt()),
+                    new TerminalShortcut(new KeyCodeCombination(KeyCode.LEFT, KeyCombination.ALT_DOWN), () -> isTerminalFocused() && sendEsc("b")),
+                    new TerminalShortcut(new KeyCodeCombination(KeyCode.RIGHT, KeyCombination.ALT_DOWN), () -> isTerminalFocused() && sendEsc("f")),
+                    new TerminalShortcut(new KeyCodeCombination(KeyCode.LEFT, KeyCombination.META_DOWN), () -> isTerminalFocused() && sendText("\u0001")),
+                    new TerminalShortcut(new KeyCodeCombination(KeyCode.RIGHT, KeyCombination.META_DOWN), () -> isTerminalFocused() && sendText("\u0005")),
+                    new TerminalShortcut(new KeyCodeCombination(KeyCode.BACK_SPACE, KeyCombination.META_DOWN), () -> isTerminalFocused() && sendText("\u0015")));
         }
         return List.of(
-                new TerminalShortcut(new KeyCodeCombination(KeyCode.C, KeyCombination.CONTROL_DOWN), this::copySelection),
-                new TerminalShortcut(new KeyCodeCombination(KeyCode.V, KeyCombination.CONTROL_DOWN), this::pasteClipboard),
-                new TerminalShortcut(new KeyCodeCombination(KeyCode.A, KeyCombination.CONTROL_DOWN, KeyCombination.SHIFT_DOWN), this::selectAll),
-                new TerminalShortcut(new KeyCodeCombination(KeyCode.F, KeyCombination.CONTROL_DOWN, KeyCombination.SHIFT_DOWN), this::toggleSearch),
-                new TerminalShortcut(new KeyCodeCombination(KeyCode.LEFT, KeyCombination.SHIFT_DOWN), this::extendSelectionLeft),
-                new TerminalShortcut(new KeyCodeCombination(KeyCode.RIGHT, KeyCombination.SHIFT_DOWN), this::extendSelectionRight),
-                new TerminalShortcut(new KeyCodeCombination(KeyCode.UP, KeyCombination.SHIFT_DOWN), this::extendSelectionUp),
-                new TerminalShortcut(new KeyCodeCombination(KeyCode.DOWN, KeyCombination.SHIFT_DOWN), this::extendSelectionDown),
-                new TerminalShortcut(new KeyCodeCombination(KeyCode.PAGE_UP, KeyCombination.SHIFT_DOWN), this::extendSelectionPageUp),
-                new TerminalShortcut(new KeyCodeCombination(KeyCode.PAGE_DOWN, KeyCombination.SHIFT_DOWN), this::extendSelectionPageDown),
-                new TerminalShortcut(new KeyCodeCombination(KeyCode.HOME, KeyCombination.SHIFT_DOWN), this::extendSelectionHome),
-                new TerminalShortcut(new KeyCodeCombination(KeyCode.END, KeyCombination.SHIFT_DOWN), this::extendSelectionEnd),
-                new TerminalShortcut(new KeyCodeCombination(KeyCode.PAGE_UP, KeyCombination.SHIFT_DOWN), this::scrollViewportPageUp),
-                new TerminalShortcut(new KeyCodeCombination(KeyCode.PAGE_DOWN, KeyCombination.SHIFT_DOWN), this::scrollViewportPageDown),
-                new TerminalShortcut(new KeyCodeCombination(KeyCode.HOME, KeyCombination.SHIFT_DOWN), this::scrollViewportToTop),
-                new TerminalShortcut(new KeyCodeCombination(KeyCode.END, KeyCombination.SHIFT_DOWN), this::scrollViewportToBottom),
-                new TerminalShortcut(new KeyCodeCombination(KeyCode.UP, KeyCombination.CONTROL_DOWN, KeyCombination.SHIFT_DOWN), this::scrollViewportToPreviousPrompt),
-                new TerminalShortcut(new KeyCodeCombination(KeyCode.DOWN, KeyCombination.CONTROL_DOWN, KeyCombination.SHIFT_DOWN), this::scrollViewportToNextPrompt));
+                new TerminalShortcut(new KeyCodeCombination(KeyCode.ENTER), this::searchNextInField),
+                new TerminalShortcut(new KeyCodeCombination(KeyCode.ENTER, KeyCombination.SHIFT_DOWN), this::searchPreviousInField),
+                new TerminalShortcut(new KeyCodeCombination(KeyCode.UP), this::searchNextInField),
+                new TerminalShortcut(new KeyCodeCombination(KeyCode.DOWN), this::searchPreviousInField),
+                new TerminalShortcut(new KeyCodeCombination(KeyCode.ESCAPE), this::closeSearch),
+                new TerminalShortcut(new KeyCodeCombination(KeyCode.C, KeyCombination.CONTROL_DOWN), () -> isTerminalFocused() && copySelection()),
+                new TerminalShortcut(new KeyCodeCombination(KeyCode.V, KeyCombination.CONTROL_DOWN), () -> isTerminalFocused() && pasteClipboard()),
+                new TerminalShortcut(new KeyCodeCombination(KeyCode.A, KeyCombination.CONTROL_DOWN, KeyCombination.SHIFT_DOWN), () -> isTerminalFocused() && selectAll()),
+                new TerminalShortcut(new KeyCodeCombination(KeyCode.F, KeyCombination.CONTROL_DOWN, KeyCombination.SHIFT_DOWN), this::openSearch),
+                new TerminalShortcut(new KeyCodeCombination(KeyCode.LEFT, KeyCombination.SHIFT_DOWN), () -> isTerminalFocused() && extendSelectionLeft()),
+                new TerminalShortcut(new KeyCodeCombination(KeyCode.RIGHT, KeyCombination.SHIFT_DOWN), () -> isTerminalFocused() && extendSelectionRight()),
+                new TerminalShortcut(new KeyCodeCombination(KeyCode.UP, KeyCombination.SHIFT_DOWN), () -> isTerminalFocused() && extendSelectionUp()),
+                new TerminalShortcut(new KeyCodeCombination(KeyCode.DOWN, KeyCombination.SHIFT_DOWN), () -> isTerminalFocused() && extendSelectionDown()),
+                new TerminalShortcut(new KeyCodeCombination(KeyCode.PAGE_UP, KeyCombination.SHIFT_DOWN), () -> isTerminalFocused() && extendSelectionPageUp()),
+                new TerminalShortcut(new KeyCodeCombination(KeyCode.PAGE_DOWN, KeyCombination.SHIFT_DOWN), () -> isTerminalFocused() && extendSelectionPageDown()),
+                new TerminalShortcut(new KeyCodeCombination(KeyCode.HOME, KeyCombination.SHIFT_DOWN), () -> isTerminalFocused() && extendSelectionHome()),
+                new TerminalShortcut(new KeyCodeCombination(KeyCode.END, KeyCombination.SHIFT_DOWN), () -> isTerminalFocused() && extendSelectionEnd()),
+                new TerminalShortcut(new KeyCodeCombination(KeyCode.PAGE_UP, KeyCombination.SHIFT_DOWN), () -> isTerminalFocused() && scrollViewportPageUp()),
+                new TerminalShortcut(new KeyCodeCombination(KeyCode.PAGE_DOWN, KeyCombination.SHIFT_DOWN), () -> isTerminalFocused() && scrollViewportPageDown()),
+                new TerminalShortcut(new KeyCodeCombination(KeyCode.HOME, KeyCombination.SHIFT_DOWN), () -> isTerminalFocused() && scrollViewportToTop()),
+                new TerminalShortcut(new KeyCodeCombination(KeyCode.END, KeyCombination.SHIFT_DOWN), () -> isTerminalFocused() && scrollViewportToBottom()),
+                new TerminalShortcut(new KeyCodeCombination(KeyCode.UP, KeyCombination.CONTROL_DOWN, KeyCombination.SHIFT_DOWN), () -> isTerminalFocused() && scrollViewportToPreviousPrompt()),
+                new TerminalShortcut(new KeyCodeCombination(KeyCode.DOWN, KeyCombination.CONTROL_DOWN, KeyCombination.SHIFT_DOWN), () -> isTerminalFocused() && scrollViewportToNextPrompt()));
     }
 
     /// Returns the default terminal link matchers for this view.
@@ -689,6 +715,25 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
         return progress.getReadOnlyProperty();
     }
 
+    /// Returns the latest command lifecycle step reported by shell integration.
+    ///
+    /// @return the reported shell state, or `null` until the first marker arrives
+    public ShellState getShellState() {
+        return shellState.get();
+    }
+
+    /// The latest command lifecycle step reported by shell integration.
+    ///
+    /// The initial value is `null`. Updates run on the JavaFX application thread.
+    /// Shells may omit steps or repeat prompts; the property reflects the latest reported
+    /// step without inferring command history. The terminal backend's lifecycle is
+    /// available separately through [#terminalStateProperty()].
+    ///
+    /// @return the read-only shell state property
+    public ReadOnlyObjectProperty<ShellState> shellStateProperty() {
+        return shellState.getReadOnlyProperty();
+    }
+
     /// Returns the terminal backend state.
     ///
     /// @return the terminal backend state
@@ -768,7 +813,7 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
                 size.heightPx()));
         refreshHover(false);
         if (searchUi.visible()) {
-            searchUi.refresh(false);
+            searchUi.refresh();
             return;
         }
         redraw();
@@ -797,12 +842,10 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
     }
 
     private void handleKeyPressed(KeyEvent event) {
-        if (searchUi.visible() && event.getCode() == KeyCode.ESCAPE) {
-            closeSearch();
-            event.consume();
+        if (event.isConsumed() || event.getTarget() != this) {
             return;
         }
-        if (handleTerminalShortcut(event) || applyTransition(KeyInput.onKeyPressed(
+        if (applyTransition(KeyInput.onKeyPressed(
                 keyInputState,
                 HostPlatform.CURRENT,
                 isMacOptionAsAlt(),
@@ -812,12 +855,18 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
     }
 
     private void handleKeyReleased(KeyEvent event) {
+        if (event.getTarget() != this) {
+            return;
+        }
         if (applyTransition(KeyInput.onKeyReleased(keyInputState, snapshot(event)))) {
             event.consume();
         }
     }
 
     private void handleKeyTyped(KeyEvent event) {
+        if (event.getTarget() != this) {
+            return;
+        }
         if (applyTransition(KeyInput.onKeyTyped(
                 keyInputState,
                 HostPlatform.CURRENT,
@@ -828,6 +877,9 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
     }
 
     private void handleInputMethodTextChanged(InputMethodEvent event) {
+        if (event.getTarget() != this) {
+            return;
+        }
         var composedText = new StringBuilder();
         for (var run : event.getComposed()) {
             composedText.append(run.getText());
@@ -1042,7 +1094,16 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
         }
 
         var deltaRows = smoothScrollDeltaRows(event);
-        if (deltaRows == 0) {
+        if (!Double.isFinite(deltaRows) || deltaRows == 0) {
+            return;
+        }
+
+        var mouseTrackingEnabled = overContent && isMouseTrackingEnabled();
+        if (!mouseTrackingEnabled && !alternateScrollEnabled(overContent)) {
+            promptNavigationRow = -1;
+            terminalSession.scrollViewportSmoothlyBy(-deltaRows);
+            refreshHover(false);
+            redraw();
             return;
         }
 
@@ -1053,7 +1114,6 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
             return;
         }
 
-        var mouseTrackingEnabled = overContent && isMouseTrackingEnabled();
         var wroteToApplication = false;
         if (mouseTrackingEnabled) {
             wroteToApplication = writeBytes(terminalSession.encodeMouseScroll(
@@ -1320,10 +1380,11 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
         var suppressRendering = mouseInputState.scrollbarDragging()
                 || pressGesture != null && pressGesture.button() == TerminalSession.MouseButton.LEFT;
         var nextRenderedHover = suppressRendering ? null : hoveredActiveLink;
+        var nextCursor = nextRenderedHover == null ? terminalSession.mouseCursor() : Cursor.HAND;
         var changed = !sameTarget(renderedHoveredLink, nextRenderedHover)
-                || getCursor() != (nextRenderedHover == null ? Cursor.DEFAULT : Cursor.HAND);
+                || getCursor() != nextCursor;
         renderedHoveredLink = nextRenderedHover;
-        setCursor(nextRenderedHover == null ? Cursor.DEFAULT : Cursor.HAND);
+        setCursor(nextCursor);
         if (changed && redraw) {
             redraw();
         }
@@ -1350,20 +1411,22 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
     }
 
     private void clearHover(boolean redraw) {
-        var changed = hoveredActiveLink != null || renderedHoveredLink != null || getCursor() != Cursor.DEFAULT;
+        var applicationCursor = terminalSession.mouseCursor();
+        var changed = hoveredActiveLink != null || renderedHoveredLink != null || getCursor() != applicationCursor;
         hoveredActiveLink = null;
         hoveredLink.set(null);
         renderedHoveredLink = null;
-        setCursor(Cursor.DEFAULT);
+        setCursor(applicationCursor);
         if (changed && redraw) {
             redraw();
         }
     }
 
     private void clearRenderedHover(boolean redraw) {
-        var changed = renderedHoveredLink != null || getCursor() != Cursor.DEFAULT;
+        var applicationCursor = terminalSession.mouseCursor();
+        var changed = renderedHoveredLink != null || getCursor() != applicationCursor;
         renderedHoveredLink = null;
-        setCursor(Cursor.DEFAULT);
+        setCursor(applicationCursor);
         if (changed && redraw) {
             redraw();
         }
@@ -1696,9 +1759,6 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
         if (!canScrollViewport(scrollbar)) {
             return false;
         }
-        if (scrollbar.offset() == 0) {
-            return true;
-        }
         scrollViewportTo(0);
         return true;
     }
@@ -1750,6 +1810,24 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
         return scrollViewportToPrompt(1);
     }
 
+    /// Returns whether the terminal itself is the scene's focus owner.
+    ///
+    /// This excludes the find field and does not require the window to be active.
+    ///
+    /// @return `true` if the terminal itself owns focus; otherwise `false`
+    public boolean isTerminalFocused() {
+        return getScene() != null && getScene().getFocusOwner() == this;
+    }
+
+    /// Returns whether the visible find field is the scene's focus owner.
+    ///
+    /// This does not require the window to be active.
+    ///
+    /// @return `true` if the visible find field owns focus; otherwise `false`
+    public boolean isSearchFieldFocused() {
+        return searchUi.fieldFocused();
+    }
+
     /// Opens search, or closes it if it is already open.
     ///
     /// @return `true`
@@ -1759,9 +1837,17 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
             return true;
         }
 
-        var selected = terminalSession.hasSelection() ? selectedText() : "";
-        clearSelection();
-        searchUi.open(selected);
+        return openSearch();
+    }
+
+    /// Opens search or focuses its field if already open, using the current terminal selection as the query.
+    ///
+    /// Without a selection, an already open search keeps its query and a newly opened search starts empty.
+    /// The terminal selection is preserved.
+    ///
+    /// @return `true`
+    public boolean openSearch() {
+        searchUi.open(terminalSession.hasSelection() ? selectedText() : null);
         return true;
     }
 
@@ -1778,18 +1864,32 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
         return true;
     }
 
-    /// Selects the next search match.
+    /// Selects the next search match toward older content, stopping at the oldest match.
     ///
-    /// @return `true` if the selected match changed; otherwise `false`
+    /// @return `true` if search is open, including without matches or at the boundary; otherwise `false`
     public boolean searchNext() {
-        return searchUi.selectNext(true);
+        return searchUi.selectNext();
     }
 
-    /// Selects the previous search match.
+    /// Selects the previous search match toward newer content, stopping at the newest match.
     ///
-    /// @return `true` if the selected match changed; otherwise `false`
+    /// @return `true` if search is open, including without matches or at the boundary; otherwise `false`
     public boolean searchPrevious() {
-        return searchUi.selectPrevious(true);
+        return searchUi.selectPrevious();
+    }
+
+    /// Selects the next search match toward older content when the find field has focus.
+    ///
+    /// @return `true` if the find field has focus, even without matches; otherwise `false`
+    public boolean searchNextInField() {
+        return isSearchFieldFocused() && searchNext();
+    }
+
+    /// Selects the previous search match toward newer content when the find field has focus.
+    ///
+    /// @return `true` if the find field has focus, even without matches; otherwise `false`
+    public boolean searchPreviousInField() {
+        return isSearchFieldFocused() && searchPrevious();
     }
 
     String searchText() {
@@ -1801,7 +1901,7 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
     }
 
     int selectedSearchMatchIndex() {
-        return searchUi.selectedMatch();
+        return searchUi.selectedIndex();
     }
 
     private boolean scrollViewportByRows(long deltaRows) {
@@ -1811,10 +1911,6 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
         }
 
         var nextOffset = Math.clamp(scrollbar.offset() + deltaRows, 0, scrollbar.scrollableRows());
-        if (nextOffset == scrollbar.offset()) {
-            return true;
-        }
-
         scrollViewportTo(nextOffset);
         return true;
     }
@@ -1904,39 +2000,6 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
         }
         promptNavigationHighlightRow = -1;
         redraw();
-    }
-
-    private boolean searchMatchesAffectViewport(List<Selection> matches) {
-        var scrollbar = scrollbarInfo();
-        if (scrollbar == null || scrollbar.visible() <= 0) {
-            return !matches.isEmpty();
-        }
-
-        var viewportTop = scrollbar.offset();
-        var viewportBottom = viewportTop + scrollbar.visible() - 1;
-        for (var match : matches) {
-            var normalized = match.normalized();
-            if (normalized.from().y() <= viewportBottom && normalized.to().y() >= viewportTop) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    private void scrollSearchMatchIntoView(Selection match) {
-        var scrollbar = scrollbarInfo();
-        if (scrollbar == null || scrollbar.visible() <= 0) {
-            return;
-        }
-
-        var row = match.normalized().from().y();
-        var viewportTop = scrollbar.offset();
-        var viewportBottom = viewportTop + scrollbar.visible() - 1;
-        if (row < viewportTop) {
-            scrollViewportTo(row);
-        } else if (row > viewportBottom) {
-            scrollViewportTo(row - scrollbar.visible() + 1);
-        }
     }
 
     private static boolean canScrollViewport(TerminalSession.ScrollbarInfo scrollbar) {
@@ -2040,7 +2103,24 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
         return new KeyInput.KeySnapshot(event.getCode(), event.isShiftDown(), event.isControlDown(), event.isAltDown(), event.isMetaDown());
     }
 
+    private void handleRenderHold(boolean held) {
+        redraw();
+        if (held) {
+            renderHoldTimeout.playFromStart();
+        } else {
+            renderHoldTimeout.stop();
+        }
+    }
+
     private void redraw() {
+        searchUi.refreshResults();
+        render();
+    }
+
+    private void render() {
+        if (terminalSession.renderHeld()) {
+            return;
+        }
         var width = getWidth();
         var height = getHeight();
         if (width <= 0 || height <= 0) {
@@ -2133,7 +2213,7 @@ public final class TerminalView extends AnchorPane implements AutoCloseable {
     }
 
     private CursorLocation currentCursorLocation() {
-        return terminalSession.currentCursorLocation(fontMetrics.get());
+        return terminalSession.currentCursorLocation(fontMetrics.get(), getHeight());
     }
 
     private record Cleanup(TerminalSession terminalSession, PtySession ptySession) implements Runnable {

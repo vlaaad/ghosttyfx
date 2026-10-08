@@ -34,7 +34,9 @@ import io.github.vlaaad.ghostty.bindings.GhosttyPointCoordinate;
 import io.github.vlaaad.ghostty.bindings.GhosttyPointValue;
 import io.github.vlaaad.ghostty.bindings.GhosttyRenderStateColors;
 import io.github.vlaaad.ghostty.bindings.GhosttyRenderStateCursor;
+import io.github.vlaaad.ghostty.bindings.GhosttyRenderStateOverscan;
 import io.github.vlaaad.ghostty.bindings.GhosttySelection;
+import io.github.vlaaad.ghostty.bindings.GhosttySelectionBuffer;
 import io.github.vlaaad.ghostty.bindings.GhosttySelectionGestureGeometry;
 import io.github.vlaaad.ghostty.bindings.GhosttySizeReportSize;
 import io.github.vlaaad.ghostty.bindings.GhosttyString;
@@ -51,10 +53,13 @@ import io.github.vlaaad.ghostty.bindings.GhosttyTerminalModeConfig;
 import io.github.vlaaad.ghostty.bindings.GhosttyTerminalPwdChangedFn;
 import io.github.vlaaad.ghostty.bindings.GhosttyTerminalProgressReport;
 import io.github.vlaaad.ghostty.bindings.GhosttyTerminalProgressReportFn;
+import io.github.vlaaad.ghostty.bindings.GhosttyTerminalRenderHoldFn;
 import io.github.vlaaad.ghostty.bindings.GhosttyTerminalScrollViewport;
 import io.github.vlaaad.ghostty.bindings.GhosttyTerminalScrollViewportValue;
 import io.github.vlaaad.ghostty.bindings.GhosttyTerminalScrollbar;
 import io.github.vlaaad.ghostty.bindings.GhosttyTerminalSelectionFormatOptions;
+import io.github.vlaaad.ghostty.bindings.GhosttyTerminalSemanticPrompt;
+import io.github.vlaaad.ghostty.bindings.GhosttyTerminalSemanticPromptFn;
 import io.github.vlaaad.ghostty.bindings.GhosttyTerminalSizeFn;
 import io.github.vlaaad.ghostty.bindings.GhosttyTerminalTitleChangedFn;
 import io.github.vlaaad.ghostty.bindings.GhosttyTerminalWritePtyFn;
@@ -62,6 +67,7 @@ import io.github.vlaaad.ghostty.bindings.GhosttyTerminalXtversionFn;
 import io.github.vlaaad.ghostty.bindings.ghostty_vt_h;
 import javafx.application.ColorScheme;
 import javafx.application.Platform;
+import javafx.scene.Cursor;
 import javafx.scene.canvas.GraphicsContext;
 import javafx.scene.image.Image;
 import javafx.scene.image.PixelFormat;
@@ -73,6 +79,7 @@ final class TerminalSession implements AutoCloseable {
     private static final int GHOSTTY_SUCCESS = 0;
     private static final int MAX_GRAPHEME_CODEPOINTS = 16;
     private static final short GRAPHEME_CLUSTER_MODE = 2027;
+    private static final short SYNCHRONIZED_OUTPUT_MODE = 2026;
     private static final int KEY_BUFFER_SIZE = 256;
     private static final int CURSOR_STYLE_BAR = 0;
     private static final int CURSOR_STYLE_UNDERLINE = 2;
@@ -80,6 +87,33 @@ final class TerminalSession implements AutoCloseable {
     private static final int PALETTE_SIZE = 256;
     private static final int MAX_GHOSTTY_DIMENSION = 0xFFFF;
     private static final long INITIAL_MAX_SCROLLBACK = 10_000_000;
+    private static final Map<Integer, ShellState.PromptKind> PROMPT_KINDS = Map.of(
+            ghostty_vt_h.GHOSTTY_SEMANTIC_PROMPT_PROMPT_PRIMARY(), ShellState.PromptKind.PRIMARY,
+            ghostty_vt_h.GHOSTTY_SEMANTIC_PROMPT_PROMPT_RIGHT(), ShellState.PromptKind.RIGHT,
+            ghostty_vt_h.GHOSTTY_SEMANTIC_PROMPT_PROMPT_CONTINUATION(), ShellState.PromptKind.CONTINUATION,
+            ghostty_vt_h.GHOSTTY_SEMANTIC_PROMPT_PROMPT_SECONDARY(), ShellState.PromptKind.SECONDARY);
+    private static final Map<Integer, Cursor> MOUSE_CURSORS = Map.ofEntries(
+            Map.entry(ghostty_vt_h.GHOSTTY_MOUSE_SHAPE_DEFAULT(), Cursor.DEFAULT),
+            Map.entry(ghostty_vt_h.GHOSTTY_MOUSE_SHAPE_POINTER(), Cursor.HAND),
+            Map.entry(ghostty_vt_h.GHOSTTY_MOUSE_SHAPE_TEXT(), Cursor.TEXT),
+            Map.entry(ghostty_vt_h.GHOSTTY_MOUSE_SHAPE_CROSSHAIR(), Cursor.CROSSHAIR),
+            Map.entry(ghostty_vt_h.GHOSTTY_MOUSE_SHAPE_WAIT(), Cursor.WAIT),
+            Map.entry(ghostty_vt_h.GHOSTTY_MOUSE_SHAPE_GRAB(), Cursor.OPEN_HAND),
+            Map.entry(ghostty_vt_h.GHOSTTY_MOUSE_SHAPE_GRABBING(), Cursor.CLOSED_HAND),
+            Map.entry(ghostty_vt_h.GHOSTTY_MOUSE_SHAPE_MOVE(), Cursor.MOVE),
+            Map.entry(ghostty_vt_h.GHOSTTY_MOUSE_SHAPE_ALL_SCROLL(), Cursor.MOVE),
+            Map.entry(ghostty_vt_h.GHOSTTY_MOUSE_SHAPE_COL_RESIZE(), Cursor.H_RESIZE),
+            Map.entry(ghostty_vt_h.GHOSTTY_MOUSE_SHAPE_ROW_RESIZE(), Cursor.V_RESIZE),
+            Map.entry(ghostty_vt_h.GHOSTTY_MOUSE_SHAPE_EW_RESIZE(), Cursor.H_RESIZE),
+            Map.entry(ghostty_vt_h.GHOSTTY_MOUSE_SHAPE_NS_RESIZE(), Cursor.V_RESIZE),
+            Map.entry(ghostty_vt_h.GHOSTTY_MOUSE_SHAPE_N_RESIZE(), Cursor.N_RESIZE),
+            Map.entry(ghostty_vt_h.GHOSTTY_MOUSE_SHAPE_E_RESIZE(), Cursor.E_RESIZE),
+            Map.entry(ghostty_vt_h.GHOSTTY_MOUSE_SHAPE_S_RESIZE(), Cursor.S_RESIZE),
+            Map.entry(ghostty_vt_h.GHOSTTY_MOUSE_SHAPE_W_RESIZE(), Cursor.W_RESIZE),
+            Map.entry(ghostty_vt_h.GHOSTTY_MOUSE_SHAPE_NE_RESIZE(), Cursor.NE_RESIZE),
+            Map.entry(ghostty_vt_h.GHOSTTY_MOUSE_SHAPE_NW_RESIZE(), Cursor.NW_RESIZE),
+            Map.entry(ghostty_vt_h.GHOSTTY_MOUSE_SHAPE_SE_RESIZE(), Cursor.SE_RESIZE),
+            Map.entry(ghostty_vt_h.GHOSTTY_MOUSE_SHAPE_SW_RESIZE(), Cursor.SW_RESIZE));
     private static final long KITTY_IMAGE_STORAGE_LIMIT = 128L * 1024 * 1024;
     private static final long KITTY_APC_MAX_BYTES = 65L * 1024 * 1024;
     private static final double BLOCK_CURSOR_ALPHA = 0.5;
@@ -147,7 +181,9 @@ final class TerminalSession implements AutoCloseable {
 
     private final AtomicBoolean closed = new AtomicBoolean();
     private final Arena callbackArena = Arena.ofShared();
+    private final MemorySegment cursorSnapshot = GhosttyRenderStateCursor.allocate(callbackArena);
     private final MemorySegment terminal;
+    private final MemorySegment search;
     private final MemorySegment renderState;
     private final MemorySegment rowIterator;
     private final MemorySegment rowCells;
@@ -167,13 +203,17 @@ final class TerminalSession implements AutoCloseable {
     private final Consumer<String> pwdChanged;
     private final Consumer<Notification> notification;
     private final Consumer<Progress> progress;
+    private final Consumer<ShellState> shellStateChanged;
     private final Runnable bell;
+    private final Consumer<Boolean> renderHold;
     private Size size;
     private int physicalCellWidthPx;
     private int physicalCellHeightPx;
     private long kittyStorageGeneration;
     private CachedLinks cachedLinks;
     private Progress currentProgress;
+    private boolean renderHeld;
+    private double scrollOffsetRows;
 
     TerminalSession(
             int initialColumns,
@@ -184,13 +224,17 @@ final class TerminalSession implements AutoCloseable {
             Consumer<String> pwdChanged,
             Consumer<Notification> notification,
             Consumer<Progress> progress,
-            Runnable bell) {
+            Consumer<ShellState> shellStateChanged,
+            Runnable bell,
+            Consumer<Boolean> renderHold) {
         this.terminalInput = terminalInput;
         this.titleChanged = titleChanged;
         this.pwdChanged = pwdChanged;
         this.notification = notification;
         this.progress = progress;
+        this.shellStateChanged = shellStateChanged;
         this.bell = bell;
+        this.renderHold = renderHold;
         size = new Size(
                 initialColumns,
                 initialRows,
@@ -212,6 +256,9 @@ final class TerminalSession implements AutoCloseable {
                             (short) initialRows),
                     "ghostty_terminal_new");
             terminal = terminalPointer.get(ValueLayout.ADDRESS, 0);
+            var searchPointer = arena.allocate(ValueLayout.ADDRESS);
+            requireGhosttySuccess(ghostty_vt_h.ghostty_search_new(MemorySegment.NULL, searchPointer, terminal), "ghostty_search_new");
+            search = searchPointer.get(ValueLayout.ADDRESS, 0);
             var scrollbackLimit = arena.allocate(ValueLayout.JAVA_LONG);
             scrollbackLimit.set(ValueLayout.JAVA_LONG, 0, INITIAL_MAX_SCROLLBACK);
             requireGhosttySuccess(
@@ -231,6 +278,12 @@ final class TerminalSession implements AutoCloseable {
                     "ghostty_terminal_set(mode)");
 
             renderState = newAddress(arena, "ghostty_render_state_new", RENDER_STATE_ALLOCATOR);
+            var overscan = GhosttyRenderStateOverscan.allocate(arena);
+            // A fractional Canvas remainder plus a fractional scroll can reveal two extra rows.
+            GhosttyRenderStateOverscan.below(overscan, (short) 2);
+            requireGhosttySuccess(
+                    ghostty_vt_h.ghostty_render_state_set(renderState, ghostty_vt_h.GHOSTTY_RENDER_STATE_OPTION_OVERSCAN(), overscan),
+                    "ghostty_render_state_set(overscan)");
             rowIterator = newAddress(arena, "ghostty_render_state_row_iterator_new", RENDER_STATE_ROW_ITERATOR_ALLOCATOR);
             rowCells = newAddress(arena, "ghostty_render_state_row_cells_new", RENDER_STATE_ROW_CELLS_ALLOCATOR);
             linkRowIterator = newAddress(arena, "ghostty_render_state_row_iterator_new", RENDER_STATE_ROW_ITERATOR_ALLOCATOR);
@@ -321,10 +374,58 @@ final class TerminalSession implements AutoCloseable {
         requireGhosttySuccess(
                 ghostty_vt_h.ghostty_terminal_set(
                         terminal,
+                        ghostty_vt_h.GHOSTTY_TERMINAL_OPT_SEMANTIC_PROMPT(),
+                        GhosttyTerminalSemanticPromptFn.allocate(this::reportShellState, callbackArena)),
+                "ghostty_terminal_set(semantic_prompt)");
+        requireGhosttySuccess(
+                ghostty_vt_h.ghostty_terminal_set(
+                        terminal,
                         ghostty_vt_h.GHOSTTY_TERMINAL_OPT_BELL(),
                         GhosttyTerminalBellFn.allocate((_, _) -> this.bell.run(), callbackArena)),
                 "ghostty_terminal_set");
+        requireGhosttySuccess(
+                ghostty_vt_h.ghostty_terminal_set(
+                        terminal,
+                        ghostty_vt_h.GHOSTTY_TERMINAL_OPT_RENDER_HOLD(),
+                        GhosttyTerminalRenderHoldFn.allocate(this::reportRenderHold, callbackArena)),
+                "ghostty_terminal_set(render_hold)");
         updateRenderState();
+    }
+
+    boolean renderHeld() {
+        return renderHeld;
+    }
+
+    void releaseRenderHold() {
+        if (!renderHeld) {
+            return;
+        }
+        try (var arena = Arena.ofConfined()) {
+            var mode = GhosttyTerminalModeConfig.allocate(arena);
+            GhosttyTerminalModeConfig.mode(mode, SYNCHRONIZED_OUTPUT_MODE);
+            GhosttyTerminalModeConfig.value(mode, false);
+            requireGhosttySuccess(
+                    ghostty_vt_h.ghostty_terminal_set(terminal, ghostty_vt_h.GHOSTTY_TERMINAL_OPT_MODE(), mode),
+                    "ghostty_terminal_set(mode)");
+        }
+        // Setting the mode directly does not invoke the native callback.
+        reportRenderHold(terminal, MemorySegment.NULL, false);
+    }
+
+    private void reportRenderHold(MemorySegment terminal, MemorySegment userdata, boolean held) {
+        try {
+            renderHeld = false;
+            clearLinkCache();
+            updateRenderState();
+            try {
+                // Draw at this exact VT boundary, before later bytes can change images or links.
+                renderHold.accept(held);
+            } finally {
+                renderHeld = held;
+            }
+        } catch (Throwable _) {
+            // Exceptions must not escape an FFM upcall.
+        }
     }
 
     void applyTheme(TerminalTheme theme) {
@@ -567,6 +668,30 @@ final class TerminalSession implements AutoCloseable {
         }
     }
 
+    private void reportShellState(MemorySegment terminal, MemorySegment userdata, MemorySegment event) {
+        try {
+            var value = event.reinterpret(GhosttyTerminalSemanticPrompt.sizeof());
+            var kind = GhosttyTerminalSemanticPrompt.kind(value);
+            if (kind == ghostty_vt_h.GHOSTTY_SEMANTIC_PROMPT_PROMPT_START()) {
+                var promptKind = PROMPT_KINDS.get(GhosttyTerminalSemanticPrompt.prompt_kind(value));
+                if (promptKind == null) {
+                    return;
+                }
+                shellStateChanged.accept(new ShellState.Prompt(promptKind));
+            } else if (kind == ghostty_vt_h.GHOSTTY_SEMANTIC_PROMPT_INPUT_START()) {
+                shellStateChanged.accept(new ShellState.InputReady());
+            } else if (kind == ghostty_vt_h.GHOSTTY_SEMANTIC_PROMPT_OUTPUT_START()) {
+                shellStateChanged.accept(new ShellState.Running(toJavaString(GhosttyTerminalSemanticPrompt.command(value))));
+            } else if (kind == ghostty_vt_h.GHOSTTY_SEMANTIC_PROMPT_COMMAND_END()) {
+                shellStateChanged.accept(new ShellState.Finished(
+                        GhosttyTerminalSemanticPrompt.has_exit_code(value) ? GhosttyTerminalSemanticPrompt.exit_code(value) : null,
+                        toJavaString(GhosttyTerminalSemanticPrompt.error(value))));
+            }
+        } catch (Throwable _) {
+            // Exceptions must not escape an FFM upcall.
+        }
+    }
+
     private static String toJavaString(MemorySegment value) {
         var length = GhosttyString.len(value);
         if (length == 0) {
@@ -597,6 +722,7 @@ final class TerminalSession implements AutoCloseable {
             ghostty_vt_h.ghostty_render_state_row_iterator_free(rowIterator);
             ghostty_vt_h.ghostty_kitty_graphics_placement_iterator_free(kittyPlacementIterator);
             ghostty_vt_h.ghostty_render_state_free(renderState);
+            ghostty_vt_h.ghostty_search_free(search);
             ghostty_vt_h.ghostty_terminal_free(terminal);
             kittyImageCache.clear();
         }
@@ -632,6 +758,7 @@ final class TerminalSession implements AutoCloseable {
                         cellWidthPx,
                         cellHeightPx),
                 "ghostty_terminal_resize");
+        scrollOffsetRows = 0;
         size = new Size(columns, rows, columns * cellWidthPx, rows * cellHeightPx);
         physicalCellWidthPx = cellWidthPx;
         physicalCellHeightPx = cellHeightPx;
@@ -671,6 +798,7 @@ final class TerminalSession implements AutoCloseable {
     }
 
     void scrollViewportBy(long deltaRows) {
+        scrollOffsetRows = 0;
         if (deltaRows == 0) {
             return;
         }
@@ -685,6 +813,7 @@ final class TerminalSession implements AutoCloseable {
     }
 
     void scrollViewportTo(long row) {
+        scrollOffsetRows = 0;
         try (var arena = Arena.ofConfined()) {
             var behavior = GhosttyTerminalScrollViewport.allocate(arena);
             GhosttyTerminalScrollViewport.tag(behavior, ghostty_vt_h.GHOSTTY_SCROLL_VIEWPORT_ROW());
@@ -695,6 +824,7 @@ final class TerminalSession implements AutoCloseable {
     }
 
     void scrollViewportToBottom() {
+        scrollOffsetRows = 0;
         try (var arena = Arena.ofConfined()) {
             var behavior = GhosttyTerminalScrollViewport.allocate(arena);
             GhosttyTerminalScrollViewport.tag(behavior, ghostty_vt_h.GHOSTTY_SCROLL_VIEWPORT_BOTTOM());
@@ -711,6 +841,40 @@ final class TerminalSession implements AutoCloseable {
                     ghostty_vt_h.GHOSTTY_TERMINAL_DATA_MOUSE_TRACKING(),
                     mouseTracking) == GHOSTTY_SUCCESS && mouseTracking.get(ValueLayout.JAVA_BOOLEAN, 0);
         }
+    }
+
+    Cursor mouseCursor() {
+        try (var arena = Arena.ofConfined()) {
+            var shape = arena.allocate(ValueLayout.JAVA_INT);
+            requireGhosttySuccess(
+                    ghostty_vt_h.ghostty_terminal_get(terminal, ghostty_vt_h.GHOSTTY_TERMINAL_DATA_MOUSE_SHAPE(), shape),
+                    "ghostty_terminal_get(mouse_shape)");
+            return MOUSE_CURSORS.getOrDefault(shape.get(ValueLayout.JAVA_INT, 0), Cursor.TEXT);
+        }
+    }
+
+    void scrollViewportSmoothlyBy(double deltaRows) {
+        if (!Double.isFinite(deltaRows) || deltaRows == 0) {
+            return;
+        }
+        try (var arena = Arena.ofConfined()) {
+            var scrollbar = GhosttyTerminalScrollbar.allocate(arena);
+            requireGhosttySuccess(
+                    ghostty_vt_h.ghostty_terminal_get(terminal, ghostty_vt_h.GHOSTTY_TERMINAL_DATA_SCROLLBAR(), scrollbar),
+                    "ghostty_terminal_get(scrollbar)");
+            var offset = GhosttyTerminalScrollbar.offset(scrollbar);
+            var target = Math.clamp(offset + scrollOffsetRows + deltaRows,
+                    0.0, Math.max(0, GhosttyTerminalScrollbar.total(scrollbar) - GhosttyTerminalScrollbar.len(scrollbar)));
+            var row = (long) Math.floor(target);
+            scrollOffsetRows = target - row;
+            if (row != offset) {
+                var behavior = GhosttyTerminalScrollViewport.allocate(arena);
+                GhosttyTerminalScrollViewport.tag(behavior, ghostty_vt_h.GHOSTTY_SCROLL_VIEWPORT_ROW());
+                GhosttyTerminalScrollViewportValue.row(GhosttyTerminalScrollViewport.value(behavior), row);
+                ghostty_vt_h.ghostty_terminal_scroll_viewport(terminal, behavior);
+            }
+        }
+        updateRenderState();
     }
 
     boolean alternateScreenActive() {
@@ -735,7 +899,7 @@ final class TerminalSession implements AutoCloseable {
             double scrollbarReservedWidthPx,
             boolean anyButtonPressed) {
         refreshMouseEncoder(anyButtonPressed, widthPx, heightPx, metrics, scrollbarReservedWidthPx);
-        return encodeMouseButton(ghostty_vt_h.GHOSTTY_MOUSE_ACTION_PRESS(), button.ghosttyButton(), x, y, mods);
+        return encodeMouseButton(ghostty_vt_h.GHOSTTY_MOUSE_ACTION_PRESS(), button.ghosttyButton(), x, y + scrollOffsetRows * metrics.cellHeightPx(), mods);
     }
 
     byte[] encodeMouseRelease(
@@ -749,7 +913,7 @@ final class TerminalSession implements AutoCloseable {
             double scrollbarReservedWidthPx,
             boolean anyButtonPressed) {
         refreshMouseEncoder(anyButtonPressed, widthPx, heightPx, metrics, scrollbarReservedWidthPx);
-        return encodeMouseButton(ghostty_vt_h.GHOSTTY_MOUSE_ACTION_RELEASE(), button.ghosttyButton(), x, y, mods);
+        return encodeMouseButton(ghostty_vt_h.GHOSTTY_MOUSE_ACTION_RELEASE(), button.ghosttyButton(), x, y + scrollOffsetRows * metrics.cellHeightPx(), mods);
     }
 
     byte[] encodeMouseMotion(
@@ -763,7 +927,7 @@ final class TerminalSession implements AutoCloseable {
             double scrollbarReservedWidthPx,
             boolean anyButtonPressed) {
         refreshMouseEncoder(anyButtonPressed, widthPx, heightPx, metrics, scrollbarReservedWidthPx);
-        return encodeMouseButton(ghostty_vt_h.GHOSTTY_MOUSE_ACTION_MOTION(), button.ghosttyButton(), x, y, mods);
+        return encodeMouseButton(ghostty_vt_h.GHOSTTY_MOUSE_ACTION_MOTION(), button.ghosttyButton(), x, y + scrollOffsetRows * metrics.cellHeightPx(), mods);
     }
 
     byte[] encodeMouseScroll(
@@ -783,12 +947,13 @@ final class TerminalSession implements AutoCloseable {
         var chunkCount = 0;
         var totalLength = 0;
         refreshMouseEncoder(false, widthPx, heightPx, metrics, scrollbarReservedWidthPx);
+        var mouseY = y + scrollOffsetRows * metrics.cellHeightPx();
         for (var i = 0; i < count; i++) {
             var press = encodeMouseButton(
                     ghostty_vt_h.GHOSTTY_MOUSE_ACTION_PRESS(),
                     button,
                     x,
-                    y,
+                    mouseY,
                     mods);
             if (press.length > 0) {
                 chunks[chunkCount++] = press;
@@ -799,7 +964,7 @@ final class TerminalSession implements AutoCloseable {
                     ghostty_vt_h.GHOSTTY_MOUSE_ACTION_RELEASE(),
                     button,
                     x,
-                    y,
+                    mouseY,
                     mods);
             if (release.length > 0) {
                 chunks[chunkCount++] = release;
@@ -855,7 +1020,7 @@ final class TerminalSession implements AutoCloseable {
                     : Math.max(minScrollbarHeightPx, heightPx * ((double) visible / total));
             var thumbY = scrollableRows == 0
                     ? 0
-                    : (heightPx - thumbHeight) * ((double) GhosttyTerminalScrollbar.offset(scrollbar) / scrollableRows);
+                    : (heightPx - thumbHeight) * ((GhosttyTerminalScrollbar.offset(scrollbar) + scrollOffsetRows) / scrollableRows);
             return new ScrollbarInfo(
                     total,
                     visible,
@@ -1068,9 +1233,28 @@ final class TerminalSession implements AutoCloseable {
         try (var arena = Arena.ofConfined()) {
             var event = selectionGestureEvent(arena, ghostty_vt_h.GHOSTTY_SELECTION_GESTURE_EVENT_TYPE_AUTOSCROLL_TICK());
             try {
+                var viewportY = hit.viewportY();
+                var scrollbar = GhosttyTerminalScrollbar.allocate(arena);
+                requireGhosttySuccess(
+                        ghostty_vt_h.ghostty_terminal_get(terminal, ghostty_vt_h.GHOSTTY_TERMINAL_DATA_SCROLLBAR(), scrollbar),
+                        "ghostty_terminal_get(scrollbar)");
+                var direction = selectionGestureAutoscroll();
+                var offset = GhosttyTerminalScrollbar.offset(scrollbar);
+                var bottom = GhosttyTerminalScrollbar.total(scrollbar) - GhosttyTerminalScrollbar.len(scrollbar);
+                if (scrollOffsetRows != 0) {
+                    if ((direction == SelectionAutoscroll.UP && offset == 0)
+                            || (direction == SelectionAutoscroll.DOWN && offset + 1 >= bottom)) {
+                        // The native tick scrolls before resolving the endpoint. At a boundary the grid snaps to whole rows.
+                        scrollOffsetRows = 0;
+                        viewportY = Math.min(viewportY, size.rows() - 1);
+                    }
+                }
+                // A downward tick removes one available row before resolving the endpoint.
+                var nextOffset = direction == SelectionAutoscroll.DOWN ? Math.min(offset + 1, bottom) : offset;
+                viewportY = Math.min(viewportY, Math.toIntExact(GhosttyTerminalScrollbar.total(scrollbar) - nextOffset - 1));
                 var viewport = GhosttyPointCoordinate.allocate(arena);
                 GhosttyPointCoordinate.x(viewport, (short) hit.viewportX());
-                GhosttyPointCoordinate.y(viewport, hit.viewportY());
+                GhosttyPointCoordinate.y(viewport, viewportY);
                 requireGhosttySuccess(
                         ghostty_vt_h.ghostty_selection_gesture_event_set(
                                 event,
@@ -1157,59 +1341,113 @@ final class TerminalSession implements AutoCloseable {
         }
     }
 
-    SearchDocumentBuilder newSearchDocument() {
-        var columns = columnCount();
-        var rows = totalRowCount();
-        return new SearchDocumentBuilder(columns, rows);
-    }
-
-    boolean appendSearchRows(SearchDocumentBuilder document, long budgetNs) {
-        if (document.complete() || document.columns() <= 0 || document.rows() <= 0) {
-            document.complete = true;
-            return false;
-        }
-
-        var changed = false;
-        var start = System.nanoTime();
+    void setSearchNeedle(String query) {
         try (var arena = Arena.ofConfined()) {
-            do {
-                appendSearchRow(document, document.nextRow, arena);
-                document.nextRow++;
-                changed = true;
-            } while (document.nextRow < document.rows()
-                    && (budgetNs == Long.MAX_VALUE || System.nanoTime() - start < budgetNs));
+            var bytes = query.getBytes(StandardCharsets.UTF_8);
+            var needle = GhosttyString.allocate(arena);
+            GhosttyString.ptr(needle, bytes.length == 0 ? MemorySegment.NULL : arena.allocateFrom(ValueLayout.JAVA_BYTE, bytes));
+            GhosttyString.len(needle, bytes.length);
+            requireGhosttySuccess(ghostty_vt_h.ghostty_search_set(search, ghostty_vt_h.GHOSTTY_SEARCH_OPT_NEEDLE(), needle), "ghostty_search_set(needle)");
         }
-        document.complete = document.nextRow >= document.rows();
-        return changed;
     }
 
-    static SearchBatch search(SearchDocumentBuilder index, String query, int searchedUntil) {
-        var searchLimit = index.text().length() - query.length() + 1;
-        if (searchLimit <= searchedUntil) {
-            return new SearchBatch(List.of(), searchedUntil);
+    void advanceSearch(long budgetNs) {
+        try (var arena = Arena.ofConfined()) {
+            var status = arena.allocate(ValueLayout.JAVA_INT);
+            var start = System.nanoTime();
+            do {
+                requireGhosttySuccess(ghostty_vt_h.ghostty_search_tick(search, status), "ghostty_search_tick");
+                var value = status.get(ValueLayout.JAVA_INT, 0);
+                if (value == ghostty_vt_h.GHOSTTY_SEARCH_STATUS_COMPLETE()) {
+                    break;
+                }
+                if (value == ghostty_vt_h.GHOSTTY_SEARCH_STATUS_FEED_REQUIRED()) {
+                    requireGhosttySuccess(ghostty_vt_h.ghostty_search_feed(search), "ghostty_search_feed");
+                }
+            } while (System.nanoTime() - start < budgetNs);
         }
+    }
 
-        var matches = new ArrayList<Selection>();
-        var fromIndex = Math.max(0, searchedUntil - Math.max(0, query.length() - 1));
-        while (fromIndex < searchLimit) {
-            var matchIndex = regionMatchesIgnoreCase(index.text(), fromIndex, query)
-                    ? fromIndex
-                    : -1;
-            if (matchIndex < 0) {
-                fromIndex++;
-                continue;
+    boolean selectSearchMatch(boolean next) {
+        try (var arena = Arena.ofConfined()) {
+            var scrollbar = GhosttyTerminalScrollbar.allocate(arena);
+            requireGhosttySuccess(ghostty_vt_h.ghostty_terminal_get(terminal, ghostty_vt_h.GHOSTTY_TERMINAL_DATA_SCROLLBAR(), scrollbar), "ghostty_terminal_get(scrollbar)");
+            var previousOffset = GhosttyTerminalScrollbar.offset(scrollbar);
+            var result = ghostty_vt_h.ghostty_search_set(search,
+                    next ? ghostty_vt_h.GHOSTTY_SEARCH_OPT_SELECT_NEXT() : ghostty_vt_h.GHOSTTY_SEARCH_OPT_SELECT_PREV(),
+                    MemorySegment.NULL);
+            if (result == ghostty_vt_h.GHOSTTY_NO_VALUE()) {
+                return false;
             }
+            requireGhosttySuccess(result, "ghostty_search_set(select)");
+            requireGhosttySuccess(ghostty_vt_h.ghostty_terminal_get(terminal, ghostty_vt_h.GHOSTTY_TERMINAL_DATA_SCROLLBAR(), scrollbar), "ghostty_terminal_get(scrollbar)");
+            if (GhosttyTerminalScrollbar.offset(scrollbar) != previousOffset) {
+                scrollOffsetRows = 0;
+                updateRenderState();
+            }
+            return true;
+        }
+    }
 
-            if (matchIndex >= searchedUntil) {
-                var start = nearestMappedPoint(index.points(), matchIndex, 1);
-                var end = nearestMappedPoint(index.points(), matchIndex + query.length() - 1, -1);
-                if (start != null && end != null) {
-                    matches.add(Selection.linear(start, end));
+    SearchSnapshot searchSnapshot() {
+        requireGhosttySuccess(ghostty_vt_h.ghostty_search_feed(search), "ghostty_search_feed");
+        try (var arena = Arena.ofConfined()) {
+            var total = arena.allocate(ValueLayout.JAVA_LONG);
+            requireGhosttySuccess(ghostty_vt_h.ghostty_search_get(search, ghostty_vt_h.GHOSTTY_SEARCH_DATA_TOTAL_MATCHES(), total), "ghostty_search_get(total_matches)");
+            var index = arena.allocate(ValueLayout.JAVA_LONG);
+            var selectedIndex = ghostty_vt_h.ghostty_search_get(search, ghostty_vt_h.GHOSTTY_SEARCH_DATA_SELECTED_INDEX(), index);
+            if (selectedIndex != ghostty_vt_h.GHOSTTY_NO_VALUE()) {
+                requireGhosttySuccess(selectedIndex, "ghostty_search_get(selected_index)");
+            }
+            var selected = selectedIndex == GHOSTTY_SUCCESS ? Math.toIntExact(index.get(ValueLayout.JAVA_LONG, 0)) : -1;
+            var selectedMatch = Selection.empty();
+            if (selected >= 0) {
+                var match = GhosttySelection.allocate(arena);
+                GhosttySelection.size(match, GhosttySelection.sizeof());
+                requireGhosttySuccess(ghostty_vt_h.ghostty_search_get(search, ghostty_vt_h.GHOSTTY_SEARCH_DATA_SELECTED_MATCH(), match), "ghostty_search_get(selected_match)");
+                selectedMatch = searchSelection(match, arena);
+            }
+            var buffer = GhosttySelectionBuffer.allocate(arena);
+            var capacityResult = ghostty_vt_h.ghostty_search_get(search, ghostty_vt_h.GHOSTTY_SEARCH_DATA_VIEWPORT_MATCHES(), buffer);
+            if (capacityResult != ghostty_vt_h.GHOSTTY_OUT_OF_SPACE()) {
+                requireGhosttySuccess(capacityResult, "ghostty_search_get(viewport_matches capacity)");
+            }
+            var capacity = GhosttySelectionBuffer.len(buffer);
+            var storage = GhosttySelection.allocateArray(capacity, arena);
+            GhosttySelectionBuffer.ptr(buffer, storage);
+            GhosttySelectionBuffer.cap(buffer, capacity);
+            requireGhosttySuccess(ghostty_vt_h.ghostty_search_get(search, ghostty_vt_h.GHOSTTY_SEARCH_DATA_VIEWPORT_MATCHES(), buffer), "ghostty_search_get(viewport_matches)");
+            var matches = new ArrayList<Selection>();
+            for (var i = 0; i < GhosttySelectionBuffer.len(buffer); i++) {
+                var match = searchSelection(storage.asSlice(i * GhosttySelection.sizeof(), GhosttySelection.sizeof()), arena);
+                if (!match.isEmpty()) {
+                    matches.add(match);
                 }
             }
-            fromIndex = matchIndex + Math.max(1, query.length());
+            // Give the selected match priority where highlights overlap.
+            var highlightedMatch = matches.indexOf(selectedMatch);
+            if (highlightedMatch >= 0) {
+                matches.remove(highlightedMatch);
+                matches.addFirst(selectedMatch);
+                highlightedMatch = 0;
+            }
+            var status = arena.allocate(ValueLayout.JAVA_INT);
+            requireGhosttySuccess(ghostty_vt_h.ghostty_search_get(search, ghostty_vt_h.GHOSTTY_SEARCH_DATA_STATUS(), status), "ghostty_search_get(status)");
+            return new SearchSnapshot(SearchResult.append(SearchResult.empty(), matches, columnCount()), highlightedMatch, selected,
+                    Math.toIntExact(total.get(ValueLayout.JAVA_LONG, 0)), status.get(ValueLayout.JAVA_INT, 0) == ghostty_vt_h.GHOSTTY_SEARCH_STATUS_COMPLETE());
         }
-        return new SearchBatch(matches, searchLimit);
+    }
+
+    private Selection searchSelection(MemorySegment match, Arena arena) {
+        var from = screenPoint(GhosttySelection.start(match), arena);
+        var to = screenPoint(GhosttySelection.end(match), arena);
+        return from == null || to == null ? Selection.empty() : Selection.linear(from, to);
+    }
+
+    record SearchSnapshot(SearchResult result, int highlightedMatch, int selectedIndex, int totalMatches, boolean complete) {
+        static SearchSnapshot empty() {
+            return new SearchSnapshot(SearchResult.empty(), -1, -1, 0, true);
+        }
     }
 
     MatchedLinkMatcher linkMatcherAt(Selection.ScreenPoint point, List<TerminalLinkMatcher> linkMatchers) {
@@ -1544,13 +1782,22 @@ final class TerminalSession implements AutoCloseable {
         }
 
         var hitX = clamp ? Math.clamp(x, 0.0, Math.max(0.0, contentWidth - 1.0)) : x;
-        var hitY = clamp ? Math.clamp(y, 0.0, Math.max(0.0, heightPx - 1.0)) : y;
+        var hitY = (clamp ? Math.clamp(y, 0.0, Math.max(0.0, heightPx - 1.0)) : y)
+                + scrollOffsetRows * metrics.cellHeightPx();
         try (var arena = Arena.ofConfined()) {
             var point = GhosttyPoint.allocate(arena);
             GhosttyPoint.tag(point, ghostty_vt_h.GHOSTTY_POINT_TAG_VIEWPORT());
             var coordinate = GhosttyPointCoordinate.allocate(arena);
             GhosttyPointCoordinate.x(coordinate, (short) Math.clamp((int) Math.floor(hitX / metrics.cellWidthPx()), 0, Math.max(0, columnCount() - 1)));
-            GhosttyPointCoordinate.y(coordinate, Math.max(0, (int) Math.floor(hitY / metrics.cellHeightPx())));
+            var viewportY = Math.max(0, (int) Math.floor(hitY / metrics.cellHeightPx()));
+            if (clamp) {
+                var scrollbar = GhosttyTerminalScrollbar.allocate(arena);
+                requireGhosttySuccess(
+                        ghostty_vt_h.ghostty_terminal_get(terminal, ghostty_vt_h.GHOSTTY_TERMINAL_DATA_SCROLLBAR(), scrollbar),
+                        "ghostty_terminal_get(scrollbar)");
+                viewportY = Math.min(viewportY, Math.toIntExact(GhosttyTerminalScrollbar.total(scrollbar) - GhosttyTerminalScrollbar.offset(scrollbar) - 1));
+            }
+            GhosttyPointCoordinate.y(coordinate, viewportY);
             GhosttyPointValue.coordinate(GhosttyPoint.value(point), coordinate);
 
             var gridRef = GhosttyGridRef.allocate(arena);
@@ -1846,9 +2093,19 @@ final class TerminalSession implements AutoCloseable {
                     kittyPlacementIterator,
                     image,
                     terminal,
-                    renderInfo) != GHOSTTY_SUCCESS
-                    || !GhosttyKittyGraphicsPlacementRenderInfo.viewport_visible(renderInfo)) {
+                    renderInfo) != GHOSTTY_SUCCESS) {
                 continue;
+            }
+            if (!GhosttyKittyGraphicsPlacementRenderInfo.viewport_visible(renderInfo)) {
+                // Ghostty c320 resolves offscreen pinned/relative origins here; invalid origins have row 0.
+                // Recheck on native updates: offscreen coordinates aren't guaranteed by the C API.
+                var column = GhosttyKittyGraphicsPlacementRenderInfo.viewport_col(renderInfo);
+                var row = GhosttyKittyGraphicsPlacementRenderInfo.viewport_row(renderInfo);
+                if (row < size.rows() || row >= size.rows() + 2
+                        || column >= size.columns()
+                        || column + Integer.toUnsignedLong(GhosttyKittyGraphicsPlacementRenderInfo.grid_cols(renderInfo)) <= 0) {
+                    continue;
+                }
             }
 
             if (ghostty_vt_h.ghostty_kitty_graphics_image_get_multi(
@@ -1889,7 +2146,8 @@ final class TerminalSession implements AutoCloseable {
             var destinationX = GhosttyKittyGraphicsPlacementRenderInfo.viewport_col(renderInfo) * metrics.cellWidthPx()
                     + Integer.toUnsignedLong(xOffsetValue.get(ValueLayout.JAVA_INT, 0)) / terminalScaleX;
             var destinationY = GhosttyKittyGraphicsPlacementRenderInfo.viewport_row(renderInfo) * metrics.cellHeightPx()
-                    + Integer.toUnsignedLong(yOffsetValue.get(ValueLayout.JAVA_INT, 0)) / terminalScaleY;
+                    + Integer.toUnsignedLong(yOffsetValue.get(ValueLayout.JAVA_INT, 0)) / terminalScaleY
+                    - scrollOffsetRows * metrics.cellHeightPx();
             var destinationWidth = destinationWidthPx / terminalScaleX;
             var destinationHeight = destinationHeightPx / terminalScaleY;
             if (destinationX >= canvasWidth
@@ -2080,12 +2338,12 @@ final class TerminalSession implements AutoCloseable {
                     ? Math.toIntExact(GhosttyTerminalScrollbar.offset(scrollbar))
                     : 0;
             var visibleRows = Math.max(1, (int) Math.ceil(height / metrics.cellHeightPx()));
-            var linkResult = linkMatcherResult(linkMatchers, viewportTop, viewportTop + visibleRows - 1);
+            var linkResult = linkMatcherResult(linkMatchers, viewportTop, viewportTop + visibleRows);
             var highlightedViewportRow = promptNavigationHighlightRow >= viewportTop
                     && promptNavigationHighlightRow < viewportTop + visibleRows
                             ? promptNavigationHighlightRow - viewportTop
                             : -1;
-            var cursor = renderStateCursor(arena);
+            var cursor = renderStateCursor(metrics, height);
             var cursorX = cursor == null
                     ? -1
                     : Short.toUnsignedInt(GhosttyRenderStateCursor.viewport_x(cursor));
@@ -2119,7 +2377,8 @@ final class TerminalSession implements AutoCloseable {
                             "ghostty_render_state_get(row_iterator)");
                 }
 
-                var y = 0.0;
+                // Overscan is requested only below, so iterator indices still equal viewport rows.
+                var y = -scrollOffsetRows * metrics.cellHeightPx();
                 var viewportY = 0;
                 while (ghostty_vt_h.ghostty_render_state_row_iterator_next(rowIterator)) {
                     requireGhosttySuccess(
@@ -2383,27 +2642,19 @@ final class TerminalSession implements AutoCloseable {
         }
     }
 
-    TerminalView.CursorLocation currentCursorLocation(TerminalView.FontMetrics metrics) {
-        try (var arena = Arena.ofConfined()) {
-            var cursor = GhosttyRenderStateCursor.allocate(arena);
-            GhosttyRenderStateCursor.size(cursor, GhosttyRenderStateCursor.sizeof());
-            if (ghostty_vt_h.ghostty_render_state_get(
-                    renderState,
-                    ghostty_vt_h.GHOSTTY_RENDER_STATE_DATA_CURSOR(),
-                    cursor) != GHOSTTY_SUCCESS
-                    || !GhosttyRenderStateCursor.visible(cursor)
-                    || !GhosttyRenderStateCursor.viewport_has_value(cursor)) {
-                return null;
-            }
-
-            var cellX = Short.toUnsignedInt(GhosttyRenderStateCursor.viewport_x(cursor));
-            var cellY = Short.toUnsignedInt(GhosttyRenderStateCursor.viewport_y(cursor));
-            return new TerminalView.CursorLocation(
-                    cellX,
-                    cellY,
-                    cellX * (double) metrics.cellWidthPx(),
-                    cellY * (double) metrics.cellHeightPx());
+    TerminalView.CursorLocation currentCursorLocation(TerminalView.FontMetrics metrics, double height) {
+        var cursor = renderStateCursor(metrics, height);
+        if (cursor == null) {
+            return null;
         }
+
+        var cellX = Short.toUnsignedInt(GhosttyRenderStateCursor.viewport_x(cursor));
+        var cellY = Short.toUnsignedInt(GhosttyRenderStateCursor.viewport_y(cursor));
+        return new TerminalView.CursorLocation(
+                cellX,
+                cellY,
+                cellX * (double) metrics.cellWidthPx(),
+                (cellY - scrollOffsetRows) * metrics.cellHeightPx());
     }
 
     private byte[] encodeMouseButton(int action, int button, double x, double y, short mods) {
@@ -2638,31 +2889,6 @@ final class TerminalSession implements AutoCloseable {
                 GhosttyPointCoordinate.y(coordinate));
     }
 
-    private void appendSearchRow(SearchDocumentBuilder document, int row, Arena arena) {
-        var lastTextColumn = lastTextColumn(row, document.columns(), arena);
-        for (var column = 0; column <= lastTextColumn; column++) {
-            var point = new Selection.ScreenPoint(column, row);
-            var grapheme = cellGrapheme(point, arena);
-            if (grapheme.spacerCell()) {
-                continue;
-            }
-            if (grapheme.text().isEmpty()) {
-                document.text().append(' ');
-                document.points().add(point);
-            } else {
-                var start = document.text().length();
-                document.text().append(grapheme.text());
-                for (var i = start; i < document.text().length(); i++) {
-                    document.points().add(point);
-                }
-            }
-        }
-        if (row + 1 < document.rows() && !rowWrap(new Selection.ScreenPoint(Math.max(0, document.columns() - 1), row), arena)) {
-            document.text().append('\n');
-            document.points().add(null);
-        }
-    }
-
     private void appendLogicalLineRow(
             StringBuilder text,
             ArrayList<Selection.ScreenPoint> points,
@@ -2872,15 +3098,6 @@ final class TerminalSession implements AutoCloseable {
             }
         }
         return null;
-    }
-
-    private static boolean regionMatchesIgnoreCase(CharSequence text, int fromIndex, String query) {
-        for (var i = 0; i < query.length(); i++) {
-            if (Character.toLowerCase(text.charAt(fromIndex + i)) != Character.toLowerCase(query.charAt(i))) {
-                return false;
-            }
-        }
-        return true;
     }
 
     private static Selection.ScreenPoint next(Selection.ScreenPoint point, int columns) {
@@ -3183,47 +3400,6 @@ final class TerminalSession implements AutoCloseable {
         return color.deriveColor(0, 1, 1, color.getOpacity() * factor);
     }
 
-    static final class SearchDocumentBuilder {
-
-        private final int columns;
-        private final int rows;
-        private final StringBuilder text = new StringBuilder();
-        private final ArrayList<Selection.ScreenPoint> points = new ArrayList<>();
-        private int nextRow;
-        private boolean complete;
-
-        private SearchDocumentBuilder(int columns, int rows) {
-            this.columns = columns;
-            this.rows = rows;
-            complete = columns <= 0 || rows <= 0;
-        }
-
-        int columns() {
-            return columns;
-        }
-
-        private int rows() {
-            return rows;
-        }
-
-        private StringBuilder text() {
-            return text;
-        }
-
-        private ArrayList<Selection.ScreenPoint> points() {
-            return points;
-        }
-
-        boolean complete() {
-            return complete;
-        }
-
-    }
-
-    record SearchBatch(List<Selection> matches, int searchedUntil) {
-
-    }
-
     record MatchedLinkMatcher(int index, TerminalLinkMatcher link, MatchResult match, Selection selection) {
 
     }
@@ -3348,7 +3524,7 @@ final class TerminalSession implements AutoCloseable {
 
         var codePointCount = preedit.text().codePointCount(0, preedit.text().length());
         var x = Short.toUnsignedInt(GhosttyRenderStateCursor.viewport_x(cursor)) * (double) metrics.cellWidthPx();
-        var y = Short.toUnsignedInt(GhosttyRenderStateCursor.viewport_y(cursor)) * (double) metrics.cellHeightPx();
+        var y = (Short.toUnsignedInt(GhosttyRenderStateCursor.viewport_y(cursor)) - scrollOffsetRows) * metrics.cellHeightPx();
         graphics.setFont(metrics.regular());
         graphics.setFill(theme.foreground());
         graphics.fillText(preedit.text(), x, y + metrics.baselineOffsetPx());
@@ -3388,7 +3564,7 @@ final class TerminalSession implements AutoCloseable {
                 ? toFxColor(GhosttyRenderStateColors.cursor(colors))
                 : theme.cursorColor();
         var cursorPixelX = Short.toUnsignedInt(GhosttyRenderStateCursor.viewport_x(cursor)) * (double) metrics.cellWidthPx();
-        var cursorPixelY = Short.toUnsignedInt(GhosttyRenderStateCursor.viewport_y(cursor)) * (double) metrics.cellHeightPx();
+        var cursorPixelY = (Short.toUnsignedInt(GhosttyRenderStateCursor.viewport_y(cursor)) - scrollOffsetRows) * metrics.cellHeightPx();
         var cursorWidth = metrics.cellWidthPx();
         var cursorHeight = metrics.cellHeightPx();
         var cursorStyle = focused
@@ -3429,26 +3605,62 @@ final class TerminalSession implements AutoCloseable {
     }
 
     private void updateRenderState() {
+        if (renderHeld) {
+            return;
+        }
         requireGhosttySuccess(
                 ghostty_vt_h.ghostty_render_state_update(renderState, terminal),
                 "ghostty_render_state_update");
+        GhosttyRenderStateCursor.size(cursorSnapshot, GhosttyRenderStateCursor.sizeof());
+        requireGhosttySuccess(
+                ghostty_vt_h.ghostty_render_state_get(renderState, ghostty_vt_h.GHOSTTY_RENDER_STATE_DATA_CURSOR(), cursorSnapshot),
+                "ghostty_render_state_get(cursor)");
+        if (GhosttyRenderStateCursor.visible(cursorSnapshot) && !GhosttyRenderStateCursor.viewport_has_value(cursorSnapshot)) {
+            // Native cursor coordinates exclude overscan. Capture them at the same VT boundary as the rows.
+            try (var arena = Arena.ofConfined()) {
+                var x = arena.allocate(ValueLayout.JAVA_SHORT);
+                var y = arena.allocate(ValueLayout.JAVA_SHORT);
+                var scrollbar = GhosttyTerminalScrollbar.allocate(arena);
+                requireGhosttySuccess(
+                        ghostty_vt_h.ghostty_terminal_get(terminal, ghostty_vt_h.GHOSTTY_TERMINAL_DATA_CURSOR_X(), x),
+                        "ghostty_terminal_get(cursor_x)");
+                requireGhosttySuccess(
+                        ghostty_vt_h.ghostty_terminal_get(terminal, ghostty_vt_h.GHOSTTY_TERMINAL_DATA_CURSOR_Y(), y),
+                        "ghostty_terminal_get(cursor_y)");
+                requireGhosttySuccess(
+                        ghostty_vt_h.ghostty_terminal_get(terminal, ghostty_vt_h.GHOSTTY_TERMINAL_DATA_SCROLLBAR(), scrollbar),
+                        "ghostty_terminal_get(scrollbar)");
+                var viewportY = Short.toUnsignedInt(y.get(ValueLayout.JAVA_SHORT, 0))
+                        + GhosttyTerminalScrollbar.total(scrollbar) - GhosttyTerminalScrollbar.len(scrollbar) - GhosttyTerminalScrollbar.offset(scrollbar);
+                if (viewportY >= size.rows() && viewportY < size.rows() + 2L) {
+                    GhosttyRenderStateCursor.viewport_x(cursorSnapshot, x.get(ValueLayout.JAVA_SHORT, 0));
+                    GhosttyRenderStateCursor.viewport_y(cursorSnapshot, (short) viewportY);
+                    GhosttyRenderStateCursor.wide_tail(cursorSnapshot, false);
+                    GhosttyRenderStateCursor.viewport_has_value(cursorSnapshot, true);
+                }
+            }
+        }
+        if (scrollOffsetRows != 0) {
+            try (var arena = Arena.ofConfined()) {
+                var overscan = GhosttyRenderStateOverscan.allocate(arena);
+                requireGhosttySuccess(
+                        ghostty_vt_h.ghostty_render_state_get(renderState, ghostty_vt_h.GHOSTTY_RENDER_STATE_DATA_OVERSCAN(), overscan),
+                        "ghostty_render_state_get(overscan)");
+                if (GhosttyRenderStateOverscan.below(overscan) == 0 || alternateScreenActive()) {
+                    scrollOffsetRows = 0;
+                }
+            }
+        }
     }
 
-    private MemorySegment renderStateCursor(Arena arena) {
-        var cursor = GhosttyRenderStateCursor.allocate(arena);
-        GhosttyRenderStateCursor.size(cursor, GhosttyRenderStateCursor.sizeof());
-        requireGhosttySuccess(
-                ghostty_vt_h.ghostty_render_state_get(
-                        renderState,
-                        ghostty_vt_h.GHOSTTY_RENDER_STATE_DATA_CURSOR(),
-                        cursor),
-                "ghostty_render_state_get(cursor)");
-        if (!GhosttyRenderStateCursor.visible(cursor)
-                || !GhosttyRenderStateCursor.viewport_has_value(cursor)) {
+    private MemorySegment renderStateCursor(TerminalView.FontMetrics metrics, double height) {
+        if (!GhosttyRenderStateCursor.visible(cursorSnapshot)
+                || !GhosttyRenderStateCursor.viewport_has_value(cursorSnapshot)
+                || (Short.toUnsignedInt(GhosttyRenderStateCursor.viewport_y(cursorSnapshot)) - scrollOffsetRows) * metrics.cellHeightPx() >= height) {
             return null;
         }
 
-        return cursor;
+        return cursorSnapshot;
     }
 
     private static MemorySegment newAddress(Arena arena, String operation, Allocator allocator) {
