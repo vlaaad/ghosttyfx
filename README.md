@@ -239,8 +239,11 @@ Use `searchPromptTextProperty()` or `setSearchPromptText(...)` to customize the
 placeholder shown in the search field. The search UI follows the terminal font
 and theme.
 
-Search can be controlled with `toggleSearch()`, `closeSearch()`, `searchNext()`,
-and `searchPrevious()`.
+Search can be controlled with `openSearch()`, `toggleSearch()`, `closeSearch()`,
+`searchNext()`, and `searchPrevious()`. Search uses Ghostty's native engine;
+opening uses selected terminal text as the query. Enter/Up navigate toward older
+matches and Shift+Enter/Down toward newer matches, without wrapping. Escape closes
+search.
 
 ### Shortcuts
 

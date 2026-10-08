@@ -1,9 +1,8 @@
 package io.github.vlaaad.ghosttyfx;
 
-import java.util.List;
-import java.util.function.Consumer;
-import java.util.function.Predicate;
+import java.util.regex.Pattern;
 import javafx.animation.AnimationTimer;
+import javafx.animation.PauseTransition;
 import javafx.application.Platform;
 import javafx.beans.binding.Bindings;
 import javafx.beans.property.ObjectProperty;
@@ -11,10 +10,10 @@ import javafx.beans.property.ReadOnlyDoubleProperty;
 import javafx.beans.property.StringProperty;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
+import javafx.util.Duration;
 import javafx.scene.control.Label;
 import javafx.scene.control.TextField;
 import javafx.scene.control.skin.TextFieldSkin;
-import javafx.scene.input.KeyEvent;
 import javafx.scene.layout.Background;
 import javafx.scene.layout.BackgroundFill;
 import javafx.scene.layout.Border;
@@ -27,66 +26,68 @@ import javafx.scene.layout.Priority;
 import javafx.scene.text.Font;
 
 final class SearchUi {
-
     private static final double WIDTH = 320;
-    private static final long INDEX_BUDGET_NS = 1_000_000L;
+    private static final Pattern SHORT_QUERY = Pattern.compile("\\X{1,2}");
+    private static final long SEARCH_BUDGET_NS = 1_000_000L;
+    private static final long REFRESH_INTERVAL_NS = 24_000_000L;
 
     private final TerminalSession terminalSession;
-    private final Runnable closeSearch;
-    private final Runnable redraw;
-    private final Predicate<List<Selection>> matchesAffectViewport;
-    private final Consumer<Selection> scrollMatchIntoView;
+    private final Runnable matchSelected;
+    private final Runnable render;
     private final HBox view;
     private final TextField field;
     private final Label count;
-    private final AnimationTimer indexTimer = new AnimationTimer() {
+    private final PauseTransition debounce = new PauseTransition(Duration.millis(300));
+    private final AnimationTimer searchTimer = new AnimationTimer() {
         @Override
         public void handle(long now) {
-            continueSearch();
+            if (now - lastProgress < REFRESH_INTERVAL_NS) {
+                return;
+            }
+            lastProgress = now;
+            terminalSession.advanceSearch(SEARCH_BUDGET_NS);
+            if (refreshResults()) {
+                render.run();
+            }
         }
     };
-
-    private TerminalSession.SearchResult result = TerminalSession.SearchResult.empty();
-    private int selectedMatch = -1;
-    private SearchJob job;
+    private TerminalSession.SearchSnapshot snapshot = TerminalSession.SearchSnapshot.empty();
+    private long lastProgress;
 
     SearchUi(
             TerminalSession terminalSession,
             ObjectProperty<Font> font,
             StringProperty searchPromptText,
             ReadOnlyDoubleProperty terminalWidth,
-            Runnable closeSearch,
-            Runnable redraw,
-            Predicate<List<Selection>> matchesAffectViewport,
-            Consumer<Selection> scrollMatchIntoView) {
+            Runnable matchSelected,
+            Runnable render) {
         this.terminalSession = terminalSession;
-        this.closeSearch = closeSearch;
-        this.redraw = redraw;
-        this.matchesAffectViewport = matchesAffectViewport;
-        this.scrollMatchIntoView = scrollMatchIntoView;
-
+        this.matchSelected = matchSelected;
+        this.render = render;
         field = new TextField();
         field.setId("ghosttyfx-search-field");
         field.setPrefColumnCount(20);
         field.setMinWidth(0);
         field.setMaxWidth(Double.MAX_VALUE);
         field.setFocusTraversable(true);
-        field.setPadding(new Insets(3, 3, 3, 3));
+        field.setPadding(new Insets(3));
         field.setSkin(new SearchTextFieldSkin(field));
         field.fontProperty().bind(font);
         field.promptTextProperty().bind(searchPromptText);
-        field.textProperty().addListener((_, _, _) -> refresh());
-        field.addEventFilter(KeyEvent.KEY_PRESSED, this::handleKeyPressed);
-        field.focusedProperty().addListener((_, _, focused) -> {
-            if (!focused) {
-                closeSearch.run();
+        field.textProperty().addListener((_, _, value) -> {
+            debounce.stop();
+            if (visible()) {
+                if (SHORT_QUERY.matcher(value).matches()) {
+                    debounce.playFromStart();
+                } else {
+                    startSearch();
+                }
             }
         });
-        field.sceneProperty().addListener((_, _, _) -> updateIndexTimer());
-
-        count = new Label();
+        field.sceneProperty().addListener((_, _, _) -> updateSearchTimer());
+        debounce.setOnFinished(_ -> startSearch());
+        count = new Label("0/0");
         count.setId("ghosttyfx-search-count");
-        count.setText("0/0");
         count.fontProperty().bind(font);
         count.setMinWidth(Label.USE_PREF_SIZE);
         view = new HBox(6, field, count);
@@ -94,8 +95,7 @@ final class SearchUi {
         view.setAlignment(Pos.CENTER_LEFT);
         view.setMinWidth(0);
         view.prefWidthProperty().bind(Bindings.createDoubleBinding(
-                () -> Math.max(0, Math.min(WIDTH, terminalWidth.get() - 16)),
-                terminalWidth));
+                () -> Math.max(0, Math.min(WIDTH, terminalWidth.get() - 16)), terminalWidth));
         view.maxWidthProperty().bind(view.prefWidthProperty());
         view.setVisible(false);
         HBox.setHgrow(field, Priority.ALWAYS);
@@ -109,28 +109,41 @@ final class SearchUi {
         return view.isVisible();
     }
 
+    boolean fieldFocused() {
+        return visible() && field.getScene() != null && field.getScene().getFocusOwner() == field;
+    }
+
     TerminalSession.SearchResult result() {
-        return result;
+        return snapshot.result();
     }
 
     int selectedMatch() {
-        return selectedMatch;
+        return snapshot.highlightedMatch();
+    }
+
+    int selectedIndex() {
+        return snapshot.selectedIndex();
     }
 
     int matchCount() {
-        return result.matches().size();
+        return snapshot.totalMatches();
     }
 
     String text() {
         return field.getText();
     }
 
-    void open(String selected) {
-        field.setText(selected);
-        field.selectAll();
+    void open(String query) {
+        var wasVisible = visible();
         view.setVisible(true);
+        if (query != null || !wasVisible) {
+            field.setText(query == null ? "" : query);
+        }
         field.requestFocus();
-        refresh();
+        field.selectAll();
+        if (!wasVisible && debounce.getStatus() != javafx.animation.Animation.Status.RUNNING) {
+            startSearch();
+        }
     }
 
     void close() {
@@ -143,76 +156,79 @@ final class SearchUi {
             Platform.runLater(this::cancel);
             return;
         }
-
-        indexTimer.stop();
-        job = null;
-        result = TerminalSession.SearchResult.empty();
-        selectedMatch = -1;
+        debounce.stop();
+        searchTimer.stop();
+        terminalSession.setSearchNeedle("");
+        snapshot = TerminalSession.SearchSnapshot.empty();
         count.setText("0/0");
     }
 
-    void refresh() {
-        refresh(true);
-    }
-
-    void refresh(boolean clearCurrent) {
+    private void startSearch() {
         if (!visible()) {
             return;
         }
-
-        var query = field.getText();
-        indexTimer.stop();
-        if (query.isEmpty()) {
-            job = null;
-            result = TerminalSession.SearchResult.empty();
-            selectedMatch = -1;
-            count.setText("0/0");
-            redraw.run();
-            return;
-        }
-
-        job = new SearchJob(query, terminalSession.newSearchDocument());
-        if (clearCurrent) {
-            result = TerminalSession.SearchResult.empty();
-            selectedMatch = -1;
-            count.setText("...");
-        } else {
-            updateCount();
-        }
-        redraw.run();
-        updateIndexTimer();
+        terminalSession.setSearchNeedle(field.getText());
+        refresh();
     }
 
-    boolean selectNext(boolean wrap) {
-        if (!visible() || result.matches().isEmpty()) {
+    void refresh() {
+        if (visible()) {
+            refreshResults();
+            render.run();
+        }
+    }
+
+    boolean refreshResults() {
+        if (!visible()) {
             return false;
         }
+        var next = terminalSession.searchSnapshot();
+        var changed = !next.equals(snapshot);
+        snapshot = next;
+        count.setText(field.getText().isEmpty() ? "0/0"
+                : snapshot.totalMatches() == 0 && !snapshot.complete() ? "..."
+                : (snapshot.selectedIndex() < 0 ? "-" : Integer.toString(snapshot.selectedIndex() + 1)) + "/" + snapshot.totalMatches());
+        updateSearchTimer();
+        return changed;
+    }
 
-        if (selectedMatch >= result.matches().size() - 1) {
-            if (!wrap) {
-                return true;
-            }
-            selectMatch(0);
-        } else {
-            selectMatch(selectedMatch + 1);
+    boolean selectNext() {
+        return selectMatch(true);
+    }
+
+    boolean selectPrevious() {
+        return selectMatch(false);
+    }
+
+    private boolean selectMatch(boolean next) {
+        if (!visible()) {
+            return false;
         }
+        if (debounce.getStatus() == javafx.animation.Animation.Status.RUNNING) {
+            debounce.stop();
+            startSearch();
+        }
+        terminalSession.advanceSearch(SEARCH_BUDGET_NS);
+        refreshResults();
+        if (snapshot.selectedIndex() >= 0
+                && snapshot.selectedIndex() == (next ? snapshot.totalMatches() - 1 : 0)) {
+            render.run();
+            return true;
+        }
+        var selected = terminalSession.selectSearchMatch(next);
+        if (selected) {
+            matchSelected.run();
+        }
+        refresh();
         return true;
     }
 
-    boolean selectPrevious(boolean wrap) {
-        if (!visible() || result.matches().isEmpty()) {
-            return false;
-        }
-
-        if (selectedMatch <= 0) {
-            if (!wrap) {
-                return true;
-            }
-            selectMatch(result.matches().size() - 1);
+    private void updateSearchTimer() {
+        if (field.getScene() != null && visible() && !snapshot.complete()) {
+            searchTimer.start();
         } else {
-            selectMatch(selectedMatch - 1);
+            searchTimer.stop();
         }
-        return true;
     }
 
     void applyTheme(TerminalTheme theme) {
@@ -233,120 +249,6 @@ final class SearchUi {
         field.setBorder(Border.EMPTY);
         ((SearchTextFieldSkin) field.getSkin()).applyTheme(theme);
         count.setTextFill(theme.foreground().deriveColor(0, 1, 1, theme.faintOpacity()));
-    }
-
-    private void continueSearch() {
-        var current = job;
-        if (current == null || !visible() || !current.query().equals(field.getText())) {
-            indexTimer.stop();
-            return;
-        }
-
-        terminalSession.appendSearchRows(current.document(), INDEX_BUDGET_NS);
-        var batch = TerminalSession.search(current.document(), current.query(), current.searchedUntil());
-        current.searchedUntil = batch.searchedUntil();
-        result = TerminalSession.SearchResult.append(current.result(), batch.matches(), current.document().columns());
-        current.result = result;
-        selectedMatch = result.matches().isEmpty() ? -1 : Math.max(0, selectedMatch);
-        updateCount();
-
-        var needsRedraw = matchesAffectViewport.test(batch.matches());
-        if (!result.matches().isEmpty() && !current.scrolledToFirstMatch()) {
-            current.scrolledToFirstMatch = true;
-            scrollMatchIntoView.accept(result.matches().getFirst());
-            needsRedraw = true;
-        }
-        if (needsRedraw) {
-            redraw.run();
-        }
-        if (current.document().complete()) {
-            job = null;
-            indexTimer.stop();
-        }
-    }
-
-    private void updateIndexTimer() {
-        if (field.getScene() != null && visible() && job != null) {
-            indexTimer.start();
-        } else {
-            indexTimer.stop();
-        }
-    }
-
-    private void selectMatch(int index) {
-        selectedMatch = index;
-        updateCount();
-        scrollMatchIntoView.accept(result.matches().get(index));
-        redraw.run();
-    }
-
-    private void updateCount() {
-        var matches = result.matches();
-        if (matches.isEmpty()) {
-            count.setText("0/0");
-            return;
-        }
-        var selected = selectedMatch >= 0 ? selectedMatch + 1 : 1;
-        count.setText(selected + "/" + matches.size());
-    }
-
-    private void handleKeyPressed(KeyEvent event) {
-        switch (event.getCode()) {
-            case ENTER -> {
-                if (event.isShiftDown()) {
-                    selectPrevious(false);
-                } else {
-                    selectNext(false);
-                }
-                event.consume();
-            }
-            case DOWN -> {
-                selectNext(false);
-                event.consume();
-            }
-            case UP -> {
-                selectPrevious(false);
-                event.consume();
-            }
-            case ESCAPE -> {
-                closeSearch.run();
-                event.consume();
-            }
-            default -> {}
-        }
-    }
-
-    private static final class SearchJob {
-        private final String query;
-        private final TerminalSession.SearchDocumentBuilder document;
-        private TerminalSession.SearchResult result = TerminalSession.SearchResult.empty();
-        private int searchedUntil;
-        private boolean scrolledToFirstMatch;
-
-        private SearchJob(String query, TerminalSession.SearchDocumentBuilder document) {
-            this.query = query;
-            this.document = document;
-        }
-
-        private String query() {
-            return query;
-        }
-
-        private TerminalSession.SearchDocumentBuilder document() {
-            return document;
-        }
-
-        private int searchedUntil() {
-            return searchedUntil;
-        }
-
-        private TerminalSession.SearchResult result() {
-            return result;
-        }
-
-        private boolean scrolledToFirstMatch() {
-            return scrolledToFirstMatch;
-        }
     }
 
     private static final class SearchTextFieldSkin extends TextFieldSkin {

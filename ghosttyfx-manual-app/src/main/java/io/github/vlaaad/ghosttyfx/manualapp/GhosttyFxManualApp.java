@@ -1,6 +1,7 @@
 package io.github.vlaaad.ghosttyfx.manualapp;
 
 import io.github.vlaaad.ghosttyfx.Shell;
+import io.github.vlaaad.ghosttyfx.ShellState;
 import io.github.vlaaad.ghosttyfx.TerminalLink;
 import io.github.vlaaad.ghosttyfx.TerminalState;
 import io.github.vlaaad.ghosttyfx.TerminalTheme;
@@ -67,7 +68,14 @@ public final class GhosttyFxManualApp {
                     .flatMap(tab -> ((TerminalView) tab.getContent()).hoveredLinkProperty())
                     .map(GhosttyFxManualApp::hoveredLinkText)
                     .orElse(""));
-            hoveredLink.setPadding(new Insets(4, 8, 8, 8));
+            var shellState = new Label();
+            shellState.textProperty().bind(tabs.getSelectionModel().selectedItemProperty()
+                    .flatMap(tab -> ((TerminalView) tab.getContent()).shellStateProperty())
+                    .map(GhosttyFxManualApp::shellStateText)
+                    .orElse("Shell: —"));
+            var statusLine = new HBox(16, shellState, hoveredLink);
+            statusLine.setPadding(new Insets(4, 8, 8, 8));
+            statusLine.setAlignment(Pos.CENTER_LEFT);
             var bellSound = new AudioClip(Objects.requireNonNull(
                     GhosttyFxManualApp.class.getResource("bell_ding1.wav"),
                     "bell_ding1.wav").toExternalForm());
@@ -181,8 +189,7 @@ public final class GhosttyFxManualApp {
             var root = new BorderPane();
             root.setTop(controls);
             root.setCenter(tabs);
-            root.setBottom(hoveredLink);
-            BorderPane.setAlignment(hoveredLink, Pos.CENTER_LEFT);
+            root.setBottom(statusLine);
 
             var stage = new Stage();
             stage.setTitle("GhosttyFX Manual App");
@@ -201,6 +208,17 @@ public final class GhosttyFxManualApp {
         return switch (link) {
             case TerminalLink.Osc8(var target) -> target;
             case TerminalLink.Regex(_, var match) -> match.group();
+        };
+    }
+
+    private static String shellStateText(ShellState state) {
+        return "Shell: " + switch (state) {
+            case ShellState.Prompt(var kind) -> "prompt (" + kind.name().toLowerCase(Locale.ROOT) + ")";
+            case ShellState.InputReady() -> "input ready";
+            case ShellState.Running(var command) -> command.isEmpty() ? "running" : "running: " + command;
+            case ShellState.Finished(var exitCode, var error) -> "finished"
+                    + (exitCode == null ? "" : " (exit " + exitCode + ")")
+                    + (error.isEmpty() ? "" : ": " + error);
         };
     }
 

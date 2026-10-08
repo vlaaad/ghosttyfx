@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.fail;
 
 import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
@@ -27,6 +28,7 @@ import java.util.ArrayList;
 import java.util.Base64;
 import java.util.HashMap;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.List;
 import java.util.Map;
@@ -40,6 +42,7 @@ import javafx.event.Event;
 import javafx.event.EventTarget;
 import javafx.event.EventType;
 import javafx.scene.Cursor;
+import javafx.scene.Node;
 import javafx.scene.Scene;
 import javafx.scene.input.KeyCode;
 import javafx.scene.input.Clipboard;
@@ -49,6 +52,10 @@ import javafx.scene.input.KeyCodeCombination;
 import javafx.scene.input.KeyCombination;
 import javafx.scene.input.MouseButton;
 import javafx.scene.input.MouseEvent;
+import javafx.scene.input.InputMethodEvent;
+import javafx.scene.input.InputMethodHighlight;
+import javafx.scene.input.InputMethodTextRun;
+import javafx.scene.input.ScrollEvent;
 import javafx.scene.control.Label;
 import javafx.scene.control.TextField;
 import javafx.scene.image.WritableImage;
@@ -64,7 +71,7 @@ final class TerminalViewTest {
     private static final Duration POLL_INTERVAL = Duration.ofMillis(100);
 
     @BeforeAll
-    static void initializeJavaFxRuntime() throws InterruptedException {
+    static void initializeJavaFxRuntime() throws Exception {
         var started = new CountDownLatch(1);
         try {
             Platform.startup(() -> {
@@ -110,6 +117,124 @@ final class TerminalViewTest {
             assertTrue(view.prefWidth(-1) != initialPrefWidth || view.prefHeight(-1) != initialPrefHeight,
                     "Expected font change to update preferred size");
             assertThrows(NullPointerException.class, () -> view.fontProperty().set(null));
+        }
+    }
+
+    @Test
+    void usesSameOsc22FallbackForBatchedAndSeparateRequests() throws Exception {
+        var terminal = new ControlledTerminal();
+        try (var view = runOnFxThread(() -> new TerminalView((_, _) -> terminal))) {
+            for (var terminator : List.of("\u001B\\", "\u0007")) {
+                terminal.emit("\u001B]22;text\u001B\\\u001B]2;cursor-reset-" + terminator.length() + "\u001B\\");
+                awaitTitle(view, "cursor-reset-" + terminator.length());
+                assertSame(Cursor.TEXT, runOnFxThread(view::getCursor));
+                terminal.emit("\u001B]22;pointer" + terminator
+                        + "\u001B]22;zoom-in" + terminator
+                        + "\u001B]2;cursor-combined-" + terminator.length() + "\u001B\\");
+                awaitTitle(view, "cursor-combined-" + terminator.length());
+                assertSame(Cursor.TEXT, runOnFxThread(view::getCursor));
+                terminal.emit("\u001B]22;pointer" + terminator
+                        + "\u001B]2;cursor-supported-" + terminator.length() + "\u001B\\");
+                awaitTitle(view, "cursor-supported-" + terminator.length());
+                assertSame(Cursor.HAND, runOnFxThread(view::getCursor));
+                terminal.emit("\u001B]22;zoom-in" + terminator
+                        + "\u001B]2;cursor-unsupported-" + terminator.length() + "\u001B\\");
+                awaitTitle(view, "cursor-unsupported-" + terminator.length());
+                assertSame(Cursor.TEXT, runOnFxThread(view::getCursor));
+            }
+        }
+    }
+
+    @Test
+    void appliesOsc22CursorRequestsWithoutPointerMovement() throws Exception {
+        var terminal = new ControlledTerminal();
+        try (var view = runOnFxThread(() -> new TerminalView((_, _) -> terminal))) {
+            assertSame(Cursor.TEXT, runOnFxThread(view::getCursor));
+            var requests = Map.of(
+                    "pointer", Cursor.HAND,
+                    "text", Cursor.TEXT,
+                    "ew-resize", Cursor.H_RESIZE,
+                    "ns-resize", Cursor.V_RESIZE,
+                    "ne-resize", Cursor.NE_RESIZE,
+                    "grab", Cursor.OPEN_HAND,
+                    "grabbing", Cursor.CLOSED_HAND,
+                    "wait", Cursor.WAIT,
+                    "default", Cursor.DEFAULT);
+            for (var request : requests.entrySet()) {
+                terminal.emit("\u001B]22;" + request.getKey() + "\u001B\\\u001B]2;" + request.getKey() + "\u001B\\");
+                awaitTitle(view, request.getKey());
+                assertSame(request.getValue(), runOnFxThread(view::getCursor));
+            }
+        }
+    }
+
+    @Test
+    void fallsBackForUnsupportedOsc22ShapesAndHonorsReset() throws Exception {
+        var terminal = new ControlledTerminal();
+        try (var view = runOnFxThread(() -> new TerminalView((_, _) -> terminal))) {
+            terminal.emit("\u001B]22;crosshair\u0007\u001B]2;crosshair-ready\u001B\\");
+            awaitTitle(view, "crosshair-ready");
+            assertSame(Cursor.CROSSHAIR, runOnFxThread(view::getCursor));
+            for (var shape : List.of("zoom-in", "help")) {
+                terminal.emit("\u001B]22;" + shape + "\u001B\\\u001B]2;" + shape + "\u001B\\");
+                awaitTitle(view, shape);
+                assertSame(Cursor.TEXT, runOnFxThread(view::getCursor));
+            }
+            terminal.emit("\u001B]22;crosshair\u0007\u001B]22;unknown-shape\u0007\u001B]2;unknown-shape\u001B\\");
+            awaitTitle(view, "unknown-shape");
+            assertSame(Cursor.CROSSHAIR, runOnFxThread(view::getCursor));
+            terminal.emit("\u001B]22;\u001B\\\u001B]2;shape-reset\u001B\\");
+            awaitTitle(view, "shape-reset");
+            assertSame(Cursor.TEXT, runOnFxThread(view::getCursor));
+        }
+    }
+
+    @Test
+    void restoresApplicationCursorAfterLinkHoverAndMouseExit() throws Exception {
+        var terminal = new ControlledTerminal();
+        try (var view = runOnFxThread(() -> new TerminalView((_, _) -> terminal))) {
+            terminal.emit("\u001B]22;crosshair\u001B\\\u001B]8;;https://example.test\u001B\\link\u001B]8;;\u001B\\\r\nplain"
+                    + "\u001B]2;cursor-link-ready\u001B\\");
+            awaitTitle(view, "cursor-link-ready");
+            runOnFxThread(() -> {
+                cellColor(view, 0, 0);
+                moveToCell(view, 1, 0);
+                assertSame(Cursor.HAND, view.getCursor());
+                return null;
+            });
+            terminal.emit("\u001B]22;ew-resize\u001B\\\u001B]2;resize-ready\u001B\\");
+            awaitTitle(view, "resize-ready");
+            runOnFxThread(() -> {
+                assertSame(Cursor.HAND, view.getCursor());
+                moveToCell(view, 1, 1);
+                assertSame(Cursor.H_RESIZE, view.getCursor());
+                moveToCell(view, 1, 0);
+                assertSame(Cursor.HAND, view.getCursor());
+                Event.fireEvent(view, mouseEvent(MouseEvent.MOUSE_EXITED, -1, -1, false));
+                assertSame(Cursor.H_RESIZE, view.getCursor());
+                assertNull(view.getHoveredLink());
+                return null;
+            });
+        }
+    }
+
+    @Test
+    void honorsApplicationCursorWhileMouseReportingSuppressesLinkHover() throws Exception {
+        var terminal = new ControlledTerminal();
+        try (var view = runOnFxThread(() -> new TerminalView((_, _) -> terminal))) {
+            terminal.emit("\u001B[?1000h\u001B]22;crosshair\u001B\\\u001B]8;;https://example.test\u001B\\link\u001B]8;;\u001B\\"
+                    + "\u001B]2;mouse-cursor-ready\u001B\\");
+            awaitTitle(view, "mouse-cursor-ready");
+            runOnFxThread(() -> {
+                cellColor(view, 0, 0);
+                moveToCell(view, 1, 0);
+                assertSame(Cursor.CROSSHAIR, view.getCursor());
+                assertNull(view.getHoveredLink());
+                return null;
+            });
+            terminal.emit("\u001B[?1000l\u001B]2;mouse-cursor-released\u001B\\");
+            awaitTitle(view, "mouse-cursor-released");
+            assertSame(Cursor.HAND, runOnFxThread(view::getCursor));
         }
     }
 
@@ -204,6 +329,467 @@ final class TerminalViewTest {
             assertColor(Color.RED, colors.get(0));
             assertColor(Color.rgb(128, 0, 127), colors.get(1));
             assertColor(Color.RED, colors.get(2));
+        }
+    }
+
+    @Test
+    void synchronizedOutputCapturesTheFrameBeforeTheHoldAndReleasesItTogether() throws Exception {
+        var terminal = new ControlledTerminal();
+        try (var view = runOnFxThread(() -> new TerminalView((_, _) -> terminal))) {
+            runOnFxThread(() -> cellColor(view, 0, 0));
+            terminal.emit("\u001B[?25l\u001B[48;2;255;0;0m "
+                    + "\u001B[?2026h\u001B[1;1H\u001B[48;2;0;0;255m "
+                    + "\u001B]2;held-frame\u001B\\");
+            awaitTitle(view, "held-frame");
+            runOnFxThread(() -> {
+                assertColor(Color.RED, cellColor(view, 0, 0));
+                view.setCursorBlinking(false);
+                assertColor(Color.RED, cellColor(view, 0, 0));
+                return null;
+            });
+
+            terminal.emit("\u001B[?2026l");
+            awaitCellColor(view, 0, 0, Color.BLUE);
+        }
+    }
+
+    @Test
+    void synchronizedOutputCapturesCompletedFramesBetweenHoldsInOneWrite() throws Exception {
+        var terminal = new ControlledTerminal();
+        try (var view = runOnFxThread(() -> new TerminalView((_, _) -> terminal))) {
+            runOnFxThread(() -> cellColor(view, 0, 0));
+            terminal.emit("\u001B[?25l\u001B[48;2;255;0;0m \u001B[?2026h"
+                    + "\u001B[1;1H\u001B[48;2;0;0;255m \u001B[?2026l\u001B[?2026h"
+                    + "\u001B[1;1H\u001B[48;2;0;255;0m \u001B]2;second-hold\u001B\\");
+            awaitTitle(view, "second-hold");
+            assertColor(Color.BLUE, runOnFxThread(() -> cellColor(view, 0, 0)));
+
+            terminal.emit("\u001B[?2026l");
+            awaitCellColor(view, 0, 0, Color.LIME);
+        }
+    }
+
+    @Test
+    void synchronizedOutputKeepsKittyImagesFrozenUntilRelease() throws Exception {
+        var terminal = new ControlledTerminal();
+        try (var view = runOnFxThread(() -> new TerminalView((_, _) -> terminal))) {
+            terminal.emit("\u001B[?25l\u001B_Ga=T,t=d,f=24,i=1,p=1,s=1,v=1,c=1,r=1,C=1,q=2;/wAA\u001B\\");
+            awaitCellColor(view, 0, 0, Color.RED);
+
+            terminal.emit("\u001B[?2026h\u001B[1;1H"
+                    + "\u001B_Ga=T,t=d,f=24,i=1,p=1,s=1,v=1,c=1,r=1,C=1,q=2;AAD/\u001B\\"
+                    + "\u001B]2;held-image\u001B\\");
+            awaitTitle(view, "held-image");
+            runOnFxThread(() -> {
+                view.setCursorBlinking(false);
+                assertColor(Color.RED, cellColor(view, 0, 0));
+                return null;
+            });
+
+            terminal.emit("\u001B[?2026l");
+            awaitCellColor(view, 0, 0, Color.BLUE);
+        }
+    }
+
+    @Test
+    void synchronizedOutputTimesOutAndAllowsAnotherHold() throws Exception {
+        var terminal = new ControlledTerminal();
+        try (var view = runOnFxThread(() -> new TerminalView((_, _) -> terminal))) {
+            runOnFxThread(() -> cellColor(view, 0, 0));
+            terminal.emit("\u001B[?25l\u001B[48;2;255;0;0m \u001B[?2026h"
+                    + "\u001B[1;1H\u001B[48;2;0;0;255m \u001B]2;hold-timeout\u001B\\");
+            awaitTitle(view, "hold-timeout");
+            assertColor(Color.RED, runOnFxThread(() -> cellColor(view, 0, 0)));
+            await("synchronized output timeout", Duration.ofSeconds(5), () -> runOnFxThread(() ->
+                    colorsEqual(Color.BLUE, cellColor(view, 0, 0)) ? Optional.of(Boolean.TRUE) : Optional.empty()));
+
+            terminal.emit("\u001B[1;1H\u001B[48;2;255;0;0m \u001B[?2026h"
+                    + "\u001B[1;1H\u001B[48;2;0;255;0m \u001B]2;hold-after-timeout\u001B\\");
+            awaitTitle(view, "hold-after-timeout");
+            assertColor(Color.RED, runOnFxThread(() -> cellColor(view, 0, 0)));
+            terminal.emit("\u001B[?2026l");
+            awaitCellColor(view, 0, 0, Color.LIME);
+        }
+    }
+
+    @Test
+    void synchronizedOutputEndsOnResizeAndFullReset() throws Exception {
+        var terminal = new ControlledTerminal();
+        try (var view = runOnFxThread(() -> new TerminalView((_, _) -> terminal))) {
+            runOnFxThread(() -> cellColor(view, 0, 0));
+            terminal.emit("\u001B[?25l\u001B[48;2;255;0;0m \u001B[?2026h"
+                    + "\u001B[1;1H\u001B[48;2;0;0;255m \u001B]2;hold-before-resize\u001B\\");
+            awaitTitle(view, "hold-before-resize");
+            assertColor(Color.RED, runOnFxThread(() -> cellColor(view, 0, 0)));
+            runOnFxThread(() -> {
+                view.resize(view.getWidth() + cellWidth(view), view.getHeight());
+                assertColor(Color.BLUE, cellColor(view, 0, 0));
+                return null;
+            });
+
+            terminal.emit("\u001B[?2026h\u001B[1;1H\u001B[48;2;255;0;0m "
+                    + "\u001B]2;hold-before-reset\u001B\\");
+            awaitTitle(view, "hold-before-reset");
+            assertColor(Color.BLUE, runOnFxThread(() -> cellColor(view, 0, 0)));
+            terminal.emit("\u001Bc\u001B[?25l\u001B[48;2;0;255;0m ");
+            awaitCellColor(view, 0, 0, Color.LIME);
+        }
+    }
+
+    @Test
+    void smoothScrollingDrawsPartialRowsAndClampsAtBothEnds() throws Exception {
+        var terminal = new ControlledTerminal();
+        try (var view = runOnFxThread(() -> new TerminalView((_, _) -> terminal))) {
+            runOnFxThread(() -> cellColor(view, 0, 0));
+            terminal.emit(stripedOutput(30) + "\u001B]2;scroll-ready\u001B\\");
+            awaitTitle(view, "scroll-ready");
+            runOnFxThread(() -> {
+                assertTrue(view.scrollViewportToTop());
+                smoothScroll(view, 0.5);
+                assertColor(Color.RED, pixelColor(view, cellX(view, 1, 0.5), cellY(view, 0, 0.25)));
+                assertColor(Color.BLUE, pixelColor(view, cellX(view, 1, 0.5), cellY(view, 0, 0.75)));
+                assertColor(Color.BLUE, pixelColor(view, cellX(view, 1, 0.5), cellY(view, 23, 0.25)));
+                assertColor(Color.RED, pixelColor(view, cellX(view, 1, 0.5), cellY(view, 23, 0.75)));
+                smoothScroll(view, 0.5);
+                assertColor(Color.BLUE, pixelColor(view, cellX(view, 1, 0.5), cellY(view, 0, 0.25)));
+                smoothScroll(view, -0.25);
+                assertColor(Color.RED, pixelColor(view, cellX(view, 1, 0.5), cellY(view, 0, 0.1)));
+                assertColor(Color.BLUE, pixelColor(view, cellX(view, 1, 0.5), cellY(view, 0, 0.5)));
+                smoothScroll(view, -100);
+                assertColor(Color.RED, pixelColor(view, cellX(view, 1, 0.5), cellY(view, 0, 0.75)));
+                smoothScroll(view, 0.5);
+                assertTrue(view.scrollViewportToTop());
+                assertColor(Color.RED, pixelColor(view, cellX(view, 1, 0.5), cellY(view, 0, 0.75)));
+                smoothScroll(view, 100);
+                assertColor(Color.BLUE, pixelColor(view, cellX(view, 1, 0.5), cellY(view, 23, 0.75)));
+                smoothScroll(view, 0.5);
+                smoothScroll(view, -0.5);
+                assertColor(Color.RED, pixelColor(view, cellX(view, 1, 0.5), cellY(view, 23, 0.25)));
+                assertColor(Color.BLUE, pixelColor(view, cellX(view, 1, 0.5), cellY(view, 23, 0.75)));
+                return null;
+            });
+        }
+    }
+
+    @Test
+    void smoothScrollingKeepsLinksAndSelectionAlignedIncludingOverscan() throws Exception {
+        var terminal = new ControlledTerminal();
+        try (var view = runOnFxThread(() -> new TerminalView((_, _) -> terminal))) {
+            runOnFxThread(() -> cellColor(view, 0, 0));
+            var lines = new ArrayList<String>();
+            for (var i = 0; i < 30; i++) {
+                lines.add("\u001B]8;;https://row-" + i + ".test\u001B\\row-" + i + "\u001B]8;;\u001B\\");
+            }
+            terminal.emit(String.join("\r\n", lines) + "\u001B]2;links-ready\u001B\\");
+            awaitTitle(view, "links-ready");
+            runOnFxThread(() -> {
+                assertTrue(view.scrollViewportToTop());
+                smoothScroll(view, 0.75);
+                moveToCell(view, 1, 0);
+                assertEquals(new TerminalLink.Osc8("https://row-1.test"), view.getHoveredLink());
+                moveToCell(view, 1, 23);
+                assertEquals(new TerminalLink.Osc8("https://row-24.test"), view.getHoveredLink());
+                dragSelection(view, 0, 4);
+                assertEquals("row-1", view.getInputMethodRequests().getSelectedText());
+                return null;
+            });
+        }
+    }
+
+    @Test
+    void selectionAutoscrollIncludesThePartialBottomRowAndReachesTheLastRow() throws Exception {
+        var terminal = new ControlledTerminal();
+        try (var view = runOnFxThread(() -> new TerminalView((_, _) -> terminal))) {
+            runOnFxThread(() -> {
+                cellColor(view, 0, 0);
+                view.resize(view.getWidth(), view.getHeight() + 0.75 * cellHeight(view));
+                return null;
+            });
+            var lines = new ArrayList<String>();
+            for (var row = 0; row < 100; row++) {
+                lines.add("\u001B]8;;https://row-" + row + ".test\u001B\\          row-" + row + "\u001B]8;;\u001B\\");
+            }
+            terminal.emit("\u001B[?25l" + String.join("\r\n", lines) + "\u001B]2;autoscroll-ready\u001B\\");
+            awaitTitle(view, "autoscroll-ready");
+            runOnFxThread(() -> {
+                view.scrollViewportToTop();
+                smoothScroll(view, 0.75);
+                Event.fireEvent(view, mouseEvent(MouseEvent.MOUSE_PRESSED, cellX(view, 0, 0.1), cellY(view, 0, 0.1), true));
+                Event.fireEvent(view, mouseEvent(MouseEvent.MOUSE_DRAGGED, cellX(view, 17, 0.5), view.getHeight() + 10, true));
+                return null;
+            });
+            await("selection autoscroll beyond the first viewport", START_TIMEOUT, () -> runOnFxThread(() ->
+                    view.getInputMethodRequests().getSelectedText().contains("row-26") ? Optional.of(Boolean.TRUE) : Optional.empty()));
+            runOnFxThread(() -> {
+                assertColor(view.getTheme().selectionColor(), pixelColor(view, cellX(view, 1, 0.5), cellY(view, 23, 0.75)));
+                return null;
+            });
+            await("selection autoscroll to the last full row", START_TIMEOUT, () -> runOnFxThread(() -> {
+                Event.fireEvent(view, mouseEvent(MouseEvent.MOUSE_MOVED, cellX(view, 11, 0.5), cellY(view, 23, 0.1), true));
+                return new TerminalLink.Osc8("https://row-99.test").equals(view.getHoveredLink())
+                        ? Optional.of(Boolean.TRUE) : Optional.empty();
+            }));
+            runOnFxThread(() -> {
+                assertTrue(view.getInputMethodRequests().getSelectedText().contains("row-99"));
+                assertColor(view.getTheme().selectionColor(), pixelColor(view, cellX(view, 1, 0.5), cellY(view, 23, 0.75)));
+                Event.fireEvent(view, mouseEvent(MouseEvent.MOUSE_RELEASED, cellX(view, 17, 0.5), view.getHeight() + 10, false));
+                return null;
+            });
+        }
+    }
+
+    @Test
+    void selectionAutoscrollAtTheTopClearsTheFractionalOffset() throws Exception {
+        var terminal = new ControlledTerminal();
+        try (var view = runOnFxThread(() -> new TerminalView((_, _) -> terminal))) {
+            runOnFxThread(() -> cellColor(view, 0, 0));
+            terminal.emit(stripedOutput(100) + "\u001B]2;top-autoscroll-ready\u001B\\");
+            awaitTitle(view, "top-autoscroll-ready");
+            runOnFxThread(() -> {
+                view.scrollViewportToTop();
+                smoothScroll(view, 0.75);
+                Event.fireEvent(view, mouseEvent(MouseEvent.MOUSE_PRESSED, cellX(view, 5, 0.5), cellY(view, 10, 0.5), true));
+                Event.fireEvent(view, mouseEvent(MouseEvent.MOUSE_DRAGGED, cellX(view, 5, 0.5), -10, true));
+                return null;
+            });
+            await("selection autoscroll to the first full row", START_TIMEOUT, () -> runOnFxThread(() ->
+                    colorsEqual(Color.RED, pixelColor(view, cellX(view, 1, 0.5), cellY(view, 0, 0.75)))
+                            ? Optional.of(Boolean.TRUE) : Optional.empty()));
+            runOnFxThread(() -> {
+                Event.fireEvent(view, mouseEvent(MouseEvent.MOUSE_RELEASED, cellX(view, 5, 0.5), -10, false));
+                return null;
+            });
+        }
+    }
+
+    @Test
+    void smoothScrollingRevealsPinnedAndRelativeImages() throws Exception {
+        var terminal = new ControlledTerminal();
+        try (var view = runOnFxThread(() -> new TerminalView((_, _) -> terminal))) {
+            runOnFxThread(() -> {
+                cellColor(view, 0, 0);
+                view.resize(view.getWidth(), view.getHeight() + 0.75 * cellHeight(view));
+                return null;
+            });
+            terminal.emit("\u001B[?25l" + "line\r\n".repeat(23)
+                    + "\u001B_Ga=T,t=d,f=24,i=1,p=1,s=1,v=1,c=1,r=1,C=1,q=2;/wAA\u001B\\"
+                    + "\u001B_Ga=T,t=d,f=24,i=2,p=1,P=1,Q=1,H=1,V=1,s=1,v=1,c=1,r=1,q=2;AAD/\u001B\\"
+                    + "\r\n\r\n\u001B[4G\u001B_Ga=T,t=d,f=24,i=3,p=1,s=1,v=1,c=100,r=1,C=1,q=2;AP8A\u001B\\"
+                    + "\r\n" + "line\r\n".repeat(5) + "\u001B]2;images-ready\u001B\\");
+            awaitTitle(view, "images-ready");
+            runOnFxThread(() -> {
+                assertTrue(view.scrollViewportToTop());
+                smoothScroll(view, 0.75);
+                assertColor(Color.RED, pixelColor(view, cellX(view, 0, 0.5), cellY(view, 22, 0.5)));
+                assertColor(Color.BLUE, pixelColor(view, cellX(view, 1, 0.5), cellY(view, 23, 0.5)));
+                assertColor(Color.LIME, pixelColor(view, cellX(view, 3, 0.5), cellY(view, 24, 0.5)));
+                return null;
+            });
+        }
+    }
+
+    @Test
+    void smoothScrollingKeepsTheOverscanCursorAndPreeditVisible() throws Exception {
+        var terminal = new ControlledTerminal();
+        try (var view = runOnFxThread(() -> new TerminalView((_, _) -> terminal))) {
+            runOnFxThread(() -> {
+                cellColor(view, 0, 0);
+                view.setCursorBlinking(false);
+                return null;
+            });
+            terminal.emit("line\r\n".repeat(29) + "prompt> \u001B]2;cursor-ready\u001B\\");
+            awaitTitle(view, "cursor-ready");
+            runOnFxThread(() -> {
+                view.scrollViewportToBottom();
+                var location = view.getInputMethodRequests().getTextLocation(0);
+                smoothScroll(view, -4 / cellHeight(view));
+                assertEquals(location.getX(), view.getInputMethodRequests().getTextLocation(0).getX());
+                assertEquals(location.getY() + 4, view.getInputMethodRequests().getTextLocation(0).getY());
+                assertColor(view.getTheme().cursorColor(), pixelColor(view, cellX(view, 8, 0), cellY(view, 23, 0.5) + 4));
+
+                view.scrollViewportToBottom();
+                Event.fireEvent(view, new InputMethodEvent(InputMethodEvent.INPUT_METHOD_TEXT_CHANGED,
+                        List.of(new InputMethodTextRun("xy", InputMethodHighlight.UNSELECTED_RAW)), "", 1));
+                var reference = view.snapshot(null, null);
+                smoothScroll(view, -4 / cellHeight(view));
+                var scrolled = view.snapshot(null, null);
+                var hasPreeditInk = false;
+                for (var y = 0; y < (int) cellHeight(view) - 4; y++) {
+                    for (var x = (int) cellX(view, 9, 0) + 1; x < (int) cellX(view, 10, 0); x++) {
+                        var color = reference.getPixelReader().getColor(x, 23 * (int) cellHeight(view) + y);
+                        hasPreeditInk |= !colorsEqual(view.getTheme().background(), color);
+                        assertColor(color, scrolled.getPixelReader().getColor(x, 23 * (int) cellHeight(view) + y + 4));
+                    }
+                }
+                assertTrue(hasPreeditInk, "Expected the composed text to be drawn");
+                smoothScroll(view, -1);
+                assertEquals(new javafx.geometry.Point2D(0, 0), view.getInputMethodRequests().getTextLocation(0));
+                return null;
+            });
+        }
+    }
+
+    @Test
+    void synchronizedOutputKeepsTheOverscanImeLocationFrozenUntilRelease() throws Exception {
+        var terminal = new ControlledTerminal();
+        try (var view = runOnFxThread(() -> new TerminalView((_, _) -> terminal))) {
+            runOnFxThread(() -> {
+                cellColor(view, 0, 0);
+                return null;
+            });
+            terminal.emit("line\r\n".repeat(29) + "prompt> \u001B]2;ime-ready\u001B\\");
+            awaitTitle(view, "ime-ready");
+            var location = runOnFxThread(() -> {
+                view.scrollViewportToBottom();
+                smoothScroll(view, -4 / cellHeight(view));
+                return view.getInputMethodRequests().getTextLocation(0);
+            });
+            terminal.emit("\u001B[?2026h\u001B[1;1H\u001B]2;ime-held\u001B\\");
+            awaitTitle(view, "ime-held");
+            assertEquals(location, runOnFxThread(() -> view.getInputMethodRequests().getTextLocation(0)));
+            terminal.emit("\u001B[?2026l\u001B]2;ime-released\u001B\\");
+            awaitTitle(view, "ime-released");
+            assertEquals(0, runOnFxThread(() -> view.getInputMethodRequests().getTextLocation(0).getX()));
+        }
+    }
+
+    @Test
+    void smoothScrollingShowsTheFullBottomRowWhenItFitsInTheCanvas() throws Exception {
+        var terminal = new ControlledTerminal();
+        try (var view = runOnFxThread(() -> new TerminalView((_, _) -> terminal))) {
+            runOnFxThread(() -> {
+                cellColor(view, 0, 0);
+                view.resize(view.getWidth(), view.getHeight() + cellHeight(view) - 4);
+                return null;
+            });
+            terminal.emit("\u001B[?25l\u001B[48;2;255;0;0m\u001B[38;2;255;255;255m"
+                    + "\u001B]8;;https://example.test\u001B\\"
+                    + String.join("\r\n", java.util.Collections.nCopies(30, "gyp_PROMPT █"))
+                    + "\u001B]8;;\u001B\\\u001B]2;strip-ready\u001B\\");
+            awaitTitle(view, "strip-ready");
+            runOnFxThread(() -> {
+                view.scrollViewportToBottom();
+                var reference = view.snapshot(null, null);
+                smoothScroll(view, -1 + 4 / cellHeight(view));
+                var scrolled = view.snapshot(null, null);
+                var rowTop = 24 * (int) cellHeight(view) - 4;
+                for (var y = 0; y < (int) cellHeight(view); y++) {
+                    for (var x = 0; x < (int) (10 * cellWidth(view)); x++) {
+                        assertColor(reference.getPixelReader().getColor(x, y),
+                                scrolled.getPixelReader().getColor(x, rowTop + y));
+                    }
+                }
+                moveToCell(view, 0, 24);
+                assertEquals(new TerminalLink.Osc8("https://example.test"), view.getHoveredLink());
+                view.scrollViewportToBottom();
+                assertColor(view.getTheme().background(), pixelColor(view, cellX(view, 1, 0.5), cellY(view, 24, 0.5)));
+                moveToCell(view, 0, 24);
+                assertNull(view.getHoveredLink());
+                view.resize(view.getWidth(), 24.75 * cellHeight(view));
+                view.scrollViewportToTop();
+                smoothScroll(view, 0.75);
+                assertColor(Color.WHITE, pixelColor(view, cellX(view, 11, 0.5), cellY(view, 24, 0.5)));
+                moveToCell(view, 0, 24);
+                assertEquals(new TerminalLink.Osc8("https://example.test"), view.getHoveredLink());
+                return null;
+            });
+        }
+    }
+
+    @Test
+    void smoothScrollingReportsOnlyWholeWheelStepsToMouseTrackingApplications() throws Exception {
+        var terminal = new ControlledTerminal();
+        try (var view = runOnFxThread(() -> new TerminalView((_, _) -> terminal))) {
+            runOnFxThread(() -> cellColor(view, 0, 0));
+            terminal.emit("\u001B[?1000h\u001B[?1006h\u001B]2;mouse-ready\u001B\\");
+            awaitTitle(view, "mouse-ready");
+            runOnFxThread(() -> {
+                smoothScroll(view, 0.5);
+                return null;
+            });
+            assertEquals(0, terminal.inputSnapshot().size());
+            runOnFxThread(() -> {
+                smoothScroll(view, 0.5);
+                return null;
+            });
+            var input = terminal.inputSnapshot().toString(StandardCharsets.UTF_8);
+            assertEquals("\u001B[<65;2;1M\u001B[<65;2;1m", input);
+        }
+    }
+
+    @Test
+    void smoothScrollingOverScrollbarStaysLocalWithMouseTrackingEnabled() throws Exception {
+        var terminal = new ControlledTerminal();
+        try (var view = runOnFxThread(() -> new TerminalView((_, _) -> terminal))) {
+            runOnFxThread(() -> cellColor(view, 0, 0));
+            terminal.emit(stripedOutput(30) + "\u001B[?1000h\u001B[?1006h\u001B]2;scrollbar-ready\u001B\\");
+            awaitTitle(view, "scrollbar-ready");
+            runOnFxThread(() -> {
+                view.scrollViewportToTop();
+                var deltaY = -0.75 * cellHeight(view);
+                Event.fireEvent(view, scrollEvent(view.getWidth() - 1, cellY(view, 0, 0.5), deltaY));
+                assertColor(Color.BLUE, pixelColor(view, cellX(view, 1, 0.5), cellY(view, 0, 0.5)));
+                return null;
+            });
+            assertEquals(0, terminal.inputSnapshot().size());
+            runOnFxThread(() -> {
+                clickCell(view, 1, 0, 1);
+                return null;
+            });
+            var input = terminal.inputSnapshot().toString(StandardCharsets.UTF_8);
+            assertEquals("\u001B[<0;2;2M\u001B[<0;2;2m", input);
+        }
+    }
+
+    @Test
+    void smoothScrollOffsetResetsOnResizeAndAlternateScreen() throws Exception {
+        var terminal = new ControlledTerminal();
+        try (var view = runOnFxThread(() -> new TerminalView((_, _) -> terminal))) {
+            runOnFxThread(() -> cellColor(view, 0, 0));
+            terminal.emit(stripedOutput(30) + "\u001B]2;resize-ready\u001B\\");
+            awaitTitle(view, "resize-ready");
+            runOnFxThread(() -> {
+                view.scrollViewportToTop();
+                smoothScroll(view, 0.75);
+                view.resize(view.getWidth() + cellWidth(view), view.getHeight());
+                assertColor(Color.RED, pixelColor(view, cellX(view, 1, 0.5), cellY(view, 0, 0.5)));
+                smoothScroll(view, 0.75);
+                return null;
+            });
+            terminal.emit("\u001B[?1049h\u001B[?25l\u001B[48;2;0;255;0m\u001B[2J\u001B]2;alternate-ready\u001B\\");
+            awaitTitle(view, "alternate-ready");
+            runOnFxThread(() -> {
+                assertColor(Color.LIME, pixelColor(view, cellX(view, 1, 0.5), cellY(view, 0, 0.5)));
+                smoothScroll(view, 0.75);
+                assertColor(Color.LIME, pixelColor(view, cellX(view, 1, 0.5), cellY(view, 0, 0.5)));
+                return null;
+            });
+        }
+    }
+
+    @Test
+    void smoothScrollingKeepsHeldFramesFrozenUntilRelease() throws Exception {
+        var terminal = new ControlledTerminal();
+        try (var view = runOnFxThread(() -> new TerminalView((_, _) -> terminal))) {
+            runOnFxThread(() -> cellColor(view, 0, 0));
+            terminal.emit(stripedOutput(30) + "\u001B]2;hold-scroll-ready\u001B\\");
+            awaitTitle(view, "hold-scroll-ready");
+            runOnFxThread(() -> {
+                view.scrollViewportToTop();
+                smoothScroll(view, 0.5);
+                return null;
+            });
+            terminal.emit("\u001B[?2026h\u001B]2;scroll-held\u001B\\");
+            awaitTitle(view, "scroll-held");
+            runOnFxThread(() -> {
+                smoothScroll(view, 0.5);
+                assertColor(Color.RED, pixelColor(view, cellX(view, 1, 0.5), cellY(view, 0, 0.25)));
+                assertColor(Color.BLUE, pixelColor(view, cellX(view, 1, 0.5), cellY(view, 0, 0.75)));
+                return null;
+            });
+            terminal.emit("\u001B[?2026l\u001B]2;scroll-released\u001B\\");
+            awaitTitle(view, "scroll-released");
+            assertColor(Color.BLUE, runOnFxThread(() -> pixelColor(view, cellX(view, 1, 0.5), cellY(view, 0, 0.25))));
         }
     }
 
@@ -316,6 +902,10 @@ final class TerminalViewTest {
                 assertEquals(
                         defaultShortcuts.stream().map(TerminalShortcut::combination).toList(),
                         combinations);
+                for (var code : List.of(KeyCode.ENTER, KeyCode.UP, KeyCode.DOWN, KeyCode.ESCAPE)) {
+                    assertTrue(combinations.contains(new KeyCodeCombination(code)));
+                }
+                assertTrue(combinations.contains(new KeyCodeCombination(KeyCode.ENTER, KeyCombination.SHIFT_DOWN)));
                 assertTrue(combinations.contains(isMac()
                         ? new KeyCodeCombination(KeyCode.C, KeyCombination.META_DOWN)
                         : new KeyCodeCombination(KeyCode.C, KeyCombination.CONTROL_DOWN)));
@@ -727,7 +1317,7 @@ final class TerminalViewTest {
                 assertSame(Cursor.HAND, view.getCursor());
                 view.getLinkMatchers().clear();
                 moveToCell(view, 4, 0);
-                assertSame(Cursor.DEFAULT, view.getCursor());
+                assertSame(Cursor.TEXT, view.getCursor());
                 view.getLinkMatchers().setAll(view.defaultLinkMatchers());
                 moveToCell(view, 4, 0);
                 assertSame(Cursor.HAND, view.getCursor());
@@ -743,7 +1333,7 @@ final class TerminalViewTest {
             runOnFxThread(() -> {
                 view.getLinkMatchers().clear();
                 moveToCell(view, 4, 0);
-                assertSame(Cursor.DEFAULT, view.getCursor());
+                assertSame(Cursor.TEXT, view.getCursor());
                 return null;
             });
         }
@@ -757,7 +1347,7 @@ final class TerminalViewTest {
                 moveToCell(view, 4, 0);
                 assertSame(Cursor.HAND, view.getCursor());
                 moveToCell(view, "https://example.test/".length(), 0);
-                assertSame(Cursor.DEFAULT, view.getCursor());
+                assertSame(Cursor.TEXT, view.getCursor());
                 return null;
             });
         }
@@ -772,7 +1362,7 @@ final class TerminalViewTest {
                 moveToCell(view, output.indexOf("example"), 0);
                 assertSame(Cursor.HAND, view.getCursor());
                 moveToCell(view, output.length() - 1, 0);
-                assertSame(Cursor.DEFAULT, view.getCursor());
+                assertSame(Cursor.TEXT, view.getCursor());
                 return null;
             });
         }
@@ -797,11 +1387,11 @@ final class TerminalViewTest {
             awaitText(view, "file:///tmp/a");
             runOnFxThread(() -> {
                 moveToCell(view, 2, 0);
-                assertSame(Cursor.DEFAULT, view.getCursor());
+                assertSame(Cursor.TEXT, view.getCursor());
                 moveToCell(view, 15, 0);
-                assertSame(Cursor.DEFAULT, view.getCursor());
+                assertSame(Cursor.TEXT, view.getCursor());
                 moveToCell(view, 24, 0);
-                assertSame(Cursor.DEFAULT, view.getCursor());
+                assertSame(Cursor.TEXT, view.getCursor());
                 return null;
             });
         }
@@ -924,6 +1514,105 @@ final class TerminalViewTest {
     }
 
     @Test
+    void exposesReportedShellLifecycleStatesInOrder() throws Exception {
+        var terminal = new ControlledTerminal();
+        var observed = new ArrayList<ShellState>();
+        var callbacksOnFxThread = new AtomicInteger();
+        try (var view = runOnFxThread(() -> new TerminalView((_, _) -> terminal))) {
+            runOnFxThread(() -> {
+                assertNull(view.getShellState());
+                assertNull(view.shellStateProperty().get());
+                assertEquals("shellState", view.shellStateProperty().getName());
+                assertSame(view, view.shellStateProperty().getBean());
+                view.shellStateProperty().addListener((_, _, state) -> {
+                    observed.add(state);
+                    if (Platform.isFxApplicationThread()) {
+                        callbacksOnFxThread.incrementAndGet();
+                    }
+                });
+                return null;
+            });
+            terminal.emit("\u001B]133;A\u0007"
+                    + "\u001B]133;P;k=r\u0007"
+                    + "\u001B]133;P;k=c\u0007"
+                    + "\u001B]133;P;k=s\u0007"
+                    + "\u001B]133;B\u0007"
+                    + "\u001B]133;C;cmdline_url=printf%20%E2%9C%93\u0007"
+                    + "\u001B]133;D;-1;err=failed\u0007"
+                    + "\u001B]2;shell-lifecycle-ready\u001B\\");
+            awaitTitle(view, "shell-lifecycle-ready");
+            runOnFxThread(() -> {
+                var expected = List.of(
+                        new ShellState.Prompt(ShellState.PromptKind.PRIMARY),
+                        new ShellState.Prompt(ShellState.PromptKind.RIGHT),
+                        new ShellState.Prompt(ShellState.PromptKind.CONTINUATION),
+                        new ShellState.Prompt(ShellState.PromptKind.SECONDARY),
+                        new ShellState.InputReady(),
+                        new ShellState.Running("printf \u2713"),
+                        new ShellState.Finished(-1, "failed"));
+                assertEquals(expected, observed);
+                assertEquals(expected.size(), callbacksOnFxThread.get());
+                assertEquals(expected.getLast(), view.getShellState());
+                assertSame(view.getShellState(), view.shellStateProperty().get());
+                return null;
+            });
+        }
+    }
+
+    @Test
+    void exposesCurrentShellStateToLateSubscribers() throws Exception {
+        var terminal = new ControlledTerminal();
+        var observed = new AtomicReference<ShellState>();
+        try (var view = runOnFxThread(() -> new TerminalView((_, _) -> terminal))) {
+            terminal.emit("\u001B]133;C;cmdline_url=make%20test\u001B\\\u001B]2;shell-running\u001B\\");
+            awaitTitle(view, "shell-running");
+            var subscription = runOnFxThread(() -> view.shellStateProperty().subscribe(observed::set));
+            try {
+                assertEquals(new ShellState.Running("make test"), observed.get());
+                terminal.emit("\u001B]133;D;0\u001B\\\u001B]2;shell-finished\u001B\\");
+                awaitTitle(view, "shell-finished");
+                assertEquals(new ShellState.Finished(0, ""), observed.get());
+                terminal.emit("\u001B]133;B\u001B\\\u001B]2;shell-input-ready\u001B\\");
+                awaitTitle(view, "shell-input-ready");
+                assertEquals(new ShellState.InputReady(), observed.get());
+            } finally {
+                runOnFxThread(() -> {
+                    subscription.unsubscribe();
+                    return null;
+                });
+            }
+        }
+    }
+
+    @Test
+    void preservesMissingShellMetadataAndAcceptsSkippedSteps() throws Exception {
+        var terminal = new ControlledTerminal();
+        try (var view = runOnFxThread(() -> new TerminalView((_, _) -> terminal))) {
+            var reports = List.of(
+                    Map.entry("\u001B]133;D\u0007", new ShellState.Finished(null, "")),
+                    Map.entry("\u001B]133;C\u0007", new ShellState.Running("")),
+                    Map.entry("\u001B]133;D;-2147483648\u0007", new ShellState.Finished(Integer.MIN_VALUE, "")));
+            var index = 0;
+            for (var report : reports) {
+                var marker = "shell-metadata-" + index++;
+                terminal.emit(report.getKey() + "\u001B]2;" + marker + "\u001B\\");
+                awaitTitle(view, marker);
+                assertEquals(report.getValue(), runOnFxThread(view::getShellState));
+            }
+            terminal.emit("\u001B]133;Z\u0007\u001B]2;shell-invalid-marker\u001B\\");
+            awaitTitle(view, "shell-invalid-marker");
+            assertEquals(new ShellState.Finished(Integer.MIN_VALUE, ""), runOnFxThread(view::getShellState));
+        }
+    }
+
+    @Test
+    void shellStateRejectsNullRequiredFields() {
+        assertThrows(NullPointerException.class, () -> new ShellState.Prompt(null));
+        assertThrows(NullPointerException.class, () -> new ShellState.Running(null));
+        assertThrows(NullPointerException.class, () -> new ShellState.Finished(null, null));
+    }
+
+    @Test
     void exposesProgressFromTerminalOutput() throws Exception {
         var terminal = new ControlledTerminal();
         try (var view = new TerminalView((_, _) -> terminal)) {
@@ -1012,6 +1701,9 @@ final class TerminalViewTest {
                 view.setOnBell(() -> {
                     throw new RuntimeException("bell handler failed");
                 });
+                view.shellStateProperty().addListener((_, _, _) -> {
+                    throw new RuntimeException("shell state listener failed");
+                });
                 return null;
             });
 
@@ -1025,6 +1717,12 @@ final class TerminalViewTest {
                 terminal.emit("\u0007\u001B]2;after bell\u001B\\");
                 await("bell exception reporting", START_TIMEOUT, () -> runOnFxThread(() ->
                         uncaughtExceptions.get() == 2 && "after bell".equals(view.getTitle())
+                                ? Optional.of(Boolean.TRUE)
+                                : Optional.empty()));
+                terminal.emit("\u001B]133;B\u0007\u001B]2;after shell state\u001B\\");
+                await("shell state listener exception reporting", START_TIMEOUT, () -> runOnFxThread(() ->
+                        uncaughtExceptions.get() == 3 && "after shell state".equals(view.getTitle())
+                                && view.getShellState() instanceof ShellState.InputReady
                                 ? Optional.of(Boolean.TRUE)
                                 : Optional.empty()));
             } finally {
@@ -1318,7 +2016,7 @@ final class TerminalViewTest {
     }
 
     @Test
-    void searchUsesSelectionAsInitialQueryAndNavigatesMatches() throws Exception {
+    void openingSearchUsesSelectionAndNavigatesNewestFirst() throws Exception {
         var marker = "ghosttyfx-search";
         var output = marker + "\nother\n" + marker;
         var tempDirectory = Files.createTempDirectory("ghosttyfx-search-test-");
@@ -1337,9 +2035,9 @@ final class TerminalViewTest {
                 dragSelection(view, 0, marker.length() - 1);
                 assertEquals(marker, view.getInputMethodRequests().getSelectedText());
 
-                assertTrue(view.toggleSearch());
+                assertTrue(view.openSearch());
                 assertEquals(marker, view.searchText());
-                assertEquals("...", ((Label) view.lookup("#ghosttyfx-search-count")).getText());
+                assertEquals(marker, view.getInputMethodRequests().getSelectedText());
                 return null;
             });
 
@@ -1348,10 +2046,17 @@ final class TerminalViewTest {
 
             runOnFxThread(() -> {
                 assertEquals(2, view.searchMatchCount());
-                assertEquals(0, view.selectedSearchMatchIndex());
+                assertEquals(-1, view.selectedSearchMatchIndex());
 
+                assertEquals("-/2", ((Label) view.lookup("#ghosttyfx-search-count")).getText());
+                assertTrue(view.searchNext());
+                assertEquals(0, view.selectedSearchMatchIndex());
                 assertTrue(view.searchNext());
                 assertEquals(1, view.selectedSearchMatchIndex());
+                assertTrue(view.searchNext());
+                assertEquals(1, view.selectedSearchMatchIndex());
+                assertTrue(view.searchPrevious());
+                assertEquals(0, view.selectedSearchMatchIndex());
                 assertTrue(view.searchPrevious());
                 assertEquals(0, view.selectedSearchMatchIndex());
 
@@ -1378,9 +2083,9 @@ final class TerminalViewTest {
                 attachToScene(view);
                 dragSelection(view, 0, 1);
                 assertEquals(marker, view.getInputMethodRequests().getSelectedText());
-                assertTrue(view.toggleSearch());
+                assertTrue(view.openSearch());
                 assertEquals(marker, view.searchText());
-                assertEquals("...", ((Label) view.lookup("#ghosttyfx-search-count")).getText());
+                assertEquals(marker, view.getInputMethodRequests().getSelectedText());
                 return null;
             });
 
@@ -1389,7 +2094,7 @@ final class TerminalViewTest {
 
             runOnFxThread(() -> {
                 assertEquals(2, view.searchMatchCount());
-                assertEquals(0, view.selectedSearchMatchIndex());
+                assertEquals(-1, view.selectedSearchMatchIndex());
                 return null;
             });
         }
@@ -1411,9 +2116,9 @@ final class TerminalViewTest {
                 attachToScene(view);
                 dragSelection(view, 0, 2);
                 assertEquals(marker, view.getInputMethodRequests().getSelectedText());
-                assertTrue(view.toggleSearch());
+                assertTrue(view.openSearch());
                 assertEquals(marker, view.searchText());
-                assertEquals("...", ((Label) view.lookup("#ghosttyfx-search-count")).getText());
+                assertEquals(marker, view.getInputMethodRequests().getSelectedText());
                 return null;
             });
 
@@ -1422,7 +2127,7 @@ final class TerminalViewTest {
 
             runOnFxThread(() -> {
                 assertEquals(2, view.searchMatchCount());
-                assertEquals(0, view.selectedSearchMatchIndex());
+                assertEquals(-1, view.selectedSearchMatchIndex());
                 return null;
             });
         }
@@ -1491,62 +2196,546 @@ final class TerminalViewTest {
     }
 
     @Test
-    void searchFieldUpdatesMatchesAndConsumesNavigationTerminalShortcuts() throws Exception {
-        var output = "alpha\nbeta\nalpha";
-        var tempDirectory = Files.createTempDirectory("ghosttyfx-search-field-navigation-test-");
-        var pidFile = tempDirectory.resolve("shell.pid");
-        var shell = discoverOutputShell(pidFile, output);
-
-        try (var view = createView(shell, tempDirectory)) {
-            await("terminal output to become searchable", START_TIMEOUT, () -> runOnFxThread(() -> {
-                fireTerminalShortcut(view, selectAllTerminalShortcut());
-                var text = view.getInputMethodRequests().getSelectedText();
-                return text != null && text.contains("beta") ? Optional.of(Boolean.TRUE) : Optional.empty();
-            }));
-
+    void searchFieldNavigationStopsAtBoundariesAndEscapeCloses() throws Exception {
+        try (var view = createView("alpha\nbeta\nalpha")) {
+            awaitText(view, "beta");
             runOnFxThread(() -> {
                 attachToScene(view);
-                assertTrue(view.toggleSearch());
-                var count = (Label) view.lookup("#ghosttyfx-search-count");
-                var field = (TextField) view.lookup("#ghosttyfx-search-field");
-                field.setText("alpha");
-                assertEquals("...", count.getText());
+                view.openSearch();
+                ((TextField) view.lookup("#ghosttyfx-search-field")).setText("alpha");
                 return null;
             });
-
             await("search matches", START_TIMEOUT, () -> runOnFxThread(() ->
                     view.searchMatchCount() == 2 ? Optional.of(Boolean.TRUE) : Optional.empty()));
-
             runOnFxThread(() -> {
                 var count = (Label) view.lookup("#ghosttyfx-search-count");
                 var field = (TextField) view.lookup("#ghosttyfx-search-field");
-                assertEquals(0, view.selectedSearchMatchIndex());
-                assertEquals("1/2", count.getText());
-
-                field.fireEvent(keyEvent(new KeyCodeCombination(KeyCode.ENTER)));
-                assertEquals(1, view.selectedSearchMatchIndex());
-                field.fireEvent(keyEvent(new KeyCodeCombination(KeyCode.ENTER)));
-                assertEquals(1, view.selectedSearchMatchIndex());
-
-                field.fireEvent(keyEvent(new KeyCodeCombination(KeyCode.ENTER, KeyCombination.SHIFT_DOWN)));
-                assertEquals(0, view.selectedSearchMatchIndex());
-                field.fireEvent(keyEvent(new KeyCodeCombination(KeyCode.ENTER, KeyCombination.SHIFT_DOWN)));
-                assertEquals(0, view.selectedSearchMatchIndex());
-
+                assertEquals(-1, view.selectedSearchMatchIndex());
+                assertEquals("-/2", count.getText());
+                for (var expected : List.of(0, 1, 1)) {
+                    field.fireEvent(keyEvent(new KeyCodeCombination(KeyCode.ENTER)));
+                    assertEquals(expected, view.selectedSearchMatchIndex());
+                }
+                for (var expected : List.of(0, 0, 0)) {
+                    field.fireEvent(keyEvent(new KeyCodeCombination(KeyCode.ENTER, KeyCombination.SHIFT_DOWN)));
+                    assertEquals(expected, view.selectedSearchMatchIndex());
+                }
                 field.positionCaret(2);
-                field.fireEvent(keyEvent(new KeyCodeCombination(KeyCode.DOWN)));
-                assertEquals(1, view.selectedSearchMatchIndex());
-                assertEquals(2, field.getCaretPosition());
-                field.fireEvent(keyEvent(new KeyCodeCombination(KeyCode.DOWN)));
-                assertEquals(1, view.selectedSearchMatchIndex());
-                assertEquals(2, field.getCaretPosition());
+                for (var expected : List.of(1, 1, 1)) {
+                    field.fireEvent(keyEvent(new KeyCodeCombination(KeyCode.UP)));
+                    assertEquals(expected, view.selectedSearchMatchIndex());
+                    assertEquals(2, field.getCaretPosition());
+                }
+                for (var expected : List.of(0, 0, 0)) {
+                    field.fireEvent(keyEvent(new KeyCodeCombination(KeyCode.DOWN)));
+                    assertEquals(expected, view.selectedSearchMatchIndex());
+                    assertEquals(2, field.getCaretPosition());
+                }
+                assertNull(view.lookup("#ghosttyfx-search-next"));
+                assertNull(view.lookup("#ghosttyfx-search-previous"));
+                assertNull(view.lookup("#ghosttyfx-search-close"));
+                field.fireEvent(keyEvent(new KeyCodeCombination(KeyCode.ESCAPE)));
+                assertFalse(view.lookup("#ghosttyfx-search").isVisible());
+                return null;
+            });
+        }
+    }
 
-                field.fireEvent(keyEvent(new KeyCodeCombination(KeyCode.UP)));
+    @Test
+    void customSearchShortcutsWorkInTheFieldAndPreserveFieldEditing() throws Exception {
+        var terminal = new ControlledTerminal();
+        try (var view = new TerminalView((_, _) -> terminal)) {
+            terminal.emit("alpha\r\nbeta\r\nalpha");
+            awaitText(view, "beta");
+            var modifier = isMac() ? KeyCombination.META_DOWN : KeyCombination.CONTROL_DOWN;
+            var next = new KeyCodeCombination(KeyCode.N, modifier);
+            var previous = new KeyCodeCombination(KeyCode.N, modifier, KeyCombination.SHIFT_DOWN);
+            runOnFxThread(() -> {
+                attachToScene(view);
+                dragSelection(view, 0, 4);
+                view.getTerminalShortcuts().add(new TerminalShortcut(next, view::searchNext));
+                view.getTerminalShortcuts().add(new TerminalShortcut(previous, view::searchPrevious));
+                view.openSearch();
+                ((TextField) view.lookup("#ghosttyfx-search-field")).setText("alpha");
+                return null;
+            });
+            await("search matches", START_TIMEOUT, () -> runOnFxThread(() ->
+                    "-/2".equals(((Label) view.lookup("#ghosttyfx-search-count")).getText())
+                            ? Optional.of(Boolean.TRUE) : Optional.empty()));
+            var before = terminal.inputSnapshot().toByteArray();
+            runOnFxThread(() -> {
+                var field = (TextField) view.lookup("#ghosttyfx-search-field");
+                var count = (Label) view.lookup("#ghosttyfx-search-count");
+                fireTerminalShortcut(field, next);
+                assertEquals("1/2", count.getText());
+                fireTerminalShortcut(field, next);
+                assertEquals("2/2", count.getText());
+                fireTerminalShortcut(field, previous);
+                assertEquals("1/2", count.getText());
+                fireTerminalShortcut(view, next);
+                assertEquals("2/2", count.getText());
+                fireTerminalShortcut(field, new KeyCodeCombination(KeyCode.A, modifier));
+                assertEquals("alpha", field.getSelectedText());
+                assertEquals("alpha", view.getInputMethodRequests().getSelectedText());
+                field.positionCaret(2);
+                fireTerminalShortcut(field, new KeyCodeCombination(KeyCode.RIGHT, KeyCombination.SHIFT_DOWN));
+                assertEquals("p", field.getSelectedText());
+                assertEquals("alpha", view.getInputMethodRequests().getSelectedText());
+                return null;
+            });
+            assertTrue(java.util.Arrays.equals(before, terminal.inputSnapshot().toByteArray()));
+        }
+    }
+
+    @Test
+    void searchNavigationBindingsRespectListOrderRemovalAndFocusAvailability() throws Exception {
+        var terminal = new ControlledTerminal();
+        try (var view = new TerminalView((_, _) -> terminal)) {
+            terminal.emit("alpha\r\nbeta\r\nalpha");
+            awaitText(view, "beta");
+            runOnFxThread(() -> {
+                attachToScene(view);
+                view.openSearch();
+                ((TextField) view.lookup("#ghosttyfx-search-field")).setText("alpha");
+                return null;
+            });
+            await("search matches", START_TIMEOUT, () -> runOnFxThread(() ->
+                    "-/2".equals(((Label) view.lookup("#ghosttyfx-search-count")).getText())
+                            ? Optional.of(Boolean.TRUE) : Optional.empty()));
+            var before = terminal.inputSnapshot().size();
+            runOnFxThread(() -> {
+                var field = (TextField) view.lookup("#ghosttyfx-search-field");
+                var count = (Label) view.lookup("#ghosttyfx-search-count");
+                var up = new KeyCodeCombination(KeyCode.UP);
+                var escape = new KeyCodeCombination(KeyCode.ESCAPE);
+                view.getTerminalShortcuts().addFirst(new TerminalShortcut(up, () -> false));
+                fireTerminalShortcut(field, up);
+                assertEquals("1/2", count.getText());
+                view.getTerminalShortcuts().addFirst(new TerminalShortcut(up, view::searchPrevious));
+                fireTerminalShortcut(field, up);
+                assertEquals("1/2", count.getText());
+                view.getTerminalShortcuts().removeIf(shortcut -> shortcut.combination().equals(up));
+                field.positionCaret(2);
+                fireTerminalShortcut(field, up);
+                assertEquals("1/2", count.getText());
+                assertEquals(0, field.getCaretPosition());
+                view.getTerminalShortcuts().removeIf(shortcut -> shortcut.combination().equals(escape));
+                fireTerminalShortcut(field, escape);
+                assertTrue(view.lookup("#ghosttyfx-search").isVisible());
+                view.requestFocus();
+                fireTerminalShortcut(view, new KeyCodeCombination(KeyCode.DOWN));
+                assertEquals("1/2", count.getText());
+                view.openSearch();
+                field.setText("missing");
+                field.positionCaret(3);
+                fireTerminalShortcut(field, new KeyCodeCombination(KeyCode.DOWN));
+                assertEquals("-/0", count.getText());
+                assertEquals(3, field.getCaretPosition());
+                view.getTerminalShortcuts().add(new TerminalShortcut(escape, view::closeSearch));
+                fireTerminalShortcut(field, escape);
+                assertFalse(view.lookup("#ghosttyfx-search").isVisible());
+                return null;
+            });
+            assertEquals("\u001B[B", terminal.inputSnapshot().toString(StandardCharsets.UTF_8).substring(before));
+        }
+    }
+
+    @Test
+    void publicFieldSearchActionsSupportCustomBindingsAndFocusAvailability() throws Exception {
+        var terminal = new ControlledTerminal();
+        try (var view = new TerminalView((_, _) -> terminal)) {
+            terminal.emit("alpha\r\nbeta\r\nalpha");
+            awaitText(view, "beta");
+            runOnFxThread(() -> {
+                attachToScene(view);
+                assertFalse(view.searchNextInField());
+                assertFalse(view.searchPreviousInField());
+                view.getTerminalShortcuts().setAll(
+                        new TerminalShortcut(new KeyCodeCombination(KeyCode.UP), view::searchNextInField),
+                        new TerminalShortcut(new KeyCodeCombination(KeyCode.DOWN), view::searchPreviousInField));
+                view.openSearch();
+                ((TextField) view.lookup("#ghosttyfx-search-field")).setText("alpha");
+                return null;
+            });
+            await("search matches", START_TIMEOUT, () -> runOnFxThread(() ->
+                    "-/2".equals(((Label) view.lookup("#ghosttyfx-search-count")).getText())
+                            ? Optional.of(Boolean.TRUE) : Optional.empty()));
+            var before = terminal.inputSnapshot().size();
+            runOnFxThread(() -> {
+                var field = (TextField) view.lookup("#ghosttyfx-search-field");
+                var count = (Label) view.lookup("#ghosttyfx-search-count");
+                fireTerminalShortcut(field, new KeyCodeCombination(KeyCode.UP));
+                assertEquals("1/2", count.getText());
+                fireTerminalShortcut(field, new KeyCodeCombination(KeyCode.UP));
+                assertEquals("2/2", count.getText());
+                fireTerminalShortcut(field, new KeyCodeCombination(KeyCode.DOWN));
+                assertEquals("1/2", count.getText());
+                view.requestFocus();
+                assertFalse(view.searchNextInField());
+                assertFalse(view.searchPreviousInField());
+                assertEquals("1/2", count.getText());
+                fireTerminalShortcut(view, new KeyCodeCombination(KeyCode.UP));
+                view.openSearch();
+                field.setText("missing");
+                assertTrue(view.searchNextInField());
+                assertTrue(view.searchPreviousInField());
+                assertEquals("-/0", count.getText());
+                return null;
+            });
+            assertEquals("\u001B[A", terminal.inputSnapshot().toString(StandardCharsets.UTF_8).substring(before));
+        }
+    }
+
+    @Test
+    void publicFocusChecksAllowExplicitShortcutAvailability() throws Exception {
+        var terminal = new ControlledTerminal();
+        var clipboardContents = runOnFxThread(TerminalViewTest::snapshotClipboardContents);
+        try (var view = new TerminalView((_, _) -> terminal)) {
+            runOnFxThread(() -> {
+                assertFalse(view.isTerminalFocused());
+                assertFalse(view.isSearchFieldFocused());
+                return null;
+            });
+            terminal.emit("alpha");
+            awaitText(view, "alpha");
+            var before = terminal.inputSnapshot().size();
+            runOnFxThread(() -> {
+                assertTrue(view.isTerminalFocused());
+                assertFalse(view.isSearchFieldFocused());
+                dragSelection(view, 0, 4);
+                view.getTerminalShortcuts().add(new TerminalShortcut(
+                        new KeyCodeCombination(KeyCode.F3), view::copySelection));
+                view.getTerminalShortcuts().add(new TerminalShortcut(
+                        new KeyCodeCombination(KeyCode.F4),
+                        () -> view.isTerminalFocused() && view.sendText("gated")));
+                view.openSearch();
+                var field = (TextField) view.lookup("#ghosttyfx-search-field");
+                field.setText("query");
+                assertFalse(view.isTerminalFocused());
+                assertTrue(view.isSearchFieldFocused());
+                fireTerminalShortcut(field, new KeyCodeCombination(KeyCode.F4));
+                return null;
+            });
+            assertEquals(before, terminal.inputSnapshot().size());
+            runOnFxThread(() -> {
+                var field = (TextField) view.lookup("#ghosttyfx-search-field");
+                assertEquals("alpha", view.getInputMethodRequests().getSelectedText());
+                fireTerminalShortcut(field, new KeyCodeCombination(KeyCode.F3));
+                assertEquals("alpha", Clipboard.getSystemClipboard().getString());
+                assertTrue(view.isSearchFieldFocused());
+                fireTerminalShortcut(view, new KeyCodeCombination(KeyCode.F4));
+                assertTrue(view.isTerminalFocused());
+                assertFalse(view.isSearchFieldFocused());
+                view.closeSearch();
+                assertTrue(view.isTerminalFocused());
+                assertFalse(view.isSearchFieldFocused());
+                return null;
+            });
+            assertEquals("gated", terminal.inputSnapshot().toString(StandardCharsets.UTF_8).substring(before));
+        } finally {
+            runOnFxThread(() -> {
+                restoreClipboardContents(clipboardContents);
+                return null;
+            });
+        }
+    }
+
+    @Test
+    void searchOnlyScrollsOnNavigationAndKeepsFractionalScrollForVisibleMatches() throws Exception {
+        var lines = new ArrayList<String>();
+        for (var i = 0; i < 1000; i++) {
+            var text = i == 0 ? "old-marker" : i == 1 ? "visible-marker" : "line-" + i;
+            lines.add((i == 0 ? "\u001B[48;2;255;0;0m\u001B[K" : "")
+                    + "\u001B]8;;ghosttyfx-test:search-row-" + i + "\u001B\\" + text + "\u001B]8;;\u001B\\\u001B[0m");
+        }
+        try (var view = runOnFxThread(() -> {
+            var terminalView = createView(String.join("\r\n", lines) + "\u001B]2;search-ready\u001B\\");
+            terminalView.setOsc8LinkAction(_ -> fail("Hovering and searching must not activate a link"));
+            return terminalView;
+        })) {
+            awaitTitle(view, "search-ready");
+            var initialLink = runOnFxThread(() -> {
+                attachToScene(view);
+                view.scrollViewportToBottom();
+                moveToCell(view, 1, 0);
+                var link = view.getHoveredLink();
+                assertTrue(link instanceof TerminalLink.Osc8);
+                view.openSearch();
+                ((TextField) view.lookup("#ghosttyfx-search-field")).setText("old-marker");
+                return link;
+            });
+            await("scrollback match", START_TIMEOUT, () -> runOnFxThread(() ->
+                    "-/1".equals(((Label) view.lookup("#ghosttyfx-search-count")).getText()) ? Optional.of(Boolean.TRUE) : Optional.empty()));
+            runOnFxThread(() -> {
+                moveToCell(view, 1, 0);
+                assertEquals(initialLink, view.getHoveredLink());
+                assertTrue(view.searchNext());
+                assertEquals(new TerminalLink.Osc8("ghosttyfx-test:search-row-0"), view.getHoveredLink());
+                assertColor(Color.RED, cellColor(view, 20, 0));
+                smoothScroll(view, 0.75);
+                moveToCell(view, 1, 0);
+                assertEquals(new TerminalLink.Osc8("ghosttyfx-test:search-row-1"), view.getHoveredLink());
+                ((TextField) view.lookup("#ghosttyfx-search-field")).setText("visible-marker");
+                assertTrue(view.searchNext());
+                moveToCell(view, 1, 0);
+                assertEquals(new TerminalLink.Osc8("ghosttyfx-test:search-row-1"), view.getHoveredLink());
+                return null;
+            });
+        }
+    }
+
+    @Test
+    void nativeSearchUsesGhosttyMatchingRules() throws Exception {
+        try (var view = createView("aaaa\r\nÄ ä\r\nABC abc\r\nfoo   \r\n界e\u0301")) {
+            awaitText(view, "界e\u0301");
+            runOnFxThread(() -> {
+                attachToScene(view);
+                view.openSearch();
+                return null;
+            });
+            for (var test : List.of(Map.entry("aaa", 2), Map.entry("ä", 1), Map.entry("abc", 2),
+                    Map.entry("foo ", 0), Map.entry("界e\u0301", 1))) {
+                runOnFxThread(() -> {
+                    ((TextField) view.lookup("#ghosttyfx-search-field")).setText(test.getKey());
+                    return null;
+                });
+                await("native query " + test.getKey(), START_TIMEOUT, () -> runOnFxThread(() ->
+                        ((Label) view.lookup("#ghosttyfx-search-count")).getText().equals("-/" + test.getValue())
+                                ? Optional.of(Boolean.TRUE) : Optional.empty()));
+                runOnFxThread(() -> {
+                    assertEquals(-1, view.selectedSearchMatchIndex());
+                    assertTrue(view.searchNext());
+                    assertEquals(test.getValue() > 0 ? 0 : -1, view.selectedSearchMatchIndex());
+                    return null;
+                });
+            }
+        }
+    }
+
+    @Test
+    void searchNavigationConsumesNoMatchShortcutsUntilSearchCloses() throws Exception {
+        var terminal = new ControlledTerminal();
+        try (var view = new TerminalView((_, _) -> terminal)) {
+            terminal.emit("\u001B[>1u\u001B]2;search-command-ready\u0007");
+            awaitTitle(view, "search-command-ready");
+            var modifier = isMac() ? KeyCombination.META_DOWN : KeyCombination.CONTROL_DOWN;
+            var next = new KeyCodeCombination(KeyCode.G, modifier);
+            var previous = new KeyCodeCombination(KeyCode.G, modifier, KeyCombination.SHIFT_DOWN);
+            runOnFxThread(() -> {
+                attachToScene(view);
+                assertFalse(view.searchNext());
+                assertFalse(view.searchPrevious());
+                if (!isMac()) {
+                    view.getTerminalShortcuts().add(new TerminalShortcut(next, view::searchNext));
+                    view.getTerminalShortcuts().add(new TerminalShortcut(previous, view::searchPrevious));
+                }
+                view.openSearch();
+                return null;
+            });
+            var before = terminal.inputSnapshot().size();
+            for (var query : List.of("", "missing")) {
+                runOnFxThread(() -> {
+                    var field = (TextField) view.lookup("#ghosttyfx-search-field");
+                    field.setText(query);
+                    view.requestFocus();
+                    assertTrue(view.searchNext());
+                    assertTrue(view.searchPrevious());
+                    assertEquals(-1, view.selectedSearchMatchIndex());
+                    fireTerminalShortcut(view, next);
+                    fireTerminalShortcut(view, previous);
+                    fireTerminalShortcut(field, next);
+                    fireTerminalShortcut(field, previous);
+                    return null;
+                });
+                assertEquals(before, terminal.inputSnapshot().size());
+            }
+            runOnFxThread(() -> {
+                assertTrue(view.closeSearch());
+                assertFalse(view.searchNext());
+                assertFalse(view.searchPrevious());
+                fireTerminalShortcut(view, next);
+                return null;
+            });
+            assertTrue(terminal.inputSnapshot().size() > before);
+        }
+    }
+
+    @Test
+    void searchPreservesQueryAndFocusAndDoesNotSendFieldInputToTerminal() throws Exception {
+        var terminal = new ControlledTerminal();
+        try (var view = new TerminalView((_, _) -> terminal)) {
+            terminal.emit("alpha\r\nbeta\r\nalpha");
+            awaitText(view, "beta");
+            runOnFxThread(() -> {
+                attachToScene(view);
+                dragSelection(view, 0, 4);
+                var selection = view.getInputMethodRequests().getSelectedText();
+                assertEquals("alpha", selection);
+                view.openSearch();
+                var field = (TextField) view.lookup("#ghosttyfx-search-field");
+                field.setText("alpha");
+                assertEquals(selection, view.getInputMethodRequests().getSelectedText());
+                return null;
+            });
+            await("search matches", START_TIMEOUT, () -> runOnFxThread(() ->
+                    "-/2".equals(((Label) view.lookup("#ghosttyfx-search-count")).getText()) ? Optional.of(Boolean.TRUE) : Optional.empty()));
+            var before = terminal.inputSnapshot().toByteArray();
+            runOnFxThread(() -> {
+                var field = (TextField) view.lookup("#ghosttyfx-search-field");
+                field.fireEvent(new KeyEvent(KeyEvent.KEY_RELEASED, "", "", KeyCode.A, false, false, false, false));
+                field.fireEvent(new InputMethodEvent(InputMethodEvent.INPUT_METHOD_TEXT_CHANGED, List.of(), "z", 0));
+                field.setText("alpha");
+                assertTrue(view.searchNext());
+                var selected = view.selectedSearchMatchIndex();
+                field.positionCaret(2);
+                fireTerminalShortcut(view, searchTerminalShortcut());
+                assertTrue(view.lookup("#ghosttyfx-search").isVisible());
+                assertEquals("alpha", field.getText());
+                assertEquals("alpha", field.getSelectedText());
+                assertEquals(selected, view.selectedSearchMatchIndex());
+                field.fireEvent(keyEvent(new KeyCodeCombination(KeyCode.ESCAPE)));
+                assertFalse(view.lookup("#ghosttyfx-search").isVisible());
+                view.openSearch();
+                fireTerminalShortcut(view, new KeyCodeCombination(KeyCode.ESCAPE));
+                assertFalse(view.lookup("#ghosttyfx-search").isVisible());
+                view.openSearch();
+                assertEquals("alpha", field.getText());
+                field.setText("");
+                field.fireEvent(keyEvent(new KeyCodeCombination(KeyCode.ESCAPE)));
+                assertFalse(view.lookup("#ghosttyfx-search").isVisible());
+                return null;
+            });
+            assertTrue(java.util.Arrays.equals(before, terminal.inputSnapshot().toByteArray()));
+        }
+    }
+
+    @Test
+    void openingSearchUsesSelectionAndStartsFreshAfterClosing() throws Exception {
+        var terminal = new ControlledTerminal();
+        try (var view = new TerminalView((_, _) -> terminal)) {
+            terminal.emit("alpha beta");
+            awaitText(view, "alpha beta");
+            runOnFxThread(() -> {
+                fireTerminalShortcut(view, searchTerminalShortcut());
+                var field = (TextField) view.lookup("#ghosttyfx-search-field");
+                assertEquals("", field.getText());
+                field.setText("old-query");
+                fireTerminalShortcut(view, searchTerminalShortcut());
+                assertEquals("old-query", field.getText());
+                assertTrue(view.isSearchFieldFocused());
+                assertTrue(view.closeSearch());
+                fireTerminalShortcut(view, searchTerminalShortcut());
+                assertEquals("", field.getText());
+                assertEquals("0/0", ((Label) view.lookup("#ghosttyfx-search-count")).getText());
+                dragSelection(view, 0, 4);
+                fireTerminalShortcut(view, searchTerminalShortcut());
+                assertEquals("alpha", field.getText());
+                assertEquals("alpha", view.getInputMethodRequests().getSelectedText());
+                field.setText("old-query");
+                dragSelection(view, 6, 9);
+                fireTerminalShortcut(view, searchTerminalShortcut());
+                assertEquals("beta", field.getText());
+                assertEquals("beta", view.getInputMethodRequests().getSelectedText());
+                assertTrue(view.closeSearch());
+                assertTrue(view.toggleSearch());
+                assertEquals("beta", field.getText());
+                clickCell(view, 11, 0, 1);
+                assertFalse(view.canCopySelection());
+                assertTrue(view.closeSearch());
+                assertTrue(view.toggleSearch());
+                assertEquals("", field.getText());
+                return null;
+            });
+        }
+    }
+
+    @Test
+    void nativeSearchRetainsSelectedMatchAcrossOutputAndScreenSwitchesAndRecoversFromResize() throws Exception {
+        var terminal = new ControlledTerminal();
+        try (var view = new TerminalView((_, _) -> terminal)) {
+            terminal.emit("hit\r\nmiddle\r\nhit");
+            awaitText(view, "middle");
+            runOnFxThread(() -> {
+                attachToScene(view);
+                view.openSearch();
+                ((TextField) view.lookup("#ghosttyfx-search-field")).setText("hit");
+                return null;
+            });
+            await("initial matches", START_TIMEOUT, () -> runOnFxThread(() ->
+                    "-/2".equals(((Label) view.lookup("#ghosttyfx-search-count")).getText()) ? Optional.of(Boolean.TRUE) : Optional.empty()));
+            runOnFxThread(() -> {
+                assertTrue(view.searchNext());
                 assertEquals(0, view.selectedSearchMatchIndex());
-                assertEquals(2, field.getCaretPosition());
-                field.fireEvent(keyEvent(new KeyCodeCombination(KeyCode.UP)));
-                assertEquals(0, view.selectedSearchMatchIndex());
-                assertEquals(2, field.getCaretPosition());
+                return null;
+            });
+            terminal.emit("\r\nhit");
+            await("new output retains match", START_TIMEOUT, () -> runOnFxThread(() ->
+                    "2/3".equals(((Label) view.lookup("#ghosttyfx-search-count")).getText()) ? Optional.of(Boolean.TRUE) : Optional.empty()));
+            terminal.emit("\u001B[?1049h\u001B[Hhit");
+            await("alternate screen matches", START_TIMEOUT, () -> runOnFxThread(() ->
+                    "-/1".equals(((Label) view.lookup("#ghosttyfx-search-count")).getText()) ? Optional.of(Boolean.TRUE) : Optional.empty()));
+            runOnFxThread(() -> {
+                assertTrue(view.searchNext());
+                return null;
+            });
+            terminal.emit("\u001B[?1049l");
+            await("primary search restored", START_TIMEOUT, () -> runOnFxThread(() ->
+                    "2/3".equals(((Label) view.lookup("#ghosttyfx-search-count")).getText()) ? Optional.of(Boolean.TRUE) : Optional.empty()));
+            runOnFxThread(() -> {
+                view.resize(view.getWidth() / 2, view.getHeight());
+                return null;
+            });
+            await("search after resize", START_TIMEOUT, () -> runOnFxThread(() ->
+                    "-/3".equals(((Label) view.lookup("#ghosttyfx-search-count")).getText()) ? Optional.of(Boolean.TRUE) : Optional.empty()));
+            runOnFxThread(() -> {
+                assertTrue(view.searchNext());
+                assertEquals("1/3", ((Label) view.lookup("#ghosttyfx-search-count")).getText());
+                return null;
+            });
+        }
+    }
+
+    @Test
+    void completedSearchResumesForNewScrollbackOutput() throws Exception {
+        var terminal = new ControlledTerminal();
+        try (var view = new TerminalView((_, _) -> terminal)) {
+            terminal.emit("search-hit\r\n".repeat(2000) + "\u001B]2;search-history-ready\u001B\\");
+            awaitTitle(view, "search-history-ready");
+            runOnFxThread(() -> {
+                attachToScene(view);
+                view.openSearch();
+                ((TextField) view.lookup("#ghosttyfx-search-field")).setText("search-hit");
+                return null;
+            });
+            await("completed history search", START_TIMEOUT, () -> runOnFxThread(() ->
+                    "-/2000".equals(((Label) view.lookup("#ghosttyfx-search-count")).getText())
+                            ? Optional.of(Boolean.TRUE) : Optional.empty()));
+            terminal.emit("search-hit\r\n".repeat(1000));
+            await("search resumed for new history", START_TIMEOUT, () -> runOnFxThread(() ->
+                    "-/3000".equals(((Label) view.lookup("#ghosttyfx-search-count")).getText())
+                            ? Optional.of(Boolean.TRUE) : Optional.empty()));
+            runOnFxThread(() -> {
+                assertTrue(view.searchNext());
+                assertEquals("1/3000", ((Label) view.lookup("#ghosttyfx-search-count")).getText());
+                return null;
+            });
+        }
+    }
+
+    @Test
+    void reopeningSearchStartsFreshWithoutChangingOtherFindBars() throws Exception {
+        try (var first = createView("first"); var second = createView("second")) {
+            runOnFxThread(() -> {
+                first.openSearch();
+                ((TextField) first.lookup("#ghosttyfx-search-field")).setText("first query 界");
+                first.closeSearch();
+                second.openSearch();
+                var secondField = (TextField) second.lookup("#ghosttyfx-search-field");
+                assertEquals("", secondField.getText());
+                secondField.setText("second query");
+                first.openSearch();
+                assertEquals("", ((TextField) first.lookup("#ghosttyfx-search-field")).getText());
+                assertEquals("second query", secondField.getText());
                 return null;
             });
         }
@@ -1832,6 +3021,12 @@ final class TerminalViewTest {
     }
 
     private static KeyEvent fireTerminalShortcut(EventTarget target, KeyCombination shortcut) {
+        if (target instanceof TerminalView view && view.getScene() == null) {
+            new Scene(view, view.getWidth(), view.getHeight());
+        }
+        if (target instanceof Node node) {
+            node.requestFocus();
+        }
         var event = keyEvent(shortcut);
         Event.fireEvent(target, event);
         return event;
@@ -1883,6 +3078,36 @@ final class TerminalViewTest {
                 colorsEqual(expected, cellColor(view, column, row))
                         ? Optional.of(Boolean.TRUE)
                         : Optional.empty()));
+    }
+
+    private static String stripedOutput(int rows) {
+        var output = new StringBuilder("\u001B[?25l");
+        for (var row = 0; row < rows; row++) {
+            if (row != 0) {
+                output.append("\r\n");
+            }
+            output.append(row % 2 == 0 ? "\u001B[48;2;255;0;0m" : "\u001B[48;2;0;0;255m");
+            output.append("\u001B[2K ");
+        }
+        return output.toString();
+    }
+
+    private static ScrollEvent scrollEvent(double x, double y, double deltaY) {
+        return new ScrollEvent(ScrollEvent.SCROLL, x, y, 0, 0,
+                false, false, false, false, true, false,
+                0, deltaY, 0, deltaY,
+                ScrollEvent.HorizontalTextScrollUnits.NONE, 0,
+                ScrollEvent.VerticalTextScrollUnits.NONE, 0, 1, null);
+    }
+
+    private static void smoothScroll(TerminalView view, double rows) {
+        Event.fireEvent(view, scrollEvent(cellX(view, 1, 0.5), cellY(view, 0, 0.5), -rows * cellHeight(view)));
+    }
+
+    private static Color pixelColor(TerminalView view, double x, double y) {
+        var snapshot = new WritableImage((int) Math.ceil(view.getWidth()), (int) Math.ceil(view.getHeight()));
+        view.snapshot(null, snapshot);
+        return snapshot.getPixelReader().getColor((int) Math.floor(x), (int) Math.floor(y));
     }
 
     private static Color cellColor(TerminalView view, int column, int row) {
@@ -2398,8 +3623,36 @@ final class TerminalViewTest {
     }
 
     private static final class ControlledTerminal implements Terminal {
+        private static final byte[] STATUS_REPLY = "\u001B[0n".getBytes(StandardCharsets.UTF_8);
         private final PipedInputStream output = new PipedInputStream();
+        private final ByteArrayOutputStream receivedInput = new ByteArrayOutputStream();
+        private final BlockingQueue<ByteArrayOutputStream> inputSnapshots = new LinkedBlockingQueue<>();
+        private final OutputStream input = new OutputStream() {
+            @Override
+            public void write(int value) {
+                receivedInput.write(value);
+            }
+
+            @Override
+            public void write(byte[] bytes, int offset, int length) {
+                if (java.util.Arrays.equals(bytes, offset, offset + length,
+                        STATUS_REPLY, 0, STATUS_REPLY.length)) {
+                    var snapshot = new ByteArrayOutputStream();
+                    snapshot.writeBytes(receivedInput.toByteArray());
+                    inputSnapshots.add(snapshot);
+                } else {
+                    receivedInput.write(bytes, offset, length);
+                }
+            }
+        };
         private final PipedOutputStream outputWriter;
+
+        private ByteArrayOutputStream inputSnapshot() throws IOException, InterruptedException {
+            assertFalse(Platform.isFxApplicationThread());
+            // The status reply is queued behind all earlier input without changing the UI.
+            emit("\u001B[5n");
+            return inputSnapshots.take();
+        }
 
         private ControlledTerminal() throws IOException {
             outputWriter = new PipedOutputStream(output);
@@ -2417,7 +3670,7 @@ final class TerminalViewTest {
 
         @Override
         public OutputStream input() {
-            return OutputStream.nullOutputStream();
+            return input;
         }
 
         @Override
