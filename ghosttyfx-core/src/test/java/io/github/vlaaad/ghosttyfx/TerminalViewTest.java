@@ -28,6 +28,7 @@ import java.util.ArrayList;
 import java.util.Base64;
 import java.util.HashMap;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.List;
 import java.util.Map;
@@ -704,14 +705,14 @@ final class TerminalViewTest {
             awaitTitle(view, "mouse-ready");
             runOnFxThread(() -> {
                 smoothScroll(view, 0.5);
-                assertEquals(0, terminal.input.size());
+                return null;
+            });
+            assertEquals(0, terminal.inputSnapshot().size());
+            runOnFxThread(() -> {
                 smoothScroll(view, 0.5);
                 return null;
             });
-            var input = await("mouse wheel report", START_TIMEOUT, () -> {
-                var text = terminal.input.toString(StandardCharsets.UTF_8);
-                return text.endsWith("m") ? Optional.of(text) : Optional.empty();
-            });
+            var input = terminal.inputSnapshot().toString(StandardCharsets.UTF_8);
             assertEquals("\u001B[<65;2;1M\u001B[<65;2;1m", input);
         }
     }
@@ -728,14 +729,14 @@ final class TerminalViewTest {
                 var deltaY = -0.75 * cellHeight(view);
                 Event.fireEvent(view, scrollEvent(view.getWidth() - 1, cellY(view, 0, 0.5), deltaY));
                 assertColor(Color.BLUE, pixelColor(view, cellX(view, 1, 0.5), cellY(view, 0, 0.5)));
-                assertEquals(0, terminal.input.size());
+                return null;
+            });
+            assertEquals(0, terminal.inputSnapshot().size());
+            runOnFxThread(() -> {
                 clickCell(view, 1, 0, 1);
                 return null;
             });
-            var input = await("shifted mouse click report", START_TIMEOUT, () -> {
-                var text = terminal.input.toString(StandardCharsets.UTF_8);
-                return text.endsWith("m") ? Optional.of(text) : Optional.empty();
-            });
+            var input = terminal.inputSnapshot().toString(StandardCharsets.UTF_8);
             assertEquals("\u001B[<0;2;2M\u001B[<0;2;2m", input);
         }
     }
@@ -2261,10 +2262,10 @@ final class TerminalViewTest {
             await("search matches", START_TIMEOUT, () -> runOnFxThread(() ->
                     "-/2".equals(((Label) view.lookup("#ghosttyfx-search-count")).getText())
                             ? Optional.of(Boolean.TRUE) : Optional.empty()));
+            var before = terminal.inputSnapshot().toByteArray();
             runOnFxThread(() -> {
                 var field = (TextField) view.lookup("#ghosttyfx-search-field");
                 var count = (Label) view.lookup("#ghosttyfx-search-count");
-                var before = terminal.input.toByteArray();
                 fireTerminalShortcut(field, next);
                 assertEquals("1/2", count.getText());
                 fireTerminalShortcut(field, next);
@@ -2280,9 +2281,9 @@ final class TerminalViewTest {
                 fireTerminalShortcut(field, new KeyCodeCombination(KeyCode.RIGHT, KeyCombination.SHIFT_DOWN));
                 assertEquals("p", field.getSelectedText());
                 assertEquals("alpha", view.getInputMethodRequests().getSelectedText());
-                assertTrue(java.util.Arrays.equals(before, terminal.input.toByteArray()));
                 return null;
             });
+            assertTrue(java.util.Arrays.equals(before, terminal.inputSnapshot().toByteArray()));
         }
     }
 
@@ -2301,6 +2302,7 @@ final class TerminalViewTest {
             await("search matches", START_TIMEOUT, () -> runOnFxThread(() ->
                     "-/2".equals(((Label) view.lookup("#ghosttyfx-search-count")).getText())
                             ? Optional.of(Boolean.TRUE) : Optional.empty()));
+            var before = terminal.inputSnapshot().size();
             runOnFxThread(() -> {
                 var field = (TextField) view.lookup("#ghosttyfx-search-field");
                 var count = (Label) view.lookup("#ghosttyfx-search-count");
@@ -2321,9 +2323,7 @@ final class TerminalViewTest {
                 fireTerminalShortcut(field, escape);
                 assertTrue(view.lookup("#ghosttyfx-search").isVisible());
                 view.requestFocus();
-                var before = terminal.input.size();
                 fireTerminalShortcut(view, new KeyCodeCombination(KeyCode.DOWN));
-                assertEquals("\u001B[B", terminal.input.toString(StandardCharsets.UTF_8).substring(before));
                 assertEquals("1/2", count.getText());
                 view.openSearch();
                 field.setText("missing");
@@ -2336,6 +2336,7 @@ final class TerminalViewTest {
                 assertFalse(view.lookup("#ghosttyfx-search").isVisible());
                 return null;
             });
+            assertEquals("\u001B[B", terminal.inputSnapshot().toString(StandardCharsets.UTF_8).substring(before));
         }
     }
 
@@ -2359,6 +2360,7 @@ final class TerminalViewTest {
             await("search matches", START_TIMEOUT, () -> runOnFxThread(() ->
                     "-/2".equals(((Label) view.lookup("#ghosttyfx-search-count")).getText())
                             ? Optional.of(Boolean.TRUE) : Optional.empty()));
+            var before = terminal.inputSnapshot().size();
             runOnFxThread(() -> {
                 var field = (TextField) view.lookup("#ghosttyfx-search-field");
                 var count = (Label) view.lookup("#ghosttyfx-search-count");
@@ -2372,9 +2374,7 @@ final class TerminalViewTest {
                 assertFalse(view.searchNextInField());
                 assertFalse(view.searchPreviousInField());
                 assertEquals("1/2", count.getText());
-                var before = terminal.input.size();
                 fireTerminalShortcut(view, new KeyCodeCombination(KeyCode.UP));
-                assertEquals("\u001B[A", terminal.input.toString(StandardCharsets.UTF_8).substring(before));
                 view.openSearch();
                 field.setText("missing");
                 assertTrue(view.searchNextInField());
@@ -2382,6 +2382,7 @@ final class TerminalViewTest {
                 assertEquals("-/0", count.getText());
                 return null;
             });
+            assertEquals("\u001B[A", terminal.inputSnapshot().toString(StandardCharsets.UTF_8).substring(before));
         }
     }
 
@@ -2397,6 +2398,7 @@ final class TerminalViewTest {
             });
             terminal.emit("alpha");
             awaitText(view, "alpha");
+            var before = terminal.inputSnapshot().size();
             runOnFxThread(() -> {
                 assertTrue(view.isTerminalFocused());
                 assertFalse(view.isSearchFieldFocused());
@@ -2411,15 +2413,17 @@ final class TerminalViewTest {
                 field.setText("query");
                 assertFalse(view.isTerminalFocused());
                 assertTrue(view.isSearchFieldFocused());
-                var before = terminal.input.size();
                 fireTerminalShortcut(field, new KeyCodeCombination(KeyCode.F4));
-                assertEquals(before, terminal.input.size());
+                return null;
+            });
+            assertEquals(before, terminal.inputSnapshot().size());
+            runOnFxThread(() -> {
+                var field = (TextField) view.lookup("#ghosttyfx-search-field");
                 assertEquals("alpha", view.getInputMethodRequests().getSelectedText());
                 fireTerminalShortcut(field, new KeyCodeCombination(KeyCode.F3));
                 assertEquals("alpha", Clipboard.getSystemClipboard().getString());
                 assertTrue(view.isSearchFieldFocused());
                 fireTerminalShortcut(view, new KeyCodeCombination(KeyCode.F4));
-                assertEquals("gated", terminal.input.toString(StandardCharsets.UTF_8).substring(before));
                 assertTrue(view.isTerminalFocused());
                 assertFalse(view.isSearchFieldFocused());
                 view.closeSearch();
@@ -2427,6 +2431,7 @@ final class TerminalViewTest {
                 assertFalse(view.isSearchFieldFocused());
                 return null;
             });
+            assertEquals("gated", terminal.inputSnapshot().toString(StandardCharsets.UTF_8).substring(before));
         } finally {
             runOnFxThread(() -> {
                 restoreClipboardContents(clipboardContents);
@@ -2513,21 +2518,24 @@ final class TerminalViewTest {
         try (var view = new TerminalView((_, _) -> terminal)) {
             terminal.emit("\u001B[>1u\u001B]2;search-command-ready\u0007");
             awaitTitle(view, "search-command-ready");
+            var modifier = isMac() ? KeyCombination.META_DOWN : KeyCombination.CONTROL_DOWN;
+            var next = new KeyCodeCombination(KeyCode.G, modifier);
+            var previous = new KeyCodeCombination(KeyCode.G, modifier, KeyCombination.SHIFT_DOWN);
             runOnFxThread(() -> {
                 attachToScene(view);
                 assertFalse(view.searchNext());
                 assertFalse(view.searchPrevious());
-                var modifier = isMac() ? KeyCombination.META_DOWN : KeyCombination.CONTROL_DOWN;
-                var next = new KeyCodeCombination(KeyCode.G, modifier);
-                var previous = new KeyCodeCombination(KeyCode.G, modifier, KeyCombination.SHIFT_DOWN);
                 if (!isMac()) {
                     view.getTerminalShortcuts().add(new TerminalShortcut(next, view::searchNext));
                     view.getTerminalShortcuts().add(new TerminalShortcut(previous, view::searchPrevious));
                 }
                 view.openSearch();
-                var field = (TextField) view.lookup("#ghosttyfx-search-field");
-                var before = terminal.input.size();
-                for (var query : List.of("", "missing")) {
+                return null;
+            });
+            var before = terminal.inputSnapshot().size();
+            for (var query : List.of("", "missing")) {
+                runOnFxThread(() -> {
+                    var field = (TextField) view.lookup("#ghosttyfx-search-field");
                     field.setText(query);
                     view.requestFocus();
                     assertTrue(view.searchNext());
@@ -2537,15 +2545,18 @@ final class TerminalViewTest {
                     fireTerminalShortcut(view, previous);
                     fireTerminalShortcut(field, next);
                     fireTerminalShortcut(field, previous);
-                    assertEquals(before, terminal.input.size());
-                }
+                    return null;
+                });
+                assertEquals(before, terminal.inputSnapshot().size());
+            }
+            runOnFxThread(() -> {
                 assertTrue(view.closeSearch());
                 assertFalse(view.searchNext());
                 assertFalse(view.searchPrevious());
                 fireTerminalShortcut(view, next);
-                assertTrue(terminal.input.size() > before);
                 return null;
             });
+            assertTrue(terminal.inputSnapshot().size() > before);
         }
     }
 
@@ -2568,12 +2579,11 @@ final class TerminalViewTest {
             });
             await("search matches", START_TIMEOUT, () -> runOnFxThread(() ->
                     "-/2".equals(((Label) view.lookup("#ghosttyfx-search-count")).getText()) ? Optional.of(Boolean.TRUE) : Optional.empty()));
+            var before = terminal.inputSnapshot().toByteArray();
             runOnFxThread(() -> {
                 var field = (TextField) view.lookup("#ghosttyfx-search-field");
-                var before = terminal.input.toByteArray();
                 field.fireEvent(new KeyEvent(KeyEvent.KEY_RELEASED, "", "", KeyCode.A, false, false, false, false));
                 field.fireEvent(new InputMethodEvent(InputMethodEvent.INPUT_METHOD_TEXT_CHANGED, List.of(), "z", 0));
-                assertTrue(java.util.Arrays.equals(before, terminal.input.toByteArray()));
                 field.setText("alpha");
                 assertTrue(view.searchNext());
                 var selected = view.selectedSearchMatchIndex();
@@ -2595,6 +2605,7 @@ final class TerminalViewTest {
                 assertFalse(view.lookup("#ghosttyfx-search").isVisible());
                 return null;
             });
+            assertTrue(java.util.Arrays.equals(before, terminal.inputSnapshot().toByteArray()));
         }
     }
 
@@ -3612,9 +3623,36 @@ final class TerminalViewTest {
     }
 
     private static final class ControlledTerminal implements Terminal {
+        private static final byte[] STATUS_REPLY = "\u001B[0n".getBytes(StandardCharsets.UTF_8);
         private final PipedInputStream output = new PipedInputStream();
-        private final ByteArrayOutputStream input = new ByteArrayOutputStream();
+        private final ByteArrayOutputStream receivedInput = new ByteArrayOutputStream();
+        private final BlockingQueue<ByteArrayOutputStream> inputSnapshots = new LinkedBlockingQueue<>();
+        private final OutputStream input = new OutputStream() {
+            @Override
+            public void write(int value) {
+                receivedInput.write(value);
+            }
+
+            @Override
+            public void write(byte[] bytes, int offset, int length) {
+                if (java.util.Arrays.equals(bytes, offset, offset + length,
+                        STATUS_REPLY, 0, STATUS_REPLY.length)) {
+                    var snapshot = new ByteArrayOutputStream();
+                    snapshot.writeBytes(receivedInput.toByteArray());
+                    inputSnapshots.add(snapshot);
+                } else {
+                    receivedInput.write(bytes, offset, length);
+                }
+            }
+        };
         private final PipedOutputStream outputWriter;
+
+        private ByteArrayOutputStream inputSnapshot() throws IOException, InterruptedException {
+            assertFalse(Platform.isFxApplicationThread());
+            // The status reply is queued behind all earlier input without changing the UI.
+            emit("\u001B[5n");
+            return inputSnapshots.take();
+        }
 
         private ControlledTerminal() throws IOException {
             outputWriter = new PipedOutputStream(output);

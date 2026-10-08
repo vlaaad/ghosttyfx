@@ -2255,10 +2255,13 @@ final class TerminalSession implements AutoCloseable {
             List<KittyPlacement> placements,
             long minimumZ,
             long maximumZ) {
+        var smoothing = graphics.isImageSmoothing();
         for (var placement : placements) {
             if (placement.z() < minimumZ || placement.z() >= maximumZ) {
                 continue;
             }
+            // Software filtering clips stretched images with a one-pixel source dimension.
+            graphics.setImageSmoothing(smoothing && placement.sourceWidth() > 1 && placement.sourceHeight() > 1);
             graphics.drawImage(
                     placement.image(),
                     placement.sourceX(),
@@ -2270,6 +2273,7 @@ final class TerminalSession implements AutoCloseable {
                     placement.destinationWidth(),
                     placement.destinationHeight());
         }
+        graphics.setImageSmoothing(smoothing);
     }
 
     BlinkState render(
