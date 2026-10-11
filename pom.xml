@@ -334,7 +334,7 @@
                             <arguments>
                                 <argument>${project.basedir}/.cmd</argument>
                                 <argument>--eval</argument>
-                                <argument>dofile("scripts/test-entrypoints.lua")</argument>
+                                <argument>dofile[[scripts/test-entrypoints.lua]]</argument>
                             </arguments>
                         </configuration>
                     </execution>
