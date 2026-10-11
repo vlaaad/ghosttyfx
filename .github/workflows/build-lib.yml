@@ -52,26 +52,6 @@ jobs:
       - name: Test
         run: ./.cmd test -B
 
-      - name: Diagnose DNS
-        if: always()
-        working-directory: ghostty
-        run: |
-          cat /etc/resolv.conf
-          resolvectl status || true
-          zig_executable="$(rg --files "$HOME/.cache/dotcmd/prepared" -g zig | head -n 1)"
-          strace -f -e trace=network -s 512 -o "$RUNNER_TEMP/ghosttyfx-dns.strace" \
-            "$zig_executable" fetch --global-cache-dir "$RUNNER_TEMP/ghosttyfx-dns-cache" \
-            https://codeberg.org/vancluever/translate-c/archive/4e879eb8aba615de112eabd1231ea6e01920cead.tar.gz || true
-          cat "$RUNNER_TEMP/ghosttyfx-dns.strace"
-          getent ahosts codeberg.org || true
-          dig +tries=1 +time=3 codeberg.org A || true
-          dig +tries=1 +time=3 codeberg.org AAAA || true
-          dig +noedns +tries=1 +time=3 codeberg.org A || true
-          dig +noedns +tries=1 +time=3 codeberg.org AAAA || true
-          dig +tcp +tries=1 +time=3 codeberg.org A || true
-          curl --silent --show-error --head --connect-timeout 15 --max-time 30 \
-            https://codeberg.org/vancluever/translate-c/archive/4e879eb8aba615de112eabd1231ea6e01920cead.tar.gz || true
-
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         if: github.event_name == 'workflow_dispatch' || github.event_name == 'push'
         with:
