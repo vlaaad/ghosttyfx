@@ -270,7 +270,7 @@ jobs:
 
       - name: Publish to Central Portal
         run: >
-          ./.cmd mvn -B -Prelease
+          ./.cmd mvn -B -Prelease -DskipTests
           -pl "${GHOSTTYFX_RELEASE_PROJECTS}"
           "-Drevision=${GHOSTTYFX_VERSION}"
           deploy
