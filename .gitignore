@@ -1,10 +1,6 @@
 /.cpcache
 /.clj-kondo
 /.lsp
-/.tools
-/.tmp
-/.zig-global-cache
-/.zig-local-cache
 /target
 /dist
 /.flattened-pom.xml
@@ -20,6 +16,4 @@ __pycache__
 /ghosttyfx-manual-app/bin
 /ghosttyfx-manual-app/.project
 hs_err_pid*.log
-/ghosttyfx-core/.tmp
-/ghosttyfx-perf-app/.tmp
-/ghosttyfx-windows-x86_64/.tmp
+/ghosttyfx-core/ghosttyfx-perf-app/ghosttyfx-windows-x86_64

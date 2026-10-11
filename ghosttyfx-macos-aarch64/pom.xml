@@ -17,7 +17,6 @@
 
     <properties>
         <ghosttyfx.platform.id>macos-aarch64</ghosttyfx.platform.id>
-        <ghosttyfx.script>${project.parent.basedir}/scripts/GhosttyBuild.java</ghosttyfx.script>
     </properties>
 
     <dependencies>
@@ -42,16 +41,13 @@
                         </goals>
                         <configuration>
                             <workingDirectory>${project.parent.basedir}</workingDirectory>
-                            <executable>java</executable>
+                            <executable>${ghosttyfx.dotcmd.executable}</executable>
                             <arguments>
-                                <argument>--source</argument>
-                                <argument>${maven.compiler.source}</argument>
-                                <argument>${ghosttyfx.script}</argument>
+                                <argument>${project.parent.basedir}/.cmd</argument>
                                 <argument>generate-platform</argument>
                                 <argument>${ghosttyfx.platform.id}</argument>
                                 <argument>${project.artifactId}</argument>
                                 <argument>${project.build.directory}</argument>
-                                <argument>${ghosttyfx.native.mode}</argument>
                             </arguments>
                         </configuration>
                     </execution>

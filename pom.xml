@@ -43,8 +43,7 @@
         <junit.version>5.12.2</junit.version>
         <javafx.version>25.0.2</javafx.version>
         <pty4j.version>0.13.12</pty4j.version>
-        <ghosttyfx.script>${project.basedir}/scripts/GhosttyBuild.java</ghosttyfx.script>
-        <ghosttyfx.native.mode>auto</ghosttyfx.native.mode>
+        <ghosttyfx.dotcmd.executable>sh</ghosttyfx.dotcmd.executable>
         <ghosttyfx.generated.sources.dir>${project.build.directory}/generated-sources/jextract</ghosttyfx.generated.sources.dir>
         <ghosttyfx.generated.resources.dir>${project.build.directory}/generated-resources/ghosttyfx</ghosttyfx.generated.resources.dir>
     </properties>
@@ -228,35 +227,6 @@
             </properties>
         </profile>
         <profile>
-            <id>download-cross-platform-artifacts</id>
-            <build>
-                <plugins>
-                    <plugin>
-                        <groupId>org.codehaus.mojo</groupId>
-                        <artifactId>exec-maven-plugin</artifactId>
-                        <executions>
-                            <execution>
-                                <id>download-cross-platform-artifacts</id>
-                                <goals>
-                                    <goal>exec</goal>
-                                </goals>
-                                <configuration>
-                                    <workingDirectory>${project.basedir}</workingDirectory>
-                                    <executable>java</executable>
-                                    <arguments>
-                                        <argument>--source</argument>
-                                        <argument>${maven.compiler.source}</argument>
-                                        <argument>${ghosttyfx.script}</argument>
-                                        <argument>download-artifacts</argument>
-                                    </arguments>
-                                </configuration>
-                            </execution>
-                        </executions>
-                    </plugin>
-                </plugins>
-            </build>
-        </profile>
-        <profile>
             <id>release</id>
             <modules>
                 <module>ghosttyfx-linux-x86_64</module>
@@ -346,6 +316,31 @@
     </profiles>
 
     <build>
+        <plugins>
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>exec-maven-plugin</artifactId>
+                <inherited>false</inherited>
+                <executions>
+                    <execution>
+                        <id>check-dotcmd-entrypoints</id>
+                        <phase>validate</phase>
+                        <goals>
+                            <goal>exec</goal>
+                        </goals>
+                        <configuration>
+                            <workingDirectory>${project.basedir}</workingDirectory>
+                            <executable>${ghosttyfx.dotcmd.executable}</executable>
+                            <arguments>
+                                <argument>${project.basedir}/.cmd</argument>
+                                <argument>--eval</argument>
+                                <argument>dofile("scripts/test-entrypoints.lua")</argument>
+                            </arguments>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
         <pluginManagement>
             <plugins>
                 <plugin>

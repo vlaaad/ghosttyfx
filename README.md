@@ -290,4 +290,7 @@ active.
 
 ## Development
 
-Internal build and repository notes live in [DEVELOPMENT.md](DEVELOPMENT.md).
+Run `./.cmd test`, `./.cmd manual-app`, or
+`./.cmd nord-app`. For other Maven operations, use `./.cmd mvn ...`. The launcher
+downloads pinned Java, Maven, Zig, and jextract versions. See
+[DEVELOPMENT.md](DEVELOPMENT.md) for OS dependencies and CI behavior.

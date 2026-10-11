@@ -35,18 +35,14 @@ Begin after the user answers yes. Approval authorizes the actions below.
 5. Run native builds and tests only in GitHub Actions.
 6. Commit the changes. Push `update-ghostty`.
 7. Wait for all required CI jobs on the exact commit. Fix failures minimally and repeat.
-8. Download and validate all artifacts from that successful CI run:
-   ```sh
-   mvn -N -Pdownload-cross-platform-artifacts exec:exec@download-cross-platform-artifacts
-   ```
-9. Verify the artifacts in `dist/<ghostty-commit>/`.
-10. Report the branch, commits, CI links, artifact path, and new features with their user value.
+8. Verify that the successful CI run uploaded a complete artifact set for all supported platforms.
+9. Report the branch, commits, CI and artifact links, and new features with their user value.
 
 End before merge or pull-request creation. Keep `main` unchanged after branch creation.
 
 ## Phase 3: Follow-up work
 
-Run Java/Maven tests locally as needed. Reserve commits and pushes for the user.
+Run `./.cmd test` locally as needed, using the same pinned toolchain and native build recipe as CI. Reserve commits and pushes for the user.
 
 ## Phase 4: Integration
 

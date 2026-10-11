@@ -15,17 +15,15 @@ jobs:
 
       - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
-          path: .tools
-          key: tools-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/GhosttyBuild.java') }}
-
-      - uses: actions/setup-java@be666c2fcd27ec809703dec50e508c2fdc7f6654 # v5.2.0
-        with:
-          distribution: temurin
-          java-version: "25"
-          cache: maven
+          path: |
+            ~/.cache/dotcmd
+            ~/Library/Caches/dotcmd
+            ~/AppData/Local/dotcmd/Cache
+            ~/.m2/repository
+          key: tools-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.cmd', '.cmd.lua', '**/pom.xml') }}
 
       - name: Test
-        run: xvfb-run -a mvn -B "-Dghosttyfx.native.mode=build" clean test
+        run: ./.cmd test -B
 
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         if: github.event_name == 'workflow_dispatch' || github.event_name == 'push'
@@ -44,17 +42,15 @@ jobs:
 
       - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
-          path: .tools
-          key: tools-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/GhosttyBuild.java') }}
-
-      - uses: actions/setup-java@be666c2fcd27ec809703dec50e508c2fdc7f6654 # v5.2.0
-        with:
-          distribution: temurin
-          java-version: "25"
-          cache: maven
+          path: |
+            ~/.cache/dotcmd
+            ~/Library/Caches/dotcmd
+            ~/AppData/Local/dotcmd/Cache
+            ~/.m2/repository
+          key: tools-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.cmd', '.cmd.lua', '**/pom.xml') }}
 
       - name: Test
-        run: xvfb-run -a mvn -B "-Dghosttyfx.native.mode=build" clean test
+        run: ./.cmd test -B
 
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         if: github.event_name == 'workflow_dispatch' || github.event_name == 'push'
@@ -73,17 +69,15 @@ jobs:
 
       - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
-          path: .tools
-          key: tools-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/GhosttyBuild.java') }}
-
-      - uses: actions/setup-java@be666c2fcd27ec809703dec50e508c2fdc7f6654 # v5.2.0
-        with:
-          distribution: temurin
-          java-version: "25"
-          cache: maven
+          path: |
+            ~/.cache/dotcmd
+            ~/Library/Caches/dotcmd
+            ~/AppData/Local/dotcmd/Cache
+            ~/.m2/repository
+          key: tools-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.cmd', '.cmd.lua', '**/pom.xml') }}
 
       - name: Test
-        run: mvn -B "-Dghosttyfx.native.mode=build" clean test
+        run: ./.cmd test -B
 
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         if: github.event_name == 'workflow_dispatch' || github.event_name == 'push'
@@ -102,17 +96,15 @@ jobs:
 
       - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
-          path: .tools
-          key: tools-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/GhosttyBuild.java') }}
-
-      - uses: actions/setup-java@be666c2fcd27ec809703dec50e508c2fdc7f6654 # v5.2.0
-        with:
-          distribution: temurin
-          java-version: "25"
-          cache: maven
+          path: |
+            ~/.cache/dotcmd
+            ~/Library/Caches/dotcmd
+            ~/AppData/Local/dotcmd/Cache
+            ~/.m2/repository
+          key: tools-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.cmd', '.cmd.lua', '**/pom.xml') }}
 
       - name: Test
-        run: mvn -B "-Dghosttyfx.native.mode=build" -Dprism.order=sw clean test
+        run: ./.cmd test -B -Dprism.order=sw
 
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         if: github.event_name == 'workflow_dispatch' || github.event_name == 'push'
@@ -131,17 +123,15 @@ jobs:
 
       - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
-          path: .tools
-          key: tools-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/GhosttyBuild.java') }}
-
-      - uses: actions/setup-java@be666c2fcd27ec809703dec50e508c2fdc7f6654 # v5.2.0
-        with:
-          distribution: temurin
-          java-version: "25"
-          cache: maven
+          path: |
+            ~/.cache/dotcmd
+            ~/Library/Caches/dotcmd
+            ~/AppData/Local/dotcmd/Cache
+            ~/.m2/repository
+          key: tools-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.cmd', '.cmd.lua', '**/pom.xml') }}
 
       - name: Test
-        run: mvn -B "-Dghosttyfx.native.mode=build" clean test
+        run: ./.cmd test -B
 
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         if: github.event_name == 'workflow_dispatch' || github.event_name == 'push'
@@ -212,39 +202,31 @@ jobs:
           echo "GHOSTTYFX_VERSION=0.1.$(git rev-list --count HEAD)" >> "${GITHUB_ENV}"
           echo "GHOSTTYFX_RELEASE_PROJECTS=${release_projects}" >> "${GITHUB_ENV}"
 
-      - uses: actions/setup-java@be666c2fcd27ec809703dec50e508c2fdc7f6654 # v5.2.0
-        with:
-          distribution: temurin
-          java-version: "25"
-          cache: maven
-          server-id: central
-          server-username: CENTRAL_USERNAME
-          server-password: CENTRAL_PASSWORD
-          gpg-private-key: ${{ secrets.GPG_PRIVATE_KEY }}
-          gpg-passphrase: GPG_PASSPHRASE
-        env:
-          CENTRAL_USERNAME: ${{ secrets.CENTRAL_USERNAME }}
-          CENTRAL_PASSWORD: ${{ secrets.CENTRAL_PASSWORD }}
-          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
-
-      # Maven 3.10.0 leaves local metadata in the Central publishing bundle.
-      - name: Set up Maven 3.9.16
+      - name: Configure publishing credentials
         shell: bash
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
         run: |
           set -euo pipefail
-          maven_version=3.9.16
-          maven_sha512=831a8591fe20c8243b1dbe7d71e3244f31d1665b0804b2e825e38cbbe5ce0cafb8338851f90780735568773e0a6cd07bbec107cda0b896b008b861075358b6f6
-          maven_archive="${RUNNER_TEMP}/apache-maven-${maven_version}-bin.tar.gz"
-          curl -fsSL "https://repo.maven.apache.org/maven2/org/apache/maven/apache-maven/${maven_version}/apache-maven-${maven_version}-bin.tar.gz" -o "${maven_archive}"
-          echo "${maven_sha512}  ${maven_archive}" | sha512sum -c -
-          tar -xzf "${maven_archive}" -C "${RUNNER_TEMP}"
-          echo "${RUNNER_TEMP}/apache-maven-${maven_version}/bin" >> "${GITHUB_PATH}"
+          mkdir -p "$HOME/.m2"
+          cat > "$HOME/.m2/settings.xml" <<'EOF'
+          <settings>
+            <servers>
+              <server>
+                <id>central</id>
+                <username>${env.CENTRAL_USERNAME}</username>
+                <password>${env.CENTRAL_PASSWORD}</password>
+              </server>
+            </servers>
+          </settings>
+          EOF
+          printf '%s' "$GPG_PRIVATE_KEY" | gpg --batch --import
 
       - name: Verify shared binding bytecode
         shell: bash
         run: |
           set -euo pipefail
-          xvfb-run -a mvn -B -Prelease -DskipTests \
+          ./.cmd mvn -B -Prelease -DskipTests \
             -pl "${GHOSTTYFX_RELEASE_PROJECTS}" \
             "-Drevision=${GHOSTTYFX_VERSION}" \
             package
@@ -252,7 +234,7 @@ jobs:
           mkdir -p target/ci
 
           core_jar="ghosttyfx-core/target/ghosttyfx-core-${GHOSTTYFX_VERSION}.jar"
-          jar tf "${core_jar}" > target/ci/ghosttyfx-core.entries
+          ./.cmd jar tf "${core_jar}" > target/ci/ghosttyfx-core.entries
           grep -q '^io/github/vlaaad/ghosttyfx/TerminalView.class$' target/ci/ghosttyfx-core.entries
           if grep -Eq '^(io/github/vlaaad/ghostty/bindings/|native/)' target/ci/ghosttyfx-core.entries
           then
@@ -265,7 +247,7 @@ jobs:
           do
             platform_jar="ghosttyfx-${platform_id}/target/ghosttyfx-${platform_id}-${GHOSTTYFX_VERSION}.jar"
             platform_entries="target/ci/ghosttyfx-${platform_id}.entries"
-            jar tf "${platform_jar}" > "${platform_entries}"
+            ./.cmd jar tf "${platform_jar}" > "${platform_entries}"
             grep -q '^io/github/vlaaad/ghostty/bindings/ghostty_vt_h.class$' "${platform_entries}"
             grep -q "^native/${platform_id}.zip$" "${platform_entries}"
             if grep -q '^io/github/vlaaad/ghosttyfx/TerminalView.class$' "${platform_entries}"
@@ -275,7 +257,7 @@ jobs:
             fi
           done
 
-          javap \
+          ./.cmd javap \
             -classpath "ghosttyfx-core/target/classes:ghosttyfx-linux-x86_64/target/classes" \
             -v io.github.vlaaad.ghosttyfx.TerminalSession \
             > target/ci/TerminalSession.javap
@@ -288,11 +270,11 @@ jobs:
 
       - name: Publish to Central Portal
         run: >
-          xvfb-run -a mvn -B -Prelease
+          ./.cmd mvn -B -Prelease
           -pl "${GHOSTTYFX_RELEASE_PROJECTS}"
           "-Drevision=${GHOSTTYFX_VERSION}"
           deploy
         env:
           CENTRAL_USERNAME: ${{ secrets.CENTRAL_USERNAME }}
           CENTRAL_PASSWORD: ${{ secrets.CENTRAL_PASSWORD }}
-          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+          MAVEN_GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}

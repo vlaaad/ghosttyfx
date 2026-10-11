@@ -1,0 +1,18 @@
+{
+  "$dotcmd": true,
+  "runtime": {
+    "path": [
+      "?.lua",
+      "?/init.lua"
+    ],
+    "pathStrict": true,
+    "version": "Lua 5.5"
+  },
+  "workspace": {
+    "checkThirdParty": "Disable",
+    "ignoreDir": [
+      "target",
+      ".git"
+    ]
+  }
+}

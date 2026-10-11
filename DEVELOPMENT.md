@@ -36,56 +36,52 @@ licenses.
 
 ## Local Build
 
-Run:
+Run `./.cmd test`, or `./.cmd mvn clean test` for the equivalent Maven command.
+The checked-in [dotcmd](https://github.com/dotcmdhq/dotcmd) launcher downloads
+its pinned runtime and the toolchain on first use. No Java, Maven, Zig, or
+jextract installation is needed. Tool versions and SHA-256 hashes live in
+[.cmd.lua](.cmd.lua): Liberica JDK 25.0.2+12, Maven 3.9.16, Zig 0.16.0, and
+jextract 25+2-4. Maven arguments are forwarded unchanged.
 
-`mvn clean test`
+Native generation runs `git submodule sync --recursive` and
+`git submodule update --init --recursive` before checking cached bundles.
+This initializes missing submodules and checks out the commits pinned by the
+parent repository, including nested submodules. It does not track upstream
+branches or force-discard local source edits; conflicting changes fail the build.
 
-The Maven build invokes [scripts/GhosttyBuild.java](/C:/Users/Vlaaad/Projects/ghosttyfx/scripts/GhosttyBuild.java), which:
+On Windows, use `.\.cmd test` in PowerShell or `.cmd test` in cmd.exe.
+On Unix the bootstrap needs curl or wget and the OS SHA-256 utility; Windows
+uses PowerShell, or curl plus certutil. The runtime and downloaded tools are
+cached in dotcmd's shared cache. No cache configuration is needed.
 
-- ensures the `ghostty` and `ghostling` submodules are initialized to their repo-pinned commits
-- downloads and caches Zig in `.tools/zig`
-- downloads and caches `jextract` in `.tools/jextract`
-- builds `libghostty-vt` for the current host platform
-- runs `jextract` with a shared Java package name
-- writes generated sources under `target/generated-sources/jextract`
-- writes generated resources under `target/generated-resources/ghosttyfx`
-- writes CI/download artifacts under `target/ghosttyfx-artifact`
+Maven invokes the internal `generate-platform` task during `generate-sources`.
+It builds `libghostty-vt` and runs jextract using the same recipe locally and
+in CI. Tools, native bundles, and Zig caches use dotcmd's shared cache outside
+the checkout. Bundles are reused only when the platform,
+Ghostty source (including local edits), and `.cmd.lua` recipe match.
+Generated sources and resources remain under each module's `target/`.
+There is no local GitHub artifact lookup or `gh` dependency.
 
-If the local Windows toolchain is unavailable, the build looks for a matching downloaded artifact cache under:
-
-- `dist/<ghostty-commit-sha>/<artifactId>/`
-
-If it is missing, the build automatically downloads the current platform artifact from a successful CI run.
-
-Artifacts contain:
-
-- `src/`
-- `resources/`
-
-## Downloaded Artifacts
-
-Run:
-
-`mvn -N -Pdownload-cross-platform-artifacts exec:exec@download-cross-platform-artifacts`
-
-That command:
-
-- first searches successful `build-lib.yml` workflow dispatches for the current branch and commit
-- falls back to successful workflow runs from pushes to `main`, newest first
-- downloads the newest complete retained artifact set compatible with the checked-out `ghostty` submodule
-- downloads the produced artifact set into `dist/<ghostty-commit-sha>/`
-- validates that each artifact metadata file matches the current `ghostty` submodule commit
-
-This explicit command is only needed to download a complete cross-platform artifact set. Normal local builds download only the current platform when its native toolchain is unavailable.
+Linux needs JavaFX's system libraries (including GTK), `strip`, and a display.
+When a test or app command needs a display and `DISPLAY` is unset, `.cmd`
+launches Maven through `xvfb-run -a`, which owns virtual-display cleanup.
+Headless hosts therefore need Xvfb and xauth installed. Windows native builds
+need Visual Studio Build Tools and the Windows SDK; macOS native builds use
+the installed Apple SDK. These OS dependencies are not downloaded by `.cmd`.
 
 ## Manual App
 
 The repository includes a JavaFX manual app in
-[GhosttyFxManualApp.java](/C:/Users/Vlaaad/Projects/ghosttyfx/ghosttyfx-manual-app/src/main/java/io/github/vlaaad/ghosttyfx/manualapp/GhosttyFxManualApp.java).
+[GhosttyFxManualApp.java](ghosttyfx-manual-app/src/main/java/io/github/vlaaad/ghosttyfx/manualapp/GhosttyFxManualApp.java).
 
 From the repository root, launch it with:
 
-`mvn -pl ghosttyfx-manual-app -am -Pmanual-app compile`
+`./.cmd manual-app`
+
+Launch the Nord app with `./.cmd nord-app`. Both aliases accept extra Maven
+arguments and use the same `mvn` task. The full manual-app invocation remains:
+
+`./.cmd mvn -pl ghosttyfx-manual-app -am -Pmanual-app compile`
 
 The app:
 
@@ -98,18 +94,19 @@ Close tabs or the window to tear down their PTY processes.
 
 ## CI
 
-CI only needs to:
+Every native-host job checks out submodules and runs `./.cmd test -B`.
+The Linux display wrapper is inside `.cmd`, and CI supplies no separate
+Java/Maven versions. The macOS Intel job also passes `-Dprism.order=sw`.
 
-1. check out this repository with submodules
-2. set up Java
-3. run `mvn "-Dghosttyfx.native.mode=build" clean test`
-4. upload `<platform-module>/target/ghosttyfx-artifact/`
+Native jobs upload `<platform-module>/target/ghosttyfx-artifact/`, containing
+`src/` and `resources/`. The publishing job transfers those bundles into
+`dist/<ghostty-commit>/<artifactId>/` and runs `./.cmd mvn -Prelease ...`.
+Non-host modules require a matching bundle produced by the same recipe on
+its native host; local native generation remains host-only.
 
-## Notes
+The Maven validation phase also checks the public `.cmd` entrypoints with
+controlled tool downloads and child processes.
 
-- Local generation is host-only.
-- `ghosttyfx.native.mode=build` disables artifact reuse and downloading, so CI builds from source or fails.
-- Cross-platform artifact sets come from CI running the same build on each target host.
-- Local Windows source builds still require Visual Studio Build Tools plus the Windows SDK.
-- `ghostling` is for source reference only and is not part of the build path.
-- No extra gitignore entry is needed for generated bindings because they live under `target/`.
+The `java`, `jar`, and `javap` tasks expose the pinned JDK tools for inspection
+and release checks. Signing still uses GPG and publishing credentials.
+`ghostling` is source reference only and is not required by the build.
