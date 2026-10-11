@@ -77,9 +77,12 @@ local function windows_environment()
         "Microsoft.VisualStudio.Component.VC.Tools.x86.x64", "-property", "installationPath",
         stdout = "capture" }.stdout:gsub("%s+$", "")
     assert(installation ~= "", "Native Windows builds require Visual Studio Build Tools and the Windows SDK.")
-    local script = installation .. "/VC/Auxiliary/Build/vcvars64.bat"
-    local output = exec { "cmd.exe", "/d", "/s", "/c", 'call "' .. script .. '" >nul && set',
-        stdout = "capture" }.stdout
+    local script = installation .. "\\VC\\Auxiliary\\Build\\vcvars64.bat"
+    -- Send shell syntax through stdin so Windows argv escaping cannot alter its quotes.
+    local process <close> = spawn { "cmd.exe", "/d", "/q", stdin = "pipe", stdout = "capture" }
+    process.stdin:write('@echo off\r\ncall "' .. script .. '" >nul\r\nif errorlevel 1 exit 1\r\nset\r\nexit\r\n')
+    process.stdin:close()
+    local output = process:wait().stdout
     local environment = {}
     for line in output:gmatch("[^\r\n]+") do
         local key, value = line:match("^([^=]+)=(.*)$")
