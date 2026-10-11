@@ -104,9 +104,6 @@ Native jobs upload `<platform-module>/target/ghosttyfx-artifact/`, containing
 Non-host modules require a matching bundle produced by the same recipe on
 its native host; local native generation remains host-only.
 
-The Maven validation phase also checks the public `.cmd` entrypoints with
-controlled tool downloads and child processes.
-
 The `java`, `jar`, and `javap` tasks expose the pinned JDK tools for inspection
 and release checks. Signing still uses GPG and publishing credentials.
 `ghostling` is source reference only and is not required by the build.
